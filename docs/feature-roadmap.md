@@ -1,10 +1,10 @@
 # Feature roadmap
 
-Live showcase apps:
+Live showcase apps (only fitness demos remain):
 
-- **Book & membership** (`/sim/fitness/studioflow/`) — public fill, guest book, member login, weekly reshuffle, exercise preview, classmate name privacy.
-- **Admin console** (`/sim/fitness/classboard/`) — simulated staff login; schedule, payments, risk, legal, notify, reminders, team, editable site content.
+- **Member booking** (`/sim/fitness/studioflow/`) — public fill, guest book, weekly reshuffle, exercise preview, name privacy. Roadmap items render inside the app.
+- **Trainer admin** (`/sim/fitness/classboard/`) — staff login, schedule, payments, risk, legal, notify, reminders, site content. Ops roadmap items render inside the admin shell.
 
-Full catalog of exhibited UI capabilities (including other industries as a candidate library): [`sim-demos/DEMO-FEATURES.md`](../sim-demos/DEMO-FEATURES.md).
+Capability catalog archive: [`sim-demos/DEMO-FEATURES.md`](../sim-demos/DEMO-FEATURES.md).
 
-The marketing `/future` page lists further transfers for a later branded shell. Firebase Auth/RTDB replaces `localStorage` when Tom’s schema is known.
+Marketing site is a single homepage with section bookmarks (`#classes`, `#location`, `#apps`) plus `/contact`.

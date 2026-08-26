@@ -3,22 +3,20 @@ import { useDemoPresentation } from '../context/DemoPresentation'
 
 function marketingHref(path: string): string {
   const base = import.meta.env.BASE_URL
-  // /GBTT/sim/ → /GBTT/  or /sim/ → /
   const root = base.replace(/\/?sim\/?$/, '/') || '/'
   const clean = path.startsWith('/') ? path.slice(1) : path
   return `${root}${clean}`
 }
 
+/** Same bookmarks as the main GBTT site header. */
 const MARKETING = [
   { href: '', label: 'Home' },
-  { href: 'classes/', label: 'Classes' },
-  { href: 'locations/', label: 'Locations' },
-  { href: 'apps/', label: 'Apps' },
+  { href: '#classes', label: 'Classes' },
+  { href: '#location', label: 'Location' },
+  { href: '#apps', label: 'Apps' },
   { href: 'contact/', label: 'Contact' },
-  { href: 'future/', label: 'Future' },
 ] as const
 
-/** Sticky GBTT chrome — marketing pages + in-sim apps. */
 export function SiteDemoNav() {
   const { showShowcaseChrome } = useDemoPresentation()
   const { pathname } = useLocation()
@@ -44,13 +42,13 @@ export function SiteDemoNav() {
             to="/fitness/studioflow"
             className={pathname.includes('studioflow') ? 'is-active' : undefined}
           >
-            Book
+            Member booking
           </Link>
           <Link
             to="/fitness/classboard"
             className={pathname.includes('classboard') ? 'is-active' : undefined}
           >
-            Admin
+            Trainer admin
           </Link>
         </div>
       </div>
@@ -58,5 +56,4 @@ export function SiteDemoNav() {
   )
 }
 
-/** @deprecated alias */
 export const GbtechDemoNav = SiteDemoNav

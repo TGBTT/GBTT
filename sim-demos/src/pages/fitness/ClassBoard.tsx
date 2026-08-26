@@ -35,6 +35,7 @@ import {
   updateTeamMember,
   upsertOccurrence,
 } from '../../shared/fitnessStudio'
+import { ADMIN_ROADMAP } from '../../shared/capabilityRoadmap'
 
 type Tab =
   | 'schedule'
@@ -676,6 +677,19 @@ export default function ClassBoard() {
           </label>
         </section>
       )}
+
+      <section className="yacht-panel roadmap-panel">
+        <h2>Coming next in trainer admin</h2>
+        <p className="hint">Capability roadmap items that belong on the ops side.</p>
+        <ul className="roadmap-list">
+          {ADMIN_ROADMAP.map((item) => (
+            <li key={item.id}>
+              <strong>{item.title}</strong>
+              <p>{item.blurb}</p>
+            </li>
+          ))}
+        </ul>
+      </section>
     </div>
   )
 }

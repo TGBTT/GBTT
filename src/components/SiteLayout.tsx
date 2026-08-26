@@ -1,9 +1,19 @@
 import { useState } from 'react'
-import { Link, NavLink, Outlet } from 'react-router-dom'
+import { Link, Outlet, useLocation } from 'react-router-dom'
 import { NAV, SITE } from '../data/siteConfig'
+
+function navIsActive(to: string, pathname: string, hash: string): boolean {
+  if (to === '/') return pathname === '/' && !hash
+  if (to.startsWith('/#')) {
+    const section = to.slice(2)
+    return pathname === '/' && hash === `#${section}`
+  }
+  return pathname === to || pathname.startsWith(`${to}/`)
+}
 
 export function SiteLayout() {
   const [open, setOpen] = useState(false)
+  const { pathname, hash } = useLocation()
 
   return (
     <div className="site">
@@ -29,17 +39,31 @@ export function SiteLayout() {
             {open ? 'Close' : 'Menu'}
           </button>
           <nav id="site-nav" className={`site-nav${open ? ' is-open' : ''}`} aria-label="Primary">
-            {NAV.map((item) => (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                end={item.to === '/'}
-                className={({ isActive }) => (isActive ? 'is-active' : undefined)}
-                onClick={() => setOpen(false)}
-              >
-                {item.label}
-              </NavLink>
-            ))}
+            {NAV.map((item) => {
+              const active = navIsActive(item.to, pathname, hash)
+              if (item.to.startsWith('/#')) {
+                return (
+                  <Link
+                    key={item.to}
+                    to={item.to}
+                    className={active ? 'is-active' : undefined}
+                    onClick={() => setOpen(false)}
+                  >
+                    {item.label}
+                  </Link>
+                )
+              }
+              return (
+                <Link
+                  key={item.to}
+                  to={item.to}
+                  className={active ? 'is-active' : undefined}
+                  onClick={() => setOpen(false)}
+                >
+                  {item.label}
+                </Link>
+              )
+            })}
           </nav>
         </div>
       </header>

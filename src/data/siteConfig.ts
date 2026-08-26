@@ -10,7 +10,6 @@ export const SITE = {
   phoneHref: 'tel:+642108928057',
   facebook:
     'https://www.facebook.com/people/Golden-Bay-Team-Training/100077092552576/',
-  /** Public site origin when deployed — update if custom domain is added. */
   origin: 'https://agent5479.github.io/GBTT',
 } as const
 
@@ -42,11 +41,18 @@ export const CLASS_OFFERINGS = [
   },
 ] as const
 
+/** Primary nav — homepage section bookmarks + contact page. */
 export const NAV = [
-  { to: '/', label: 'Home' },
-  { to: '/classes', label: 'Classes' },
-  { to: '/locations', label: 'Locations' },
-  { to: '/apps', label: 'Apps' },
-  { to: '/future', label: 'Future' },
+  { to: '/', label: 'Home', end: true },
+  { to: '/#classes', label: 'Classes' },
+  { to: '/#location', label: 'Location' },
+  { to: '/#apps', label: 'Apps' },
   { to: '/contact', label: 'Contact' },
 ] as const
+
+export function simAppHref(path: string): string {
+  const base = import.meta.env.BASE_URL.endsWith('/')
+    ? import.meta.env.BASE_URL
+    : `${import.meta.env.BASE_URL}/`
+  return `${base}sim/${path}`
+}

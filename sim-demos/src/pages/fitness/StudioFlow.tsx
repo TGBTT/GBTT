@@ -26,6 +26,7 @@ import {
   visibleRosterNames,
   type PlanId,
 } from '../../shared/fitnessStudio'
+import { MEMBER_ROADMAP } from '../../shared/capabilityRoadmap'
 
 type Panel = 'browse' | 'login' | 'register' | 'account'
 
@@ -445,6 +446,19 @@ export default function StudioFlow() {
         <p className="sync-chip">{sync.calendar}</p>
         <p className="sync-chip">{sync.firebase}</p>
         <p className="hint">{site.contactDisplay}</p>
+      </section>
+
+      <section className="yacht-panel roadmap-panel">
+        <h2>Coming next in member booking</h2>
+        <p className="hint">Folded from the capability roadmap — still simulated until Firebase is live.</p>
+        <ul className="roadmap-list">
+          {MEMBER_ROADMAP.map((item) => (
+            <li key={item.id}>
+              <strong>{item.title}</strong>
+              <p>{item.blurb}</p>
+            </li>
+          ))}
+        </ul>
       </section>
     </div>
   )

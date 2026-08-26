@@ -249,3 +249,24 @@
 .form-error {
   color: #7a1010;
 }
+
+.roadmap-panel {
+  max-width: 960px;
+  margin: 1.5rem auto 2rem;
+}
+
+.roadmap-list {
+  list-style: none;
+  padding: 0;
+  margin: 0.75rem 0 0;
+}
+
+.roadmap-list li {
+  padding: 0.75rem 0;
+  border-top: 1px solid #d4d4d0;
+}
+
+.roadmap-list p {
+  margin: 0.25rem 0 0;
+  color: #5c5c5c;
+}

@@ -58,7 +58,7 @@ jobs:
           mkdir -p _site/sim/fitness/studioflow _site/sim/fitness/classboard
           cp _site/sim/index.html _site/sim/fitness/studioflow/index.html
           cp _site/sim/index.html _site/sim/fitness/classboard/index.html
-          for path in classes locations apps contact future; do
+          for path in contact; do
             mkdir -p "_site/$path"
             cp _site/index.html "_site/$path/index.html"
           done
