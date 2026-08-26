@@ -1,8 +1,11 @@
+import { Fragment, useMemo } from 'react'
 import {
   WEEKDAYS,
   classTypeById,
   formatSessionAttending,
+  formatTimetableTime,
   sessionIsFull,
+  timetableTimes,
   type ClassOccurrence,
   type Weekday,
 } from './fitnessStudio'
@@ -33,14 +36,14 @@ function SessionBadge({
   const type = classTypeById(occ.classTypeId)
   const full = sessionIsFull(occ)
   const attending = formatSessionAttending(occ)
-  const className = `week-cal__badge${selected ? ' is-selected' : ''}${held ? ' is-held' : ''}${full ? ' is-full' : ''}`
-  const title = `${type?.name ?? 'Class'} ${occ.time}${full ? ' (full)' : ` · ${attending}`}`
+  const className = `week-cal__badge${selected ? ' is-selected' : ''}${held ? ' is-held is-locked' : ''}${full ? ' is-full' : ''}`
+  const title = `${type?.name ?? 'Class'} · ${formatTimetableTime(occ.time)}${held ? ' (weekly locked)' : ''}${full ? ' (full)' : ` · ${attending}`}`
 
   const body = (
     <>
-      <span className="week-cal__time">{occ.time}</span>
       <span className="week-cal__name">{type?.name ?? 'Class'}</span>
-      <span className="week-cal__fill">{full && mode === 'public' ? 'Full' : attending}</span>
+      {mode !== 'public' ? <span className="week-cal__fill">{attending}</span> : null}
+      {mode === 'public' && full ? <span className="week-cal__fill">Full</span> : null}
     </>
   )
 
@@ -65,7 +68,7 @@ function SessionBadge({
   )
 }
 
-/** Mon–Fri grid with session name badges, times, and attending counts. */
+/** Mon–Fri timetable — days across the top, ascending times down the left. */
 export function WeekSessionCalendar({
   byDay,
   selectedId,
@@ -74,42 +77,53 @@ export function WeekSessionCalendar({
   mode = 'member',
   className,
 }: WeekSessionCalendarProps) {
+  const times = useMemo(() => timetableTimes(byDay), [byDay])
+  const lookup = useMemo(() => {
+    const map = new Map<string, ClassOccurrence>()
+    for (const day of WEEKDAYS) {
+      for (const occ of byDay[day] ?? []) map.set(`${day}|${occ.time}`, occ)
+    }
+    return map
+  }, [byDay])
+
   return (
-    <div className={`week-cal ${className ?? ''}`} role="grid" aria-label="Weekly class calendar">
-      <div className="week-cal__head" role="row">
+    <div className={`week-cal ${className ?? ''}`} role="grid" aria-label="Weekly class timetable">
+      <div className="week-cal__grid">
+        <div className="week-cal__corner" aria-hidden="true" />
         {WEEKDAYS.map((d) => (
           <div key={d} className="week-cal__day-label" role="columnheader">
             {d}
           </div>
         ))}
-      </div>
-      <div className="week-cal__body" role="row">
-        {WEEKDAYS.map((d) => {
-          const sessions = byDay[d] ?? []
-          const hasSessions = sessions.length > 0
-          return (
-            <div
-              key={d}
-              className={`week-cal__cell${hasSessions ? ' has-sessions' : ''}`}
-              role="gridcell"
-            >
-              {sessions.length === 0 ? (
-                <p className="week-cal__empty">—</p>
-              ) : (
-                sessions.map((o) => (
-                  <SessionBadge
-                    key={o.id}
-                    occ={o}
-                    mode={mode}
-                    selected={selectedId === o.id}
-                    held={heldIds.includes(o.id)}
-                    onSelect={onSelect}
-                  />
-                ))
-              )}
+
+        {times.map((time) => (
+          <Fragment key={time}>
+            <div className="week-cal__time-label" role="rowheader">
+              {formatTimetableTime(time)}
             </div>
-          )
-        })}
+            {WEEKDAYS.map((day) => {
+              const occ = lookup.get(`${day}|${time}`)
+              return (
+                <div
+                  key={`${day}-${time}`}
+                  className={`week-cal__cell${occ ? ' has-session' : ''}`}
+                  role="gridcell"
+                  aria-label={occ ? `${day} ${formatTimetableTime(time)}` : undefined}
+                >
+                  {occ ? (
+                    <SessionBadge
+                      occ={occ}
+                      mode={mode}
+                      selected={selectedId === occ.id}
+                      held={heldIds.includes(occ.id)}
+                      onSelect={onSelect}
+                    />
+                  ) : null}
+                </div>
+              )
+            })}
+          </Fragment>
+        ))}
       </div>
     </div>
   )

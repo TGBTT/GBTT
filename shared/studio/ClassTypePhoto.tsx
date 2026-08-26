@@ -1,10 +1,22 @@
 import type { ClassType } from '@gbtt/shared/studio/fitnessStudio'
 import { classImageSources } from '@gbtt/shared/studio/fitnessStudio'
 
-export function ClassTypePhoto({ classType, baseUrl }: { classType: ClassType; baseUrl: string }) {
-  const src = classImageSources(classType.id, baseUrl)
+export function ClassTypePhoto({
+  classType,
+  baseUrl,
+  variant = 'card',
+}: {
+  classType: ClassType
+  baseUrl: string
+  variant?: 'card' | 'thumb'
+}) {
+  const src = classImageSources(classType.id, baseUrl, variant)
+  const pictureClass = variant === 'thumb' ? 'class-type-thumb' : 'class-type-card__photo'
+  const width = variant === 'thumb' ? 88 : 800
+  const height = variant === 'thumb' ? 55 : 450
+
   return (
-    <picture className="class-type-card__photo">
+    <picture className={pictureClass}>
       <source type="image/webp" srcSet={src.webpSrcSet} sizes={src.sizes} />
       <img
         src={src.fallback}
@@ -12,8 +24,8 @@ export function ClassTypePhoto({ classType, baseUrl }: { classType: ClassType; b
         sizes={src.sizes}
         alt={`${classType.name} group session`}
         loading="lazy"
-        width={800}
-        height={450}
+        width={width}
+        height={height}
       />
     </picture>
   )

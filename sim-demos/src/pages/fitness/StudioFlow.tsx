@@ -1,6 +1,12 @@
 import { useMemo, useState } from 'react'
+import { ClassTypeDescription } from '@gbtt/shared/studio/ClassTypeDescription'
 import { DemoChrome } from '../../components/DemoChrome'
 import { WeekSessionCalendar } from '../../components/WeekSessionCalendar'
+import {
+  DEMO_ACTIVATION_KEY,
+  formEndpointConfigured,
+  requestActivationEmail,
+} from '@gbtt/shared/studio/accountApi'
 import {
   DEMO_CREDENTIALS,
   FITNESS_PLANS,
@@ -29,7 +35,6 @@ import {
   visibleRosterNames,
   type PlanId,
 } from '../../shared/fitnessStudio'
-import { MEMBER_ROADMAP } from '../../shared/capabilityRoadmap'
 
 /**
  * Member booking — Mon–Fri calendar grid, login underneath, select / reshuffle sessions.
@@ -44,6 +49,8 @@ export default function StudioFlow() {
   const [regName, setRegName] = useState('')
   const [regEmail, setRegEmail] = useState('')
   const [regPlan, setRegPlan] = useState<PlanId>('weekly2')
+  const [regActivationKey, setRegActivationKey] = useState('')
+  const [activationEmailSent, setActivationEmailSent] = useState(false)
   const [showRegister, setShowRegister] = useState(false)
   const [guestName, setGuestName] = useState('')
   const [guestEmail, setGuestEmail] = useState('')
@@ -77,25 +84,28 @@ export default function StudioFlow() {
         backLabel="← Demos hub"
       />
 
-      <section className="yacht-panel cal-panel demo-enter">
+      <div className="app-sections">
+      <section className="yacht-panel cal-panel demo-enter app-section">
         <h2>Mon–Fri sessions</h2>
         <p className="hint">
-          Highlighted days have classes. Badges show session name and time — tap or click one for
-          details{member ? ' and to book or reshape your week' : ''}.
+          Weekly memberships lock recurring slots on this timetable — the same day and time every
+          week. Move or unlock within your plan allowance.
         </p>
         <WeekSessionCalendar
           byDay={byDay}
           selectedId={selectedId}
-          heldIds={member?.heldOccurrenceIds ?? []}
+          heldIds={member?.weeklyLockedOccurrenceIds ?? []}
           onSelect={setSelectedId}
           mode="member"
         />
 
         {selected && selectedType ? (
           <div className="occ-detail cal-detail">
-            <h3>
-              {selectedType.name} · {selected.dayLabel} {selected.time}
-            </h3>
+            <ClassTypeDescription
+              classType={selectedType}
+              baseUrl={import.meta.env.BASE_URL}
+              title={`${selectedType.name} · ${selected.dayLabel} ${selected.time}`}
+            />
             <p>
               {formatSessionAttending(selected)}
               {spotsLeft(selected) === 0 ? ' · Full' : ` · ${spotsLeft(selected)} spots left`}
@@ -142,27 +152,27 @@ export default function StudioFlow() {
 
             {member ? (
               <div className="btn-row">
-                {member.heldOccurrenceIds.includes(selected.id) ? (
+                {member.weeklyLockedOccurrenceIds.includes(selected.id) ? (
                   <>
                     <button
                       type="button"
                       className="btn ghost"
                       onClick={() => {
                         setReshuffleFrom(selected.id)
-                        flash('Pick another session on the calendar to move this booking.', null)
+                        flash('Pick another session on the calendar to move this weekly lock.', null)
                       }}
                     >
-                      Move this booking
+                      Move weekly lock
                     </button>
                     <button
                       type="button"
                       className="btn ghost"
                       onClick={() => {
                         const err = dropMemberBooking(selected.id)
-                        flash(err ? null : 'Dropped from this session.', err)
+                        flash(err ? null : 'Weekly slot unlocked.', err)
                       }}
                     >
-                      Drop session
+                      Unlock slot
                     </button>
                   </>
                 ) : reshuffleFrom ? (
@@ -172,10 +182,10 @@ export default function StudioFlow() {
                     onClick={() => {
                       const err = reshuffleBooking(reshuffleFrom, selected.id)
                       setReshuffleFrom(null)
-                      flash(err ? null : 'Booking moved.', err)
+                      flash(err ? null : 'Weekly lock moved.', err)
                     }}
                   >
-                    Move booking here
+                    Move lock here
                   </button>
                 ) : (
                   <button
@@ -184,10 +194,10 @@ export default function StudioFlow() {
                     disabled={spotsLeft(selected) === 0}
                     onClick={() => {
                       const err = bookAsMember(selected.id)
-                      flash(err ? null : 'You are on this session.', err)
+                      flash(err ? null : 'Weekly slot locked — repeats every week.', err)
                     }}
                   >
-                    Attend this session
+                    Lock weekly slot
                   </button>
                 )}
                 {reshuffleFrom ? (
@@ -201,10 +211,10 @@ export default function StudioFlow() {
         ) : null}
       </section>
 
-      {message ? <p className="form-success sim-banner">{message}</p> : null}
-      {error ? <p className="form-error sim-banner">{error}</p> : null}
+      {message ? <p className="form-success sim-banner app-section app-section--banner">{message}</p> : null}
+      {error ? <p className="form-error sim-banner app-section app-section--banner">{error}</p> : null}
 
-      <section className="yacht-panel demo-enter" id="login-book">
+      <section className="yacht-panel demo-enter app-section" id="login-book">
         <h2>{member ? 'Your membership' : 'Log in to book'}</h2>
         {!member ? (
           <>
@@ -265,24 +275,60 @@ export default function StudioFlow() {
                     </button>
                   ))}
                 </div>
+                <label className="field">
+                  Activation key
+                  <input
+                    value={regActivationKey}
+                    onChange={(e) => setRegActivationKey(e.target.value)}
+                    placeholder="From your confirmation email"
+                    autoComplete="one-time-code"
+                  />
+                </label>
+                {activationEmailSent ? (
+                  <p className="form-success">
+                    {formEndpointConfigured()
+                      ? 'Confirmation email sent — enter the activation key above.'
+                      : `Demo mode: use activation key ${DEMO_ACTIVATION_KEY}`}
+                  </p>
+                ) : null}
                 <div className="btn-row">
                   <button type="button" className="btn ghost" onClick={() => setShowRegister(false)}>
                     Back to login
                   </button>
                   <button
                     type="button"
+                    className="btn ghost"
+                    onClick={async () => {
+                      const result = await requestActivationEmail(regName, regEmail, regPlan)
+                      if (result.ok) {
+                        setActivationEmailSent(true)
+                        flash(
+                          result.simulated
+                            ? `Demo: no email sent — use key ${DEMO_ACTIVATION_KEY}`
+                            : 'Activation email sent.',
+                          null,
+                        )
+                      } else {
+                        flash(null, result.error ?? 'Could not send email.')
+                      }
+                    }}
+                  >
+                    Send activation email
+                  </button>
+                  <button
+                    type="button"
                     className="btn primary"
                     onClick={() => {
-                      const err = registerMember(regName, regEmail, regPlan)
+                      const err = registerMember(regName, regEmail, regPlan, regActivationKey)
                       flash(
                         err
                           ? null
-                          : 'Registered (password: demo). Accept terms, then pick sessions on the calendar.',
+                          : 'Account created (password: demo). Accept terms, then lock your weekly slots.',
                         err,
                       )
                     }}
                   >
-                    Create membership
+                    Activate &amp; create membership
                   </button>
                 </div>
               </>
@@ -294,7 +340,7 @@ export default function StudioFlow() {
               Signed in as <strong>{member.name}</strong> ·{' '}
               {planById(member.planId)?.name}
               {member.classesPerWeek > 0
-                ? ` · ${member.heldOccurrenceIds.length}/${member.classesPerWeek} sessions this week`
+                ? ` · ${member.weeklyLockedOccurrenceIds.length}/${member.classesPerWeek} weekly slots locked`
                 : ` · ${member.creditsLeft} credits`}
             </p>
             {member.pendingPlanId ? (
@@ -360,12 +406,12 @@ export default function StudioFlow() {
               ))}
             </div>
 
-            <h3>Your held sessions</h3>
+            <h3>Your weekly locked slots</h3>
             <ul className="held-list">
-              {member.heldOccurrenceIds.length === 0 ? (
-                <li>None yet — select a badge on the calendar.</li>
+              {member.weeklyLockedOccurrenceIds.length === 0 ? (
+                <li>None yet — lock a slot on the calendar (repeats every week).</li>
               ) : null}
-              {member.heldOccurrenceIds.map((id) => {
+              {member.weeklyLockedOccurrenceIds.map((id) => {
                 const o = getOccurrences().find((x) => x.id === id)
                 const t = o ? classTypeById(o.classTypeId) : null
                 if (!o || !t) return null
@@ -394,18 +440,7 @@ export default function StudioFlow() {
         <p className="sync-chip">{sync.calendar}</p>
         <p className="sync-chip">{sync.firebase}</p>
       </section>
-
-      <section className="yacht-panel roadmap-panel">
-        <h2>Coming next in member booking</h2>
-        <ul className="roadmap-list">
-          {MEMBER_ROADMAP.map((item) => (
-            <li key={item.id}>
-              <strong>{item.title}</strong>
-              <p>{item.blurb}</p>
-            </li>
-          ))}
-        </ul>
-      </section>
+      </div>
     </div>
   )
 }

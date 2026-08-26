@@ -1,4 +1,5 @@
 @import '../../shared/studio/week-cal.css';
+@import '../../shared/studio/class-type.css';
 
 :root {
   --ink: #0a0a0a;
@@ -410,6 +411,15 @@ h2 {
   padding-top: 1.25rem;
 }
 
+.class-type-card .class-type-desc {
+  margin-bottom: 0.5rem;
+}
+
+.class-type-card__cap {
+  margin: 0;
+  padding-left: calc(5.5rem + 0.85rem);
+}
+
 .class-type-card__photo {
   display: block;
   margin-bottom: 1rem;
@@ -423,21 +433,6 @@ h2 {
   height: auto;
   aspect-ratio: 16 / 10;
   object-fit: cover;
-}
-
-.class-type-card__body h3 {
-  margin-bottom: 0.35rem;
-}
-
-.class-type-card__blurb {
-  font-weight: 600;
-  margin: 0 0 0.5rem;
-}
-
-.class-type-card__desc {
-  margin: 0 0 0.5rem;
-  color: var(--muted);
-  font-size: 0.98rem;
 }
 
 #trainer,

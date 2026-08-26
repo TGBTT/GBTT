@@ -116,7 +116,7 @@ export function DemoChrome({
   return (
     <>
       <DemoOutsideShell backTo={backTo} backLabel={backLabel} imageId={imageId} heroAlt={heroAlt} />
-      <header className="demo-chrome demo-chrome--in-app">
+      <header className="demo-chrome demo-chrome--in-app app-section app-section--chrome">
         <div>
           <p className="demo-badge">{badge}</p>
           <h1>{title}</h1>

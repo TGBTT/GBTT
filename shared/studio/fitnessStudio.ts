@@ -1,5 +1,7 @@
 /** Simulated GBTT studio — localStorage-backed stand-in for Firebase + Calendar. */
 
+import { activationKeyValid } from './accountApi'
+
 export type PlanId = 'casual' | 'pack10' | 'pack20' | 'weekly1' | 'weekly2' | 'weekly3'
 export type SimRole = 'public' | 'member' | 'admin' | 'substitute'
 export type AttendeeKind = 'member' | 'guest'
@@ -61,8 +63,12 @@ export interface SimUser {
   planId: PlanId
   creditsLeft: number
   classesPerWeek: number
-  /** Occurrence ids held this week (subscription reshuffle). */
+  /** Recurring weekly template slots (Mon–Fri timetable ids) — locks every week. */
+  weeklyLockedOccurrenceIds: string[]
+  /** Mirrors weekly locks for subscription members; kept for pack/casual one-offs. */
   heldOccurrenceIds: string[]
+  /** Email activation completed (Apps Script key). */
+  activated: boolean
   showNameToClassmates: boolean
   paid: boolean
   paymentNote: string
@@ -106,7 +112,7 @@ export interface TeamMember {
 }
 
 export const FITNESS_VENUE = 'Rec Park Centre, Golden Bay'
-export const STORAGE_KEY = 'gbtt-sim-v3'
+export const STORAGE_KEY = 'gbtt-sim-v4'
 export const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'] as const
 export type Weekday = (typeof WEEKDAYS)[number]
 
@@ -452,7 +458,9 @@ const DEFAULT_USERS: SimUser[] = [
     planId: 'weekly2',
     creditsLeft: 0,
     classesPerWeek: 2,
+    weeklyLockedOccurrenceIds: ['occ-mon-strong', 'occ-wed-strong'],
     heldOccurrenceIds: ['occ-mon-strong', 'occ-wed-strong'],
+    activated: true,
     showNameToClassmates: true,
     paid: true,
     paymentNote: '',
@@ -470,7 +478,9 @@ const DEFAULT_USERS: SimUser[] = [
     planId: 'casual',
     creditsLeft: 0,
     classesPerWeek: 0,
+    weeklyLockedOccurrenceIds: [],
     heldOccurrenceIds: [],
+    activated: true,
     showNameToClassmates: false,
     paid: true,
     paymentNote: '',
@@ -487,7 +497,9 @@ const DEFAULT_USERS: SimUser[] = [
     planId: 'casual',
     creditsLeft: 0,
     classesPerWeek: 0,
+    weeklyLockedOccurrenceIds: [],
     heldOccurrenceIds: [],
+    activated: true,
     showNameToClassmates: false,
     paid: true,
     paymentNote: '',
@@ -505,7 +517,7 @@ const DEFAULT_SITE: SiteContent = {
   paymentInstructions:
     'Pay by bank transfer to the GBTT account Tom provides, or cash at Rec Park before class. Mark paid in admin once cleared.',
   termsText:
-    'GBTT memberships are weekly-slot based. Reshuffles must stay within your classes-per-week allowance. Guests pay casual rate. Simulated demo — not a binding contract.',
+    'GBTT weekly memberships lock recurring Mon–Fri slots on the timetable — your chosen sessions repeat every week. You may move locks within your classes-per-week allowance. Guests pay casual rate. Simulated demo — not a binding contract.',
   waiverText:
     'I understand group fitness involves physical effort and accept responsibility for my own limits. Inform Tom of injuries before class.',
 }
@@ -558,7 +570,11 @@ function seedState(): StoreState {
       exerciseIds: [...o.exerciseIds],
       roster: o.roster.map((r) => ({ ...r })),
     })),
-    users: DEFAULT_USERS.map((u) => ({ ...u, heldOccurrenceIds: [...u.heldOccurrenceIds] })),
+    users: DEFAULT_USERS.map((u) => ({
+      ...u,
+      weeklyLockedOccurrenceIds: [...u.weeklyLockedOccurrenceIds],
+      heldOccurrenceIds: [...u.heldOccurrenceIds],
+    })),
     sessionUserId: null,
     site: { ...DEFAULT_SITE },
     team: DEFAULT_TEAM.map((t) => ({ ...t })),
@@ -570,13 +586,63 @@ function seedState(): StoreState {
   }
 }
 
+function migrateUser(u: SimUser): SimUser {
+  const weeklyLockedOccurrenceIds = u.weeklyLockedOccurrenceIds ?? [...(u.heldOccurrenceIds ?? [])]
+  return {
+    ...u,
+    activated: u.activated ?? true,
+    weeklyLockedOccurrenceIds,
+    heldOccurrenceIds: weeklyLockedOccurrenceIds,
+  }
+}
+
+/** Apply recurring weekly locks to timetable rosters (idempotent). */
+function syncMemberWeeklyLocks(u: SimUser): void {
+  if (u.role !== 'member') return
+  u.heldOccurrenceIds = [...u.weeklyLockedOccurrenceIds]
+
+  for (const occ of store.occurrences) {
+    const onRoster = occ.roster.some((r) => r.memberId === u.id)
+    const shouldBeOn = u.weeklyLockedOccurrenceIds.includes(occ.id)
+    if (onRoster && !shouldBeOn) {
+      occ.roster = occ.roster.filter((r) => r.memberId !== u.id)
+      occ.bookedCount = Math.max(0, occ.bookedCount - 1)
+    }
+  }
+
+  for (const occId of u.weeklyLockedOccurrenceIds) {
+    const occ = store.occurrences.find((o) => o.id === occId)
+    if (!occ) continue
+    if (occ.roster.some((r) => r.memberId === u.id)) continue
+    if (occ.bookedCount >= (classTypeById(occ.classTypeId)?.cap ?? occ.bookedCount)) continue
+    occ.roster = [
+      ...occ.roster,
+      {
+        memberId: u.id,
+        displayName: u.name,
+        kind: 'member',
+        showName: u.showNameToClassmates,
+      },
+    ]
+    occ.bookedCount += 1
+  }
+}
+
+function normalizeStore(parsed: StoreState): StoreState {
+  parsed.users = parsed.users.map(migrateUser)
+  for (const u of parsed.users) {
+    syncMemberWeeklyLocks(u)
+  }
+  return parsed
+}
+
 function loadState(): StoreState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return seedState()
     const parsed = JSON.parse(raw) as StoreState
     if (!parsed?.classes?.length || !parsed?.users?.length) return seedState()
-    return parsed
+    return normalizeStore(parsed)
   } catch {
     return seedState()
   }
@@ -715,8 +781,20 @@ export function formatSessionAttending(occ: ClassOccurrence): string {
 }
 
 /** Responsive card image paths under /images/classes/{id}/ */
-export function classImageSources(classTypeId: string, baseUrl: string) {
+export function classImageSources(
+  classTypeId: string,
+  baseUrl: string,
+  variant: 'card' | 'thumb' = 'card',
+) {
   const base = `${baseUrl.replace(/\/?$/, '')}/images/classes/${classTypeId}`
+  if (variant === 'thumb') {
+    return {
+      webpSrcSet: `${base}/card-480.webp 480w`,
+      jpgSrcSet: `${base}/card-480.jpg 480w`,
+      fallback: `${base}/card-480.jpg`,
+      sizes: '88px',
+    }
+  }
   return {
     webpSrcSet: [480, 800, 1200].map((w) => `${base}/card-${w}.webp ${w}w`).join(', '),
     jpgSrcSet: [480, 800, 1200].map((w) => `${base}/card-${w}.jpg ${w}w`).join(', '),
@@ -749,7 +827,11 @@ export function login(email: string, password: string): string | null {
     (u) => u.email.toLowerCase() === email.trim().toLowerCase() && u.password === password,
   )
   if (!user) return 'Unknown email or password (try demo credentials).'
+  if (user.role === 'member' && !user.activated) {
+    return 'Account not activated — enter the key from your confirmation email.'
+  }
   store.sessionUserId = user.id
+  if (user.role === 'member') syncMemberWeeklyLocks(user)
   persist()
   return null
 }
@@ -759,9 +841,18 @@ export function logout(): void {
   persist()
 }
 
-export function registerMember(name: string, email: string, planId: PlanId): string | null {
+export function registerMember(
+  name: string,
+  email: string,
+  planId: PlanId,
+  activationKey: string,
+): string | null {
   const trimmedEmail = email.trim().toLowerCase()
   if (!name.trim() || !trimmedEmail) return 'Name and email required.'
+  if (!activationKey.trim()) return 'Enter the activation key from your email.'
+  if (!activationKeyValid(activationKey)) {
+    return 'Invalid activation key — check your confirmation email.'
+  }
   if (store.users.some((u) => u.email.toLowerCase() === trimmedEmail)) {
     return 'That email is already registered — log in instead.'
   }
@@ -777,7 +868,9 @@ export function registerMember(name: string, email: string, planId: PlanId): str
     planId,
     creditsLeft: plan.credits,
     classesPerWeek: plan.classesPerWeek,
+    weeklyLockedOccurrenceIds: [],
     heldOccurrenceIds: [],
+    activated: true,
     showNameToClassmates: false,
     paid: false,
     paymentNote: 'Awaiting first payment',
@@ -789,6 +882,12 @@ export function registerMember(name: string, email: string, planId: PlanId): str
   store.sessionUserId = id
   persist()
   return null
+}
+
+export function getWeeklyLockedOccurrenceIds(): string[] {
+  const u = getSessionUser()
+  if (!u || u.role !== 'member') return []
+  return u.weeklyLockedOccurrenceIds
 }
 
 export function setShowNameToClassmates(value: boolean): void {
@@ -819,8 +918,9 @@ export function setMemberPlan(planId: PlanId): string | null {
   u.classesPerWeek = plan.classesPerWeek
   u.pendingPlanId = null
   if (plan.credits > 0) u.creditsLeft = plan.credits
-  if (plan.classesPerWeek > 0 && u.heldOccurrenceIds.length > plan.classesPerWeek) {
-    u.heldOccurrenceIds = u.heldOccurrenceIds.slice(0, plan.classesPerWeek)
+  if (plan.classesPerWeek > 0 && u.weeklyLockedOccurrenceIds.length > plan.classesPerWeek) {
+    u.weeklyLockedOccurrenceIds = u.weeklyLockedOccurrenceIds.slice(0, plan.classesPerWeek)
+    u.heldOccurrenceIds = [...u.weeklyLockedOccurrenceIds]
   }
   persist()
   return null
@@ -872,14 +972,38 @@ export function confirmSubscriptionChange(userId: string, approve: boolean): str
   u.planId = plan.id
   u.classesPerWeek = plan.classesPerWeek
   if (plan.credits > 0) u.creditsLeft = plan.credits
-  if (plan.classesPerWeek > 0 && u.heldOccurrenceIds.length > plan.classesPerWeek) {
-    u.heldOccurrenceIds = u.heldOccurrenceIds.slice(0, plan.classesPerWeek)
+  if (plan.classesPerWeek > 0 && u.weeklyLockedOccurrenceIds.length > plan.classesPerWeek) {
+    u.weeklyLockedOccurrenceIds = u.weeklyLockedOccurrenceIds.slice(0, plan.classesPerWeek)
+    u.heldOccurrenceIds = [...u.weeklyLockedOccurrenceIds]
   }
   u.pendingPlanId = null
   u.paid = true
   u.paymentNote = `Plan confirmed · ${plan.name}`
   persist()
   return null
+}
+
+export function formatTimetableTime(time: string): string {
+  const [hStr, mStr = '00'] = time.split(':')
+  let h = parseInt(hStr, 10)
+  const ampm = h >= 12 ? 'pm' : 'am'
+  if (h === 0) h = 12
+  else if (h > 12) h -= 12
+  return `${h}.${mStr}${ampm}`
+}
+
+function timeSortKey(time: string): number {
+  const [h, m = '0'] = time.split(':')
+  return parseInt(h, 10) * 60 + parseInt(m, 10)
+}
+
+/** Unique session times across the week, ascending. */
+export function timetableTimes(byDay: Record<Weekday, ClassOccurrence[]>): string[] {
+  const times = new Set<string>()
+  for (const day of WEEKDAYS) {
+    for (const occ of byDay[day] ?? []) times.add(occ.time)
+  }
+  return [...times].sort((a, b) => timeSortKey(a) - timeSortKey(b))
 }
 
 export function occurrencesByWeekday(): Record<Weekday, ClassOccurrence[]> {
@@ -901,6 +1025,7 @@ export function deleteOccurrence(id: string): void {
   store.occurrences = store.occurrences.filter((o) => o.id !== id)
   for (const u of store.users) {
     u.heldOccurrenceIds = u.heldOccurrenceIds.filter((x) => x !== id)
+    u.weeklyLockedOccurrenceIds = u.weeklyLockedOccurrenceIds.filter((x) => x !== id)
   }
   persist()
 }
@@ -946,12 +1071,14 @@ export function bookAsMember(occurrenceId: string): string | null {
   const occ = occurrenceById(occurrenceId)
   const plan = planById(u.planId)
   if (!occ || !plan) return 'Missing class or plan.'
-  if (u.heldOccurrenceIds.includes(occurrenceId)) return 'Already booked on this class.'
+  if (u.weeklyLockedOccurrenceIds.includes(occurrenceId)) {
+    return 'This weekly slot is already locked.'
+  }
   if (spotsLeft(occ) <= 0) return 'This class is full.'
 
   if (plan.classesPerWeek > 0) {
-    if (u.heldOccurrenceIds.length >= u.classesPerWeek) {
-      return `Weekly allowance full (${u.classesPerWeek}/week). Reshuffle or drop a class first.`
+    if (u.weeklyLockedOccurrenceIds.length >= u.classesPerWeek) {
+      return `Weekly lock limit (${u.classesPerWeek}). Move or unlock a slot first.`
     }
   } else if (plan.credits > 0) {
     if (u.creditsLeft <= 0) return 'No credits left — pick a pack or weekly plan.'
@@ -968,7 +1095,12 @@ export function bookAsMember(occurrenceId: string): string | null {
       showName: u.showNameToClassmates,
     },
   ]
-  u.heldOccurrenceIds = [...u.heldOccurrenceIds, occurrenceId]
+  if (plan.classesPerWeek > 0) {
+    u.weeklyLockedOccurrenceIds = [...u.weeklyLockedOccurrenceIds, occurrenceId]
+    u.heldOccurrenceIds = [...u.weeklyLockedOccurrenceIds]
+  } else {
+    u.heldOccurrenceIds = [...u.heldOccurrenceIds, occurrenceId]
+  }
   store.lastCalendarWrite = occ.calendarEventId
   persist()
   return null
@@ -979,7 +1111,10 @@ export function dropMemberBooking(occurrenceId: string): string | null {
   if (!u || u.role !== 'member') return 'Log in as a member first.'
   const occ = occurrenceById(occurrenceId)
   if (!occ) return 'Missing class.'
-  if (!u.heldOccurrenceIds.includes(occurrenceId)) return 'You are not on this class.'
+  if (!u.weeklyLockedOccurrenceIds.includes(occurrenceId) && !u.heldOccurrenceIds.includes(occurrenceId)) {
+    return 'You are not locked on this session.'
+  }
+  u.weeklyLockedOccurrenceIds = u.weeklyLockedOccurrenceIds.filter((id) => id !== occurrenceId)
   u.heldOccurrenceIds = u.heldOccurrenceIds.filter((id) => id !== occurrenceId)
   occ.roster = occ.roster.filter((r) => r.memberId !== u.id)
   occ.bookedCount = Math.max(0, occ.bookedCount - 1)
@@ -990,9 +1125,38 @@ export function dropMemberBooking(occurrenceId: string): string | null {
 }
 
 export function reshuffleBooking(fromId: string, toId: string): string | null {
-  const drop = dropMemberBooking(fromId)
-  if (drop) return drop
-  return bookAsMember(toId)
+  const u = getSessionUser()
+  if (!u || u.role !== 'member') return 'Log in as a member first.'
+  if (!u.weeklyLockedOccurrenceIds.includes(fromId)) {
+    return 'Only weekly locked slots can be moved this way.'
+  }
+  const fromOcc = occurrenceById(fromId)
+  const toOcc = occurrenceById(toId)
+  if (!fromOcc || !toOcc) return 'Missing class.'
+  if (u.weeklyLockedOccurrenceIds.includes(toId)) return 'That slot is already locked.'
+  if (spotsLeft(toOcc) <= 0) return 'This class is full.'
+
+  fromOcc.roster = fromOcc.roster.filter((r) => r.memberId !== u.id)
+  fromOcc.bookedCount = Math.max(0, fromOcc.bookedCount - 1)
+
+  toOcc.bookedCount += 1
+  toOcc.roster = [
+    ...toOcc.roster,
+    {
+      memberId: u.id,
+      displayName: u.name,
+      kind: 'member',
+      showName: u.showNameToClassmates,
+    },
+  ]
+
+  u.weeklyLockedOccurrenceIds = u.weeklyLockedOccurrenceIds.map((id) =>
+    id === fromId ? toId : id,
+  )
+  u.heldOccurrenceIds = [...u.weeklyLockedOccurrenceIds]
+  store.lastCalendarWrite = toOcc.calendarEventId
+  persist()
+  return null
 }
 
 /** Legacy wizard helper */

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { WeekSessionCalendar } from '@gbtt/shared/studio/WeekSessionCalendar'
-import { ClassTypePhoto } from '@gbtt/shared/studio/ClassTypePhoto'
+import { ClassTypeDescription } from '@gbtt/shared/studio/ClassTypeDescription'
 import {
   getClassTypes,
   occurrencesByWeekday,
@@ -33,13 +33,8 @@ export function ClassSchedule() {
       <ul className="class-type-grid">
         {classTypes.map((c) => (
           <li key={c.id} className="class-type-card">
-            <ClassTypePhoto classType={c} baseUrl={import.meta.env.BASE_URL} />
-            <div className="class-type-card__body">
-              <h3>{c.name}</h3>
-              <p className="class-type-card__blurb">{c.blurb}</p>
-              <p className="class-type-card__desc">{c.longDescription}</p>
-              <p className="hint">Max capacity {c.cap} per session</p>
-            </div>
+            <ClassTypeDescription classType={c} baseUrl={import.meta.env.BASE_URL} title={c.name} />
+            <p className="hint class-type-card__cap">Max capacity {c.cap} per session</p>
           </li>
         ))}
       </ul>

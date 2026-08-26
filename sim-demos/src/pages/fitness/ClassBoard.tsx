@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ClassTypePhoto } from '@gbtt/shared/studio/ClassTypePhoto'
+import { ClassTypeDescription } from '@gbtt/shared/studio/ClassTypeDescription'
 import { DemoOutsideShell } from '../../components/DemoChrome'
 import { WeekSessionCalendar } from '../../components/WeekSessionCalendar'
 import {
@@ -46,7 +46,6 @@ import {
   upsertOccurrence,
   type Weekday,
 } from '../../shared/fitnessStudio'
-import { ADMIN_ROADMAP } from '../../shared/capabilityRoadmap'
 
 type Tab =
   | 'schedule'
@@ -120,7 +119,8 @@ export default function ClassBoard() {
     return (
       <div className="classboard-page theme-gbtt">
         <DemoOutsideShell imageId="classboard" backLabel="← Demos hub" />
-        <header className="classboard-top">
+        <div className="app-sections">
+        <header className="classboard-top app-section">
           <div>
             <p className="demo-badge">Admin console · simulated</p>
             <h1>Staff login</h1>
@@ -130,7 +130,7 @@ export default function ClassBoard() {
             </p>
           </div>
         </header>
-        <section className="yacht-panel demo-enter admin-login">
+        <section className="yacht-panel demo-enter admin-login app-section">
           <p className="hint">
             {DEMO_CREDENTIALS.map((c) => `${c.label}: ${c.email} / ${c.password}`).join(' · ')}
           </p>
@@ -167,6 +167,7 @@ export default function ClassBoard() {
             </Link>
           </div>
         </section>
+        </div>
       </div>
     )
   }
@@ -174,7 +175,8 @@ export default function ClassBoard() {
   return (
     <div className="classboard-page theme-gbtt">
       <DemoOutsideShell imageId="classboard" backLabel="← Demos hub" />
-      <header className="classboard-top">
+      <div className="app-sections">
+      <header className="classboard-top app-section">
         <div>
           <p className="demo-badge">Admin · {session?.name} ({role})</p>
           <h1>Backend management</h1>
@@ -214,7 +216,7 @@ export default function ClassBoard() {
         </div>
       </header>
 
-      <div className="admin-tabs" role="tablist">
+      <div className="admin-tabs app-section" role="tablist">
         {tabs.map((t) => (
           <button
             key={t.id}
@@ -230,7 +232,7 @@ export default function ClassBoard() {
       </div>
 
       {tab === 'schedule' && (
-        <div className="classboard-deck demo-enter schedule-cal-layout">
+        <div className="classboard-deck demo-enter schedule-cal-layout app-section">
           <div className="schedule-cal-main">
             <h2>Week calendar</h2>
             <p className="hint">
@@ -249,9 +251,11 @@ export default function ClassBoard() {
             />
             {selectedOcc && selectedOccType ? (
               <div className="occ-detail cal-detail">
-                <h3>
-                  Edit · {selectedOccType.name} · {selectedOcc.dayLabel} {selectedOcc.time}
-                </h3>
+                <ClassTypeDescription
+                  classType={selectedOccType}
+                  baseUrl={import.meta.env.BASE_URL}
+                  title={`Edit · ${selectedOccType.name} · ${selectedOcc.dayLabel} ${selectedOcc.time}`}
+                />
                 <p>
                   {formatSessionAttending(selectedOcc)}
                   {sessionIsFull(selectedOcc) ? ' · Full' : ` · ${spotsLeft(selectedOcc)} spots left`}
@@ -403,9 +407,6 @@ export default function ClassBoard() {
             <aside className="classboard-side">
               <section>
                 <h2>Class type defaults</h2>
-                {selected ? (
-                  <ClassTypePhoto classType={selected} baseUrl={import.meta.env.BASE_URL} />
-                ) : null}
                 <div className="class-type-tabs">
                   {classes.map((c) => (
                     <button
@@ -418,6 +419,14 @@ export default function ClassBoard() {
                     </button>
                   ))}
                 </div>
+                {selected ? (
+                  <ClassTypeDescription
+                    classType={selected}
+                    baseUrl={import.meta.env.BASE_URL}
+                    title={selected.name}
+                    showLongDescription={role !== 'admin'}
+                  />
+                ) : null}
                 {role === 'admin' ? (
                   <>
                     <label className="field">
@@ -452,9 +461,7 @@ export default function ClassBoard() {
                       />
                     </label>
                   </>
-                ) : (
-                  <p>{selected.longDescription}</p>
-                )}
+                ) : null}
                 <label className="field">
                   Max capacity
                   <input
@@ -544,7 +551,7 @@ export default function ClassBoard() {
       )}
 
       {tab === 'members' && (
-        <section className="yacht-panel demo-enter">
+        <section className="yacht-panel demo-enter app-section">
           <h2>Members &amp; payments</h2>
           <ul className="admin-member-list">
             {users.map((u) => (
@@ -602,7 +609,7 @@ export default function ClassBoard() {
       )}
 
       {tab === 'risk' && (
-        <section className="yacht-panel demo-enter">
+        <section className="yacht-panel demo-enter app-section">
           <h2>Personal limitations &amp; risk</h2>
           {users.map((u) => (
             <article key={u.id} className="risk-card">
@@ -635,7 +642,7 @@ export default function ClassBoard() {
       )}
 
       {tab === 'legal' && role === 'admin' && (
-        <section className="yacht-panel demo-enter">
+        <section className="yacht-panel demo-enter app-section">
           <h2>Legal &amp; payment instructions</h2>
           <label className="field">
             Payment instructions
@@ -674,7 +681,7 @@ export default function ClassBoard() {
       )}
 
       {tab === 'notify' && role === 'admin' && (
-        <section className="yacht-panel demo-enter">
+        <section className="yacht-panel demo-enter app-section">
           <h2>Email all subscribers</h2>
           <p className="hint">Simulated outbox — no real email is sent.</p>
           <label className="field">
@@ -709,7 +716,7 @@ export default function ClassBoard() {
       )}
 
       {tab === 'reminders' && (
-        <section className="yacht-panel demo-enter">
+        <section className="yacht-panel demo-enter app-section">
           <h2>Marketing &amp; ops reminders</h2>
           <ul className="reminder-list">
             {reminders.map((r) => (
@@ -753,7 +760,7 @@ export default function ClassBoard() {
       )}
 
       {tab === 'team' && (
-        <section className="yacht-panel demo-enter">
+        <section className="yacht-panel demo-enter app-section">
           <h2>Team &amp; substitutes</h2>
           <p className="hint">
             Cover logins ({DEMO_CREDENTIALS[2].email}) keep the board running when Tom is away.
@@ -780,7 +787,7 @@ export default function ClassBoard() {
       )}
 
       {tab === 'site' && role === 'admin' && (
-        <section className="yacht-panel demo-enter">
+        <section className="yacht-panel demo-enter app-section">
           <h2>Public-facing content</h2>
           <p className="hint">Edits appear in the member app without touching code.</p>
           <label className="field">
@@ -817,19 +824,7 @@ export default function ClassBoard() {
           </label>
         </section>
       )}
-
-      <section className="yacht-panel roadmap-panel">
-        <h2>Coming next in trainer admin</h2>
-        <p className="hint">Capability roadmap items that belong on the ops side.</p>
-        <ul className="roadmap-list">
-          {ADMIN_ROADMAP.map((item) => (
-            <li key={item.id}>
-              <strong>{item.title}</strong>
-              <p>{item.blurb}</p>
-            </li>
-          ))}
-        </ul>
-      </section>
+      </div>
     </div>
   )
 }

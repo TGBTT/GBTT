@@ -1,6 +1,7 @@
 /* GBTT B&W theme — matches marketing site tokens */
 
 @import '../../../shared/studio/week-cal.css';
+@import '../../../shared/studio/class-type.css';
 
 .theme-gbtt {
   --ink: #0a0a0a;
@@ -404,4 +405,243 @@
 .roadmap-list p {
   margin: 0.25rem 0 0;
   color: #5c5c5c;
+}
+
+/* ——— Mobile app sections: beveled cards + alternating contrast ——— */
+@media (max-width: 760px) {
+  .theme-gbtt {
+    --app-section-radius: 10px;
+    --app-section-bevel-light:
+      inset 0 1px 0 rgba(255, 255, 255, 0.55),
+      0 2px 10px rgba(0, 0, 0, 0.07);
+    --app-section-bevel-dark:
+      inset 0 1px 0 rgba(255, 255, 255, 0.12),
+      0 3px 14px rgba(0, 0, 0, 0.22);
+  }
+
+  .theme-gbtt.fitness-page .demo-chrome--in-app.app-section,
+  .theme-gbtt .app-sections > .app-section {
+    margin-left: 0;
+    margin-right: 0;
+    width: auto;
+    max-width: none;
+    box-sizing: border-box;
+    border-radius: var(--app-section-radius);
+    border: 1px solid var(--line);
+    box-shadow: var(--app-section-bevel-light);
+    background: rgba(255, 255, 255, 0.94);
+    color: var(--ink);
+  }
+
+  .theme-gbtt.fitness-page .demo-chrome--in-app.app-section {
+    margin-left: 1rem;
+    margin-right: 1rem;
+    margin-top: 0.65rem;
+    margin-bottom: 0;
+    padding: 1rem 1.1rem;
+  }
+
+  .theme-gbtt .app-sections > .classboard-top.app-section {
+    margin: 0;
+    width: auto;
+    margin-top: 0;
+    padding: 1rem 1.1rem 0.85rem;
+  }
+
+  .theme-gbtt .app-sections > .admin-tabs.app-section {
+    padding: 0.65rem 0.75rem;
+    margin-top: 0;
+    margin-bottom: 0;
+  }
+
+  .theme-gbtt .app-sections {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    padding: 0.75rem 1rem 2rem;
+  }
+
+  .theme-gbtt .app-sections > .app-section {
+    padding: 1.15rem 1.05rem;
+  }
+
+  .theme-gbtt .app-sections > .app-section.yacht-panel,
+  .theme-gbtt .app-sections > .classboard-deck.app-section {
+    margin: 0;
+    width: auto;
+    padding: 1.15rem 1.05rem;
+  }
+
+  .theme-gbtt .app-sections > .classboard-deck.app-section {
+    padding: 1rem 1.05rem 1.25rem;
+  }
+
+  /* Alternate light / inverted bands */
+  .theme-gbtt.fitness-page .demo-chrome--in-app.app-section,
+  .theme-gbtt .app-sections > .app-section:nth-child(odd) {
+    background: rgba(255, 255, 255, 0.94);
+    color: var(--ink);
+    border-color: var(--line);
+    box-shadow: var(--app-section-bevel-light);
+  }
+
+  .theme-gbtt .app-sections > .app-section:nth-child(even) {
+    background: var(--ink);
+    color: var(--paper);
+    border-color: #2a2a2a;
+    box-shadow: var(--app-section-bevel-dark);
+  }
+
+  .theme-gbtt .app-sections > .app-section:nth-child(even) .hint,
+  .theme-gbtt .app-sections > .app-section:nth-child(even) .demo-sub,
+  .theme-gbtt .app-sections > .app-section:nth-child(even) .demo-badge {
+    color: rgba(245, 245, 243, 0.78);
+  }
+
+  .theme-gbtt .app-sections > .app-section:nth-child(even) h2,
+  .theme-gbtt .app-sections > .app-section:nth-child(even) h3,
+  .theme-gbtt .app-sections > .app-section:nth-child(even) h1 {
+    color: var(--paper);
+  }
+
+  .theme-gbtt .app-sections > .app-section:nth-child(even) .btn.ghost {
+    border-color: rgba(245, 245, 243, 0.65);
+    color: var(--paper);
+    background: transparent;
+  }
+
+  .theme-gbtt .app-sections > .app-section:nth-child(even) .btn.primary {
+    background: var(--paper);
+    color: var(--ink);
+    border-color: var(--paper);
+  }
+
+  .theme-gbtt .app-sections > .app-section:nth-child(even) .field input,
+  .theme-gbtt .app-sections > .app-section:nth-child(even) .field textarea,
+  .theme-gbtt .app-sections > .app-section:nth-child(even) .field select,
+  .theme-gbtt .app-sections > .app-section:nth-child(even) .guest-book-row input {
+    background: #1a1a1a;
+    color: var(--paper);
+    border-color: #444;
+  }
+
+  .theme-gbtt .app-sections > .app-section:nth-child(even) .pkg-card,
+  .theme-gbtt .app-sections > .app-section:nth-child(even) .legal-box,
+  .theme-gbtt .app-sections > .app-section:nth-child(even) .risk-card {
+    background: #1a1a1a;
+    color: var(--paper);
+    border-color: #444;
+  }
+
+  .theme-gbtt .app-sections > .app-section:nth-child(even) .pkg-card.selected {
+    outline-color: var(--paper);
+  }
+
+  .theme-gbtt .app-sections > .app-section:nth-child(even) .sync-chip {
+    background: #2a2a2a;
+    color: var(--paper);
+    border-color: #444;
+  }
+
+  .theme-gbtt .app-sections > .app-section:nth-child(even) .class-type-desc__text,
+  .theme-gbtt .app-sections > .app-section:nth-child(even) .class-type-desc__blurb {
+    color: rgba(245, 245, 243, 0.82);
+  }
+
+  .theme-gbtt .app-sections > .app-section:nth-child(even) .class-type-thumb {
+    border-color: #555;
+    background: #1a1a1a;
+  }
+
+  .theme-gbtt .app-sections > .app-section:nth-child(even) .occ-detail {
+    border-left-color: var(--paper);
+  }
+
+  .theme-gbtt .app-sections > .app-section:nth-child(even) .held-list li,
+  .theme-gbtt .app-sections > .app-section:nth-child(even) .admin-member-list li {
+    border-bottom-color: #444;
+  }
+
+  .theme-gbtt .app-sections > .app-section:nth-child(even) .week-cal {
+    border-color: #444;
+    background: #141414;
+  }
+
+  .theme-gbtt .app-sections > .app-section:nth-child(even) .week-cal__cell {
+    background: #1e1e1e;
+    border-color: #444;
+  }
+
+  .theme-gbtt .app-sections > .app-section:nth-child(even) .week-cal__cell.has-session {
+    background: #262626;
+  }
+
+  .theme-gbtt .app-sections > .app-section:nth-child(even) .week-cal__time-label,
+  .theme-gbtt .app-sections > .app-section:nth-child(even) .week-cal__corner,
+  .theme-gbtt .app-sections > .app-section:nth-child(even) .week-cal__day-label {
+    background: #0a0a0a;
+    border-color: #444;
+  }
+
+  .theme-gbtt .app-sections > .app-section:nth-child(even) .week-cal__badge {
+    background: #2a2a2a;
+    border-color: #666;
+    color: var(--paper);
+  }
+
+  .theme-gbtt .app-sections > .app-section:nth-child(even) .week-cal__badge:hover:not(.is-full),
+  .theme-gbtt .app-sections > .app-section:nth-child(even) .week-cal__badge.is-selected {
+    background: var(--paper);
+    color: var(--ink);
+    border-color: var(--paper);
+  }
+
+  .theme-gbtt .app-sections > .app-section:nth-child(even) .week-cal__badge.is-held {
+    outline-color: var(--paper);
+  }
+
+  .theme-gbtt .app-sections > .app-section:nth-child(even) .week-cal__badge.is-full {
+    background: #333;
+    border-color: #555;
+    color: #aaa;
+  }
+
+  .theme-gbtt .app-sections > .app-section.app-section--banner {
+    padding: 0.75rem 1rem;
+    margin-top: 0;
+    font-size: 0.92rem;
+  }
+
+  .theme-gbtt .app-sections > .app-section.app-section--banner.form-success {
+    background: #e8f5ec;
+    color: #0f5132;
+    border-color: #b8dfc4;
+  }
+
+  .theme-gbtt .app-sections > .app-section.app-section--banner.form-error {
+    background: #fdecec;
+    color: #7a1010;
+    border-color: #f0bcbc;
+  }
+
+  .theme-gbtt .app-sections > .admin-tabs.app-section .chip {
+    border-color: #555;
+    color: inherit;
+  }
+
+  .theme-gbtt .app-sections > .admin-tabs.app-section:nth-child(even) .chip {
+    color: var(--paper);
+  }
+
+  .theme-gbtt .app-sections > .admin-tabs.app-section .chip.selected {
+    background: var(--ink);
+    color: var(--paper);
+    border-color: var(--ink);
+  }
+
+  .theme-gbtt .app-sections > .admin-tabs.app-section:nth-child(even) .chip.selected {
+    background: var(--paper);
+    color: var(--ink);
+    border-color: var(--paper);
+  }
 }
