@@ -575,11 +575,21 @@
     margin-right: -0.35rem;
     width: calc(100% + 0.7rem);
     max-width: none;
+    overflow: visible;
+  }
+
+  .theme-gbtt .app-sections > .app-section .week-cal__scroll {
+    max-width: 100%;
+  }
+
+  .theme-gbtt .app-sections > .app-section:nth-child(even) .week-cal__scroll {
+    border-color: #444;
+    background: #141414;
   }
 
   .theme-gbtt .app-sections > .app-section:nth-child(even) .week-cal {
-    border-color: #444;
-    background: #141414;
+    border-color: transparent;
+    background: transparent;
   }
 
   .theme-gbtt .app-sections > .app-section:nth-child(even) .week-cal__cell {

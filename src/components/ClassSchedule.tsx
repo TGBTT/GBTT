@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { WeekSessionCalendar } from '@gbtt/shared/studio/WeekSessionCalendar'
-import { ClassTypeDescription } from '@gbtt/shared/studio/ClassTypeDescription'
+import { ClassTypeAccordion } from '@gbtt/shared/studio/ClassTypeAccordion'
 import {
   getClassTypes,
   occurrencesByWeekday,
@@ -32,15 +32,13 @@ export function ClassSchedule() {
       </p>
       <div className="class-schedule__types">
         <h3 className="class-schedule__types-heading">Session types</h3>
-        <ul className="class-type-grid">
+        <p className="hint class-schedule__types-intro">
+          Tap a class for purpose, warnings, what to bring, and typical exercises.
+        </p>
+        <ul className="class-type-accordion-list">
           {classTypes.map((c) => (
-            <li key={c.id} className="class-type-card">
-              <ClassTypeDescription
-                classType={c}
-                baseUrl={import.meta.env.BASE_URL}
-                title={c.name}
-              />
-              <p className="hint class-type-card__cap">Max capacity {c.cap} per session</p>
+            <li key={c.id}>
+              <ClassTypeAccordion classType={c} baseUrl={import.meta.env.BASE_URL} />
             </li>
           ))}
         </ul>

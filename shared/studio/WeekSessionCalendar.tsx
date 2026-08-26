@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { Fragment, useMemo } from 'react'
 import {
   WEEKDAYS,
   classTypeById,
@@ -88,35 +88,27 @@ export function WeekSessionCalendar({
 
   return (
     <div className={`week-cal ${className ?? ''}`}>
-      <table className="week-cal__table" aria-label="Weekly class timetable">
-        <colgroup>
-          <col className="week-cal__col-time" />
+      <div className="week-cal__scroll" tabIndex={0} aria-label="Weekly class timetable — swipe sideways on small screens">
+        <div className="week-cal__matrix" role="grid">
+          <div className="week-cal__corner" role="columnheader" aria-hidden="true" />
           {WEEKDAYS.map((d) => (
-            <col key={d} className="week-cal__col-day" />
+            <div key={d} className="week-cal__day-label" role="columnheader">
+              {d}
+            </div>
           ))}
-        </colgroup>
-        <thead>
-          <tr>
-            <th scope="col" className="week-cal__corner" aria-hidden="true" />
-            {WEEKDAYS.map((d) => (
-              <th key={d} scope="col" className="week-cal__day-label">
-                {d}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
+
           {times.map((time) => (
-            <tr key={time}>
-              <th scope="row" className="week-cal__time-label">
+            <Fragment key={time}>
+              <div className="week-cal__time-label" role="rowheader">
                 {formatTimetableTime(time)}
-              </th>
+              </div>
               {WEEKDAYS.map((day) => {
                 const occ = lookup.get(`${day}|${time}`)
                 return (
-                  <td
+                  <div
                     key={`${day}-${time}`}
                     className={`week-cal__cell${occ ? ' has-session' : ''}`}
+                    role="gridcell"
                   >
                     {occ ? (
                       <SessionBadge
@@ -127,13 +119,14 @@ export function WeekSessionCalendar({
                         onSelect={onSelect}
                       />
                     ) : null}
-                  </td>
+                  </div>
                 )
               })}
-            </tr>
+            </Fragment>
           ))}
-        </tbody>
-      </table>
+        </div>
+      </div>
+      <p className="week-cal__scroll-hint">Swipe sideways for the full Mon–Fri grid</p>
     </div>
   )
 }

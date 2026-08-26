@@ -47,3 +47,126 @@
 .occ-detail .class-type-desc + .btn-row {
   margin-top: 0.75rem;
 }
+
+.class-type-accordion-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.class-type-accordion {
+  border: 1px solid var(--line, #d4d4d0);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.92);
+  overflow: hidden;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+}
+
+.class-type-accordion__summary {
+  display: grid;
+  grid-template-columns: 7.25rem minmax(0, 1fr) auto;
+  gap: 1rem;
+  align-items: center;
+  padding: 0.85rem 1rem;
+  cursor: pointer;
+  list-style: none;
+}
+
+.class-type-accordion__summary::-webkit-details-marker {
+  display: none;
+}
+
+.class-type-accordion__head {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.class-type-accordion__title {
+  font-family: var(--font-display, 'Bebas Neue', Impact, sans-serif);
+  font-size: 1.35rem;
+  letter-spacing: 0.05em;
+  line-height: 1.1;
+}
+
+.class-type-accordion__blurb {
+  font-size: 0.95rem;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.class-type-accordion__meta {
+  font-size: 0.82rem;
+  margin: 0;
+}
+
+.class-type-accordion__chevron {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(45deg);
+  opacity: 0.55;
+  transition: transform 0.2s ease;
+  flex-shrink: 0;
+  margin-right: 0.15rem;
+}
+
+.class-type-accordion[open] .class-type-accordion__chevron {
+  transform: rotate(-135deg);
+  margin-top: 0.35rem;
+}
+
+.class-type-accordion__panel {
+  padding: 0 1rem 1.1rem 1rem;
+  border-top: 1px solid var(--line, #d4d4d0);
+  margin-left: calc(7.25rem + 1rem);
+}
+
+.class-type-accordion__block {
+  margin-top: 0.85rem;
+}
+
+.class-type-accordion__block:first-child {
+  margin-top: 1rem;
+}
+
+.class-type-accordion__block h4 {
+  margin: 0 0 0.35rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted, #5c5c5c);
+}
+
+.class-type-accordion__block p {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.45;
+  color: var(--ink, #0a0a0a);
+}
+
+.class-type-accordion__exercises {
+  margin: 0;
+  padding-left: 1.15rem;
+  font-size: 0.95rem;
+  line-height: 1.45;
+}
+
+@media (max-width: 560px) {
+  .class-type-accordion__summary {
+    grid-template-columns: 5.5rem minmax(0, 1fr) auto;
+    gap: 0.75rem;
+    padding: 0.75rem;
+  }
+
+  .class-type-accordion__panel {
+    margin-left: 0;
+    padding-left: 0.75rem;
+    padding-right: 0.75rem;
+  }
+}

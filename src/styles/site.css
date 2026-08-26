@@ -395,6 +395,11 @@ h2 {
 
 .class-schedule .week-cal {
   max-width: 100%;
+  overflow: visible;
+}
+
+.class-schedule .week-cal__scroll {
+  max-width: 100%;
 }
 
 .class-schedule__types {
@@ -402,19 +407,19 @@ h2 {
 }
 
 .class-schedule__types-heading {
-  margin: 0 0 1.25rem;
+  margin: 0 0 0.5rem;
   font-family: var(--font-display);
   font-size: clamp(1.65rem, 3vw, 2.1rem);
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 
-.class-schedule .class-type-desc {
-  grid-template-columns: 7.25rem minmax(0, 1fr);
-  gap: 1rem;
+.class-schedule__types-intro {
+  margin: 0 0 1.25rem;
+  max-width: 40rem;
 }
 
-.class-schedule .class-type-thumb {
+.class-schedule .class-type-accordion .class-type-thumb {
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
 }
 

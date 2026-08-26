@@ -26,7 +26,12 @@ export interface ClassType {
   id: string
   name: string
   blurb: string
+  /** Public purpose / fuller explanation shown when expanded. */
   longDescription: string
+  warnings: string
+  restrictions: string
+  recommendations: string
+  whatToBring: string
   /** Max capacity — max attendees per session (set in trainer admin). */
   cap: number
   exerciseIds: string[]
@@ -203,6 +208,10 @@ const DEFAULT_CLASSES: ClassType[] = [
     blurb: 'High-intensity cardio and powerful movements — high or low impact.',
     longDescription:
       'A high intensity class that combines cardio and powerful movements that can be high or low impact.',
+    warnings: 'High heart rate and impact options — stop if dizzy, faint, or in pain.',
+    restrictions: 'Ages 14+ recommended unless cleared with Tom. Impact moves can be regressed.',
+    recommendations: 'Eat lightly 1–2 hours before class and hydrate well through the day.',
+    whatToBring: 'Towel, water bottle, and comfortable trainers.',
     cap: 20,
     exerciseIds: ['burpee', 'kbswing', 'boxjump', 'medball'],
   },
@@ -212,6 +221,10 @@ const DEFAULT_CLASSES: ClassType[] = [
     blurb: 'Resistance equipment to build strength, posture, and technique.',
     longDescription:
       'Use resistance equipment and challenge your muscles to gain strength, improve posture and exercise technique! Those with a little or a lot of strength can come to this class.',
+    warnings: 'Lift within your limits — ask for a spot or lighter load when unsure.',
+    restrictions: 'Suitable for beginners with coaching; inform Tom of back or shoulder issues.',
+    recommendations: 'Stable shoes and a warm-up walk or mobility beforehand helps.',
+    whatToBring: 'Water bottle and towel; gloves optional.',
     cap: 20,
     exerciseIds: ['squat', 'deadlift', 'press', 'row'],
   },
@@ -221,6 +234,10 @@ const DEFAULT_CLASSES: ClassType[] = [
     blurb: 'Strength, cardio, and mobility in one full-body session.',
     longDescription:
       'This is an all round session using strength, cardio and mobility to hit the whole body. A great fit if you only have time for 1 session per week.',
+    warnings: 'Multiple stations — pace yourself and flag fatigue early.',
+    restrictions: 'All levels welcome; every station has easier options.',
+    recommendations: 'Ideal if you only train once per week and want full-body work.',
+    whatToBring: 'Towel, water, and trainers.',
     cap: 18,
     exerciseIds: ['lunge', 'pushup', 'kbswing', 'trx'],
   },
@@ -230,6 +247,10 @@ const DEFAULT_CLASSES: ClassType[] = [
     blurb: 'Cardio and strength for all ages — child friendly.',
     longDescription:
       'One for the ladies of all ages and you can bring your kids! Cardio and strength work with options to regress or progress your efforts based on how you are feeling. If you bring kids there are toys for them to play with.',
+    warnings: 'Children must stay in the designated play area — you remain responsible for them.',
+    restrictions: 'Open to women and girls of all ages; kids welcome with toys provided.',
+    recommendations: 'Come as you are — options to push or ease off every round.',
+    whatToBring: 'Water bottle; snacks/toys for kids if helpful.',
     cap: 16,
     exerciseIds: ['band', 'kbswing', 'lunge', 'plank'],
   },
@@ -239,6 +260,10 @@ const DEFAULT_CLASSES: ClassType[] = [
     blurb: 'Low impact, controlled range-of-motion and core work.',
     longDescription:
       'Low impact, slow movement focused on full control and range of motion. A combination of core, isolation and mobility movements to help minimise injury and increase your mobility.',
+    warnings: 'Move slowly — forcing range causes injury. Breathe through tight spots.',
+    restrictions: 'Great for recovery days and injury prevention; no jumping.',
+    recommendations: 'Wear layers you can move in; ideal after desk work or heavy training days.',
+    whatToBring: 'Water bottle; yoga mat optional (mats available).',
     cap: 14,
     exerciseIds: ['hipopener', 'tspine', 'plank', 'balance'],
   },
@@ -248,6 +273,10 @@ const DEFAULT_CLASSES: ClassType[] = [
     blurb: 'Yoga-inspired flow set to music for a full-body workout.',
     longDescription:
       'Yoga inspired flow set to music for a fullbody workout.',
+    warnings: 'Balance work — use a wall or mat edge if needed. Pregnancy: tell the instructor.',
+    restrictions: 'Les Mills format; barefoot or grippy socks recommended.',
+    recommendations: 'Arrive a few minutes early to set up your mat space.',
+    whatToBring: 'Water bottle; comfortable stretch clothing.',
     cap: 18,
     exerciseIds: ['flow', 'plank', 'hipopener', 'balance'],
   },
@@ -257,6 +286,10 @@ const DEFAULT_CLASSES: ClassType[] = [
     blurb: 'High-intensity, low-impact pilates and strength fusion.',
     longDescription:
       'High intensity but low impact pilates/strength work in this fusion class designed for that juicy burn!',
+    warnings: 'Core-heavy — stop if sharp lower-back pain. Low impact but high effort.',
+    restrictions: 'Not ideal in late pregnancy without clearance.',
+    recommendations: 'Great complement to running or heavy lifting programmes.',
+    whatToBring: 'Water bottle and towel.',
     cap: 16,
     exerciseIds: ['pilates', 'plank', 'band', 'press'],
   },
@@ -266,6 +299,10 @@ const DEFAULT_CLASSES: ClassType[] = [
     blurb: 'Strength, boxing, and cardio for ages 11+ — good vibes only.',
     longDescription:
       'A fun intro to training. A combination of strength, boxing and cardio. Competition free and supportive. Everything is optional! Good vibes only!',
+    warnings: 'Parent/guardian must sign waiver for under-18s. No contact sparring.',
+    restrictions: 'Ages 11+ only. Everything is optional — no pressure to compete.',
+    recommendations: 'School sports kit or comfortable gym clothes.',
+    whatToBring: 'Water bottle; indoor trainers.',
     cap: 14,
     exerciseIds: ['boxing', 'pushup', 'kbswing', 'burpee'],
   },
@@ -275,6 +312,10 @@ const DEFAULT_CLASSES: ClassType[] = [
     blurb: 'Playful training for ages 5–10 — games, skills, and teamwork.',
     longDescription:
       'Playful movement and intro to training for ages 5–10. Games, bodyweight skills, and team activities — everything is optional and fun-first.',
+    warnings: 'Parent/guardian must remain on site or as arranged with Tom.',
+    restrictions: 'Ages 5–10 only. Fun-first — kids can opt out of any activity.',
+    recommendations: 'Encourage trainers they can get dirty in.',
+    whatToBring: 'Water bottle; parent contact details on file.',
     cap: 12,
     exerciseIds: ['game', 'balance', 'lunge', 'pushup'],
   },
@@ -628,7 +669,21 @@ function syncMemberWeeklyLocks(u: SimUser): void {
   }
 }
 
+function migrateClass(cls: ClassType): ClassType {
+  const def = DEFAULT_CLASSES.find((d) => d.id === cls.id)
+  if (!def) return cls
+  return {
+    ...cls,
+    warnings: cls.warnings ?? def.warnings,
+    restrictions: cls.restrictions ?? def.restrictions,
+    recommendations: cls.recommendations ?? def.recommendations,
+    whatToBring: cls.whatToBring ?? def.whatToBring,
+    exerciseIds: cls.exerciseIds?.length ? cls.exerciseIds : [...def.exerciseIds],
+  }
+}
+
 function normalizeStore(parsed: StoreState): StoreState {
+  parsed.classes = parsed.classes.map(migrateClass)
   parsed.users = parsed.users.map(migrateUser)
   for (const u of parsed.users) {
     syncMemberWeeklyLocks(u)
@@ -702,6 +757,13 @@ export function getExercises(): Exercise[] {
 
 export function getClassTypes(): ClassType[] {
   return store.classes
+}
+
+/** Default exercises linked to a class type (trainer admin checklist). */
+export function exercisesForClassType(classType: ClassType): Exercise[] {
+  return classType.exerciseIds
+    .map((id) => store.exercises.find((e) => e.id === id))
+    .filter(Boolean) as Exercise[]
 }
 
 export function getOccurrences(): ClassOccurrence[] {
@@ -1216,7 +1278,19 @@ export function setClassCap(classTypeId: string, cap: number): void {
 
 export function updateClassType(
   id: string,
-  patch: Partial<Pick<ClassType, 'name' | 'blurb' | 'longDescription' | 'cap'>>,
+  patch: Partial<
+    Pick<
+      ClassType,
+      | 'name'
+      | 'blurb'
+      | 'longDescription'
+      | 'warnings'
+      | 'restrictions'
+      | 'recommendations'
+      | 'whatToBring'
+      | 'cap'
+    >
+  >,
 ): void {
   const cls = classTypeById(id)
   if (!cls) return

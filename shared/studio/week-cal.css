@@ -2,27 +2,21 @@
   width: 100%;
   max-width: 100%;
   margin: 1rem 0 1.25rem;
-  border: 1px solid var(--line, #d4d4d0);
-  background: #fff;
+}
+
+.week-cal__scroll {
   overflow-x: auto;
   overflow-y: hidden;
   -webkit-overflow-scrolling: touch;
+  border: 1px solid var(--line, #d4d4d0);
+  background: #fff;
 }
 
-.week-cal__table {
-  width: 100%;
-  min-width: 34rem;
-  border-collapse: collapse;
-  table-layout: fixed;
-}
-
-.week-cal__col-time {
-  width: 4.75rem;
-}
-
-.week-cal__col-day {
-  width: calc((100% - 4.75rem) / 5);
-  min-width: 5.25rem;
+.week-cal__matrix {
+  display: grid;
+  grid-template-columns: 4.75rem repeat(5, 5.5rem);
+  width: max-content;
+  min-width: 100%;
 }
 
 .week-cal__corner,
@@ -34,16 +28,24 @@
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  border: 1px solid var(--line, #d4d4d0);
+  border-right: 1px solid var(--line, #d4d4d0);
+  border-bottom: 1px solid var(--line, #d4d4d0);
 }
 
 .week-cal__corner {
   padding: 0.55rem 0.35rem;
+  position: sticky;
+  left: 0;
+  z-index: 3;
 }
 
 .week-cal__day-label {
   padding: 0.55rem 0.35rem;
   text-align: center;
+}
+
+.week-cal__day-label:last-of-type {
+  border-right: none;
 }
 
 .week-cal__time-label {
@@ -53,17 +55,25 @@
   letter-spacing: 0.03em;
   text-transform: none;
   white-space: nowrap;
-  vertical-align: middle;
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  box-shadow: 2px 0 0 var(--line, #d4d4d0);
 }
 
 .week-cal__cell {
   min-height: 3.75rem;
-  height: 3.75rem;
   padding: 0.35rem;
-  border: 1px solid var(--line, #d4d4d0);
+  border-right: 1px solid var(--line, #d4d4d0);
+  border-bottom: 1px solid var(--line, #d4d4d0);
   background: #fafaf8;
-  vertical-align: middle;
-  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.week-cal__cell:nth-child(6n) {
+  border-right: none;
 }
 
 .week-cal__cell.has-session {
@@ -125,20 +135,25 @@ button.week-cal__badge {
   opacity: 0.85;
 }
 
-@media (max-width: 720px) {
-  .week-cal__table {
-    min-width: 36rem;
+.week-cal__scroll-hint {
+  display: none;
+  margin: 0.45rem 0 0;
+  font-size: 0.82rem;
+  color: var(--muted, #5c5c5c);
+}
+
+@media (max-width: 760px) {
+  .week-cal__scroll-hint {
+    display: block;
   }
 
-  .week-cal__corner,
-  .week-cal__time-label {
-    position: sticky;
-    left: 0;
-    z-index: 2;
-    box-shadow: 2px 0 0 var(--line, #d4d4d0);
+  .week-cal__matrix {
+    grid-template-columns: 4.5rem repeat(5, 5.25rem);
   }
+}
 
-  .week-cal__corner {
-    z-index: 3;
+@media (min-width: 761px) {
+  .week-cal__scroll-hint {
+    display: none !important;
   }
 }

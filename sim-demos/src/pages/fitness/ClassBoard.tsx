@@ -460,6 +460,54 @@ export default function ClassBoard() {
                         }}
                       />
                     </label>
+                    <label className="field">
+                      Warnings
+                      <textarea
+                        rows={2}
+                        value={selected.warnings}
+                        disabled={role !== 'admin'}
+                        onChange={(e) => {
+                          updateClassType(selected.id, { warnings: e.target.value })
+                          refresh()
+                        }}
+                      />
+                    </label>
+                    <label className="field">
+                      Restrictions
+                      <textarea
+                        rows={2}
+                        value={selected.restrictions}
+                        disabled={role !== 'admin'}
+                        onChange={(e) => {
+                          updateClassType(selected.id, { restrictions: e.target.value })
+                          refresh()
+                        }}
+                      />
+                    </label>
+                    <label className="field">
+                      Recommendations
+                      <textarea
+                        rows={2}
+                        value={selected.recommendations}
+                        disabled={role !== 'admin'}
+                        onChange={(e) => {
+                          updateClassType(selected.id, { recommendations: e.target.value })
+                          refresh()
+                        }}
+                      />
+                    </label>
+                    <label className="field">
+                      What to bring
+                      <textarea
+                        rows={2}
+                        value={selected.whatToBring}
+                        disabled={role !== 'admin'}
+                        onChange={(e) => {
+                          updateClassType(selected.id, { whatToBring: e.target.value })
+                          refresh()
+                        }}
+                      />
+                    </label>
                   </>
                 ) : null}
                 <label className="field">
