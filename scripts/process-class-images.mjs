@@ -70,7 +70,11 @@ async function processClass(id) {
     return false
   }
 
-  const outDirs = [path.join(IMG_CLASSES, id), PUBLIC_CLASSES, SIM_PUBLIC]
+  const outDirs = [
+    path.join(IMG_CLASSES, id),
+    path.join(PUBLIC_CLASSES, id),
+    path.join(SIM_PUBLIC, id),
+  ]
   outDirs.forEach(ensureDir)
 
   const meta = await sharp(source).metadata()
