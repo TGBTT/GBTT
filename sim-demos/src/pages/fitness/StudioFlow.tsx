@@ -1,299 +1,451 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { DemoChrome } from '../../components/DemoChrome'
-import { DemoModeBar } from '../../components/DemoModeBar'
-import { DemoPitchBar, DemoQuoteCta } from '../../components/DemoPitch'
 import {
+  DEMO_CREDENTIALS,
   FITNESS_PLANS,
-  bookOccurrence,
+  acceptTerms,
+  bookAsGuest,
+  bookAsMember,
   classTypeById,
+  dropMemberBooking,
   formatPrepaid,
-  getMember,
+  getClassTypes,
   getOccurrences,
-  planById,
+  getSessionUser,
+  getSiteContent,
+  login,
+  logout,
+  registerMember,
+  reshuffleBooking,
+  sessionExercises,
+  setMemberPlan,
+  setShowNameToClassmates,
   spotsLeft,
   syncLabels,
+  visibleRosterNames,
   type PlanId,
 } from '../../shared/fitnessStudio'
 
+type Panel = 'browse' | 'login' | 'register' | 'account'
+
 /**
- * Studio Flow — member booking wizard.
- * Class (spots vs cap) → prepaid plan → confirm (simulated calendar + Firebase).
+ * Book & membership — public fill view, guest book, member login / weekly reshuffle.
  */
 export default function StudioFlow() {
-  const [tick, setTick] = useState(0)
+  const [, setTick] = useState(0)
   const refresh = () => setTick((n) => n + 1)
 
-  const [step, setStep] = useState(1)
-  const [occurrenceId, setOccurrenceId] = useState<string>()
-  const [planId, setPlanId] = useState<PlanId>(getMember().planId)
-  const [waitlistOccId, setWaitlistOccId] = useState<string>()
-  const [waitlistPosition, setWaitlistPosition] = useState<number>()
-  const [done, setDone] = useState(false)
+  const [panel, setPanel] = useState<Panel>('browse')
+  const [focusId, setFocusId] = useState<string | null>(null)
+  const [guestName, setGuestName] = useState('')
+  const [guestEmail, setGuestEmail] = useState('')
+  const [authEmail, setAuthEmail] = useState('alex@demo')
+  const [authPassword, setAuthPassword] = useState('demo')
+  const [regName, setRegName] = useState('')
+  const [regEmail, setRegEmail] = useState('')
+  const [regPlan, setRegPlan] = useState<PlanId>('weekly2')
+  const [reshuffleFrom, setReshuffleFrom] = useState<string | null>(null)
+  const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [peakOn, setPeakOn] = useState(false)
 
-  const occurrences = useMemo(() => {
-    const base = getOccurrences()
-    if (!peakOn) return base
-    return base.map((o) => {
-      const type = classTypeById(o.classTypeId)
-      const cap = type?.cap ?? o.bookedCount
-      const peakBooked = Math.min(cap, Math.max(o.bookedCount, Math.ceil(cap * 0.92)))
-      return { ...o, bookedCount: peakBooked }
-    })
-  }, [peakOn, tick])
+  const user = getSessionUser()
+  const site = getSiteContent()
+  const occurrences = getOccurrences()
+  const classTypes = getClassTypes()
+  const sync = useMemo(() => syncLabels(), [user?.heldOccurrenceIds?.length, focusId])
 
-  const member = getMember()
-  const occ = occurrenceId ? occurrences.find((o) => o.id === occurrenceId) : undefined
-  const cls = occ ? classTypeById(occ.classTypeId) : undefined
-  const plan = planById(planId)
-  const sync = useMemo(() => syncLabels(), [done, occurrenceId])
-
-  if (done && occ && cls && plan) {
-    return (
-      <div className="fitness-page theme-studioflow">
-        <DemoChrome
-          theme="Studio Flow"
-          title="Credit burned (demo)"
-          subtitle="Nothing was charged or written to a live calendar."
-          imageId="studioflow"
-        />
-        <div className="yacht-panel success-panel demo-enter-success">
-          <h2>You&apos;re on the list</h2>
-          <p>
-            <strong>
-              {cls.name} · {occ.dayLabel} {occ.time}
-            </strong>
-          </p>
-          <p>
-            {plan.name} · {formatPrepaid(plan)} ·{' '}
-            {member.creditsLeft === 1 ? '1 credit left' : `${member.creditsLeft} credits left`}
-          </p>
-          <p className="sync-chip">{sync.calendar}</p>
-          <p className="sync-chip">{sync.firebase}</p>
-          <p className="hint">
-            {spotsLeft(occ)} of {cls.cap} spots still open — walk-ins stop when the cap is hit, without you watching
-            the phone.
-          </p>
-          <DemoQuoteCta styleName="Studio Flow" />
-          <button
-            type="button"
-            className="btn ghost"
-            onClick={() => {
-              setDone(false)
-              setStep(1)
-              setError(null)
-              setWaitlistOccId(undefined)
-              setWaitlistPosition(undefined)
-            }}
-          >
-            Book another class (demo)
-          </button>
-          <Link to="/" className="adventure-hub-link">
-            ← All demos
-          </Link>
-        </div>
-        <DemoPitchBar
-          packageTier="essential"
-          compareTo="/fitness/classboard"
-          compareLabel="Class Board"
-          engineNote="Member pack wallet vs instructor wall timetable — same packs, caps, and calendar check."
-        />
-      </div>
-    )
+  const flash = (ok: string | null, err: string | null) => {
+    setMessage(ok)
+    setError(err)
+    refresh()
   }
 
-  const walletPlan = planById(member.planId)
-
   return (
-    <div className="fitness-page theme-studioflow">
+    <div className="fitness-page theme-gbtt">
       <DemoChrome
-        theme="Studio Flow"
-        title="Member pack wallet"
-        subtitle="Prepaid credits sit in the wallet and burn when you book — the calendar still holds the cap."
+        theme="Book & membership"
+        title="Classes at Rec Park"
+        subtitle={site.heroBlurb}
         imageId="studioflow"
-      />
-      <DemoPitchBar
-        packageTier="essential"
-        compareTo="/fitness/classboard"
-        compareLabel="Class Board"
-        engineNote="Member pack wallet vs instructor wall timetable — same packs, caps, and calendar check."
-      />
-      <DemoModeBar
-        clientTo="/fitness/studioflow"
-        clientLabel="Client view"
-        opsTo="/fitness/classboard"
-        opsLabel="Admin view"
-        peakOn={peakOn}
-        onPeakToggle={(on) => {
-          setPeakOn(on)
-          setOccurrenceId(undefined)
-          setWaitlistOccId(undefined)
-          setWaitlistPosition(undefined)
-        }}
+        badge="Simulated · localStorage stand-in for Firebase"
+        backTo="/"
+        backLabel="← Demos hub"
       />
 
-      <div className="wallet-strip" aria-live="polite">
-        <span className="wallet-strip-kicker">Wallet</span>
-        <strong>{walletPlan?.name ?? 'Member pack'}</strong>
-        <span>
-          {member.creditsLeft === 1 ? '1 credit left' : `${member.creditsLeft} credits left`}
-        </span>
+      <div className="sim-toolbar">
+        <p className="sim-toolbar__status">
+          {user
+            ? `Signed in as ${user.name} (${user.role})`
+            : 'Public view — fill bars only; names hidden'}
+        </p>
+        <div className="sim-toolbar__actions">
+          {!user ? (
+            <>
+              <button type="button" className="btn ghost" onClick={() => setPanel('login')}>
+                Log in
+              </button>
+              <button type="button" className="btn primary" onClick={() => setPanel('register')}>
+                Subscribe
+              </button>
+            </>
+          ) : (
+            <>
+              <button type="button" className="btn ghost" onClick={() => setPanel('account')}>
+                My account
+              </button>
+              <button
+                type="button"
+                className="btn ghost"
+                onClick={() => {
+                  logout()
+                  setPanel('browse')
+                  flash('Signed out.', null)
+                }}
+              >
+                Log out
+              </button>
+            </>
+          )}
+          <Link className="btn ghost" to="/fitness/classboard">
+            Admin →
+          </Link>
+        </div>
       </div>
 
-      <ol className="wizard-steps" aria-label="Booking steps">
-        {[1, 2, 3].map((n) => (
-          <li key={n} className={step === n ? 'active' : step > n ? 'done' : ''}>
-            {n}
-          </li>
-        ))}
-      </ol>
+      {message ? <p className="form-success sim-banner">{message}</p> : null}
+      {error ? <p className="form-error sim-banner">{error}</p> : null}
 
-      {step === 1 && (
+      {panel === 'login' && (
         <section className="yacht-panel demo-enter">
-          <h2>1. Pick a class</h2>
-          <p className="hint">Spots come from the simulated Google Calendar — full classes cannot be booked.</p>
-          <div className="class-occ-list">
-            {occurrences.map((o) => {
-              const type = classTypeById(o.classTypeId)
-              if (!type) return null
-              const left = spotsLeft(o)
-              const full = left === 0
-              const on = occurrenceId === o.id
-              const onWaitlist = waitlistOccId === o.id
-              return (
-                <div key={o.id} className={`class-occ-wrap${on ? ' selected' : ''}${full ? ' is-full' : ''}`}>
-                  <button
-                    type="button"
-                    disabled={full}
-                    className={`class-occ-card${on ? ' selected' : ''}${full ? ' is-full' : ''}`}
-                    onClick={() => {
-                      setOccurrenceId(o.id)
-                      setWaitlistOccId(undefined)
-                      setWaitlistPosition(undefined)
-                    }}
-                  >
-                    <strong>
-                      {type.name} · {o.time}
-                    </strong>
-                    <span>{o.dayLabel}</span>
-                    <span className="spots-line">
-                      {full
-                        ? 'Full'
-                        : left <= Math.max(2, Math.ceil(type.cap * 0.15))
-                          ? `Almost full · ${left} of ${type.cap} left`
-                          : `${left} of ${type.cap} spots left`}
-                    </span>
-                  </button>
-                  {full && (
-                    <div className="waitlist-row">
-                      {onWaitlist && waitlistPosition ? (
-                        <p className="waitlist-position">
-                          Waitlist position <strong>#{waitlistPosition}</strong> — we&apos;ll ping you if a spot opens
-                        </p>
-                      ) : (
-                        <button
-                          type="button"
-                          className="btn ghost waitlist-join"
-                          onClick={() => {
-                            setWaitlistOccId(o.id)
-                            setOccurrenceId(undefined)
-                            setWaitlistPosition(2 + (o.id.length % 3))
-                          }}
-                        >
-                          Join waitlist (demo)
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-          <div className="btn-row">
-            <button type="button" className="btn primary" disabled={!occurrenceId} onClick={() => setStep(2)}>
-              Next: Plan
-            </button>
-          </div>
-        </section>
-      )}
-
-      {step === 2 && (
-        <section className="yacht-panel demo-enter">
-          <h2>2. Pay in advance</h2>
+          <h2>Member / staff login</h2>
           <p className="hint">
-            Casual $17 · 10-pack $15 · 20-pack $12.50 · 3-a-week $10. All prepaid. Demo member currently has{' '}
-            {member.creditsLeft} credits on a {planById(member.planId)?.name}.
+            Demo passwords are all <code>demo</code> —{' '}
+            {DEMO_CREDENTIALS.map((c) => c.email).join(' · ')}
           </p>
-          <div className="pkg-grid">
-            {FITNESS_PLANS.map((p) => (
-              <button
-                key={p.id}
-                type="button"
-                className={`pkg-card${planId === p.id ? ' selected' : ''}`}
-                onClick={() => setPlanId(p.id)}
-              >
-                <strong>{p.name}</strong>
-                <span className="pkg-price">
-                  ${p.ratePerClass.toFixed(2)} / class · {formatPrepaid(p)}
-                </span>
-                <p>{p.blurb}</p>
-              </button>
-            ))}
-          </div>
+          <label className="field">
+            Email
+            <input value={authEmail} onChange={(e) => setAuthEmail(e.target.value)} />
+          </label>
+          <label className="field">
+            Password
+            <input
+              type="password"
+              value={authPassword}
+              onChange={(e) => setAuthPassword(e.target.value)}
+            />
+          </label>
           <div className="btn-row">
-            <button type="button" className="btn ghost" onClick={() => setStep(1)}>
-              Back
-            </button>
-            <button type="button" className="btn primary" onClick={() => setStep(3)}>
-              Next: Confirm
-            </button>
-          </div>
-        </section>
-      )}
-
-      {step === 3 && occ && cls && plan && (
-        <section className="yacht-panel demo-enter">
-          <h2>3. Confirm</h2>
-          <div className="summary">
-            <p>
-              <strong>
-                {cls.name} · {occ.dayLabel} {occ.time}
-              </strong>
-            </p>
-            <p>
-              {plan.name} · {formatPrepaid(plan)}
-            </p>
-            <p>
-              Calendar check: {spotsLeft(occ)} of {cls.cap} spots left (event {occ.calendarEventId}).
-            </p>
-            {error && <p className="hint">{error}</p>}
-          </div>
-          <div className="btn-row">
-            <button type="button" className="btn ghost" onClick={() => setStep(2)}>
-              Back
+            <button type="button" className="btn ghost" onClick={() => setPanel('browse')}>
+              Cancel
             </button>
             <button
               type="button"
               className="btn primary"
               onClick={() => {
-                const msg = bookOccurrence(occ.id, plan.id)
-                if (msg) {
-                  setError(msg)
-                  refresh()
-                  return
+                const err = login(authEmail, authPassword)
+                if (err) flash(null, err)
+                else {
+                  setPanel('browse')
+                  flash('Signed in.', null)
                 }
-                setError(null)
-                refresh()
-                setDone(true)
               }}
             >
-              Burn 1 credit &amp; book (demo)
+              Sign in
             </button>
           </div>
         </section>
       )}
+
+      {panel === 'register' && (
+        <section className="yacht-panel demo-enter">
+          <h2>Register a subscription</h2>
+          <p className="hint">Subscriptions are based on how many classes you can attend per week.</p>
+          <label className="field">
+            Name
+            <input value={regName} onChange={(e) => setRegName(e.target.value)} />
+          </label>
+          <label className="field">
+            Email
+            <input value={regEmail} onChange={(e) => setRegEmail(e.target.value)} />
+          </label>
+          <div className="pkg-grid">
+            {FITNESS_PLANS.filter((p) => p.classesPerWeek > 0 || p.id.startsWith('pack')).map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                className={`pkg-card${regPlan === p.id ? ' selected' : ''}`}
+                onClick={() => setRegPlan(p.id)}
+              >
+                <strong>{p.name}</strong>
+                <span className="pkg-price">{formatPrepaid(p)}</span>
+                <p>{p.blurb}</p>
+              </button>
+            ))}
+          </div>
+          <div className="btn-row">
+            <button type="button" className="btn ghost" onClick={() => setPanel('browse')}>
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn primary"
+              onClick={() => {
+                const err = registerMember(regName, regEmail, regPlan)
+                if (err) flash(null, err)
+                else {
+                  setPanel('account')
+                  flash('Registered (password: demo). Accept terms below.', null)
+                }
+              }}
+            >
+              Create membership
+            </button>
+          </div>
+        </section>
+      )}
+
+      {panel === 'account' && user?.role === 'member' && (
+        <section className="yacht-panel demo-enter">
+          <h2>My account</h2>
+          <p>
+            Plan: <strong>{FITNESS_PLANS.find((p) => p.id === user.planId)?.name}</strong>
+            {user.classesPerWeek > 0
+              ? ` · ${user.heldOccurrenceIds.length}/${user.classesPerWeek} slots this week`
+              : ` · ${user.creditsLeft} credits left`}
+          </p>
+          <p className="hint">{site.paymentInstructions}</p>
+          <p>
+            Paid status (admin-managed):{' '}
+            <strong>{user.paid ? 'Paid' : 'Unpaid'}</strong>
+            {user.paymentNote ? ` — ${user.paymentNote}` : ''}
+          </p>
+          <label className="exercise-check">
+            <input
+              type="checkbox"
+              checked={user.showNameToClassmates}
+              onChange={(e) => {
+                setShowNameToClassmates(e.target.checked)
+                refresh()
+              }}
+            />
+            Show my name to other subscribers in the same class (never on public view)
+          </label>
+          {!user.termsAccepted ? (
+            <div className="legal-box">
+              <h3>Terms &amp; waiver</h3>
+              <p>{site.termsText}</p>
+              <p>{site.waiverText}</p>
+              <button
+                type="button"
+                className="btn primary"
+                onClick={() => {
+                  acceptTerms()
+                  flash('Terms accepted (simulated).', null)
+                }}
+              >
+                I agree
+              </button>
+            </div>
+          ) : (
+            <p className="hint">Terms accepted.</p>
+          )}
+          <h3>Change weekly plan</h3>
+          <div className="pkg-grid">
+            {FITNESS_PLANS.filter((p) => p.classesPerWeek > 0).map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                className={`pkg-card${user.planId === p.id ? ' selected' : ''}`}
+                onClick={() => {
+                  const err = setMemberPlan(p.id)
+                  flash(err ? null : `Switched to ${p.name}.`, err)
+                }}
+              >
+                <strong>{p.name}</strong>
+                <p>{p.blurb}</p>
+              </button>
+            ))}
+          </div>
+          <h3>My held classes</h3>
+          <ul className="held-list">
+            {user.heldOccurrenceIds.length === 0 ? <li>None yet — book below.</li> : null}
+            {user.heldOccurrenceIds.map((id) => {
+              const o = occurrences.find((x) => x.id === id)
+              const t = o ? classTypeById(o.classTypeId) : null
+              if (!o || !t) return null
+              return (
+                <li key={id}>
+                  {t.name} · {o.dayLabel} {o.time}{' '}
+                  <button
+                    type="button"
+                    className="btn ghost"
+                    onClick={() => {
+                      setReshuffleFrom(id)
+                      flash('Pick another class below to reshuffle into.', null)
+                    }}
+                  >
+                    Reshuffle
+                  </button>{' '}
+                  <button
+                    type="button"
+                    className="btn ghost"
+                    onClick={() => {
+                      const err = dropMemberBooking(id)
+                      flash(err ? null : 'Dropped.', err)
+                    }}
+                  >
+                    Drop
+                  </button>
+                </li>
+              )
+            })}
+          </ul>
+          <button type="button" className="btn ghost" onClick={() => setPanel('browse')}>
+            Back to timetable
+          </button>
+        </section>
+      )}
+
+      <section className="yacht-panel demo-enter">
+        <h2>Timetable</h2>
+        <p className="hint">{site.scheduleNarrative}</p>
+        <div className="class-type-blurb-row">
+          {classTypes.map((c) => (
+            <article key={c.id} className="class-type-blurb">
+              <h3>{c.name}</h3>
+              <p>{c.longDescription}</p>
+            </article>
+          ))}
+        </div>
+        <div className="class-occ-list">
+          {occurrences.map((o) => {
+            const type = classTypeById(o.classTypeId)
+            if (!type) return null
+            const left = spotsLeft(o)
+            const full = left === 0
+            const fill = Math.min(100, Math.round((o.bookedCount / type.cap) * 100))
+            const focused = focusId === o.id
+            const exercises = sessionExercises(o)
+            const classmates = visibleRosterNames(o, user)
+            const held = user?.heldOccurrenceIds.includes(o.id)
+            return (
+              <div
+                key={o.id}
+                className={`class-occ-wrap${focused ? ' selected' : ''}${full ? ' is-full' : ''}`}
+                onMouseEnter={() => setFocusId(o.id)}
+                onFocus={() => setFocusId(o.id)}
+              >
+                <button
+                  type="button"
+                  className={`class-occ-card${focused ? ' selected' : ''}${full ? ' is-full' : ''}`}
+                  onClick={() => setFocusId(o.id === focusId ? null : o.id)}
+                >
+                  <strong>
+                    {type.name} · {o.time}
+                  </strong>
+                  <span>{o.dayLabel}</span>
+                  <span className="spots-line">
+                    {full
+                      ? 'Full'
+                      : left <= Math.max(2, Math.ceil(type.cap * 0.15))
+                        ? `Almost full · ${left} of ${type.cap} left`
+                        : `${left} of ${type.cap} spots left`}
+                  </span>
+                  <div className={`fill-bar ${full ? 'fill-full' : fill >= 85 ? 'fill-critical' : 'fill-ok'}`}>
+                    <span style={{ width: `${fill}%` }} />
+                  </div>
+                  {held ? <span className="held-chip">You&apos;re booked</span> : null}
+                </button>
+                {focused ? (
+                  <div className="occ-detail">
+                    <p>
+                      <strong>Exercises:</strong>{' '}
+                      {exercises.length ? exercises.map((e) => e.name).join(', ') : 'TBC'}
+                    </p>
+                    {user && classmates.length > 0 ? (
+                      <p>
+                        <strong>Classmates (opted-in names):</strong> {classmates.join(', ')}
+                      </p>
+                    ) : (
+                      <p className="hint">Public view never shows attendee names.</p>
+                    )}
+                    <div className="btn-row">
+                      {!user && !full ? (
+                        <>
+                          <input
+                            placeholder="Guest name"
+                            value={guestName}
+                            onChange={(e) => setGuestName(e.target.value)}
+                            aria-label="Guest name"
+                          />
+                          <input
+                            placeholder="Guest email"
+                            value={guestEmail}
+                            onChange={(e) => setGuestEmail(e.target.value)}
+                            aria-label="Guest email"
+                          />
+                          <button
+                            type="button"
+                            className="btn primary"
+                            onClick={() => {
+                              const err = bookAsGuest(o.id, guestName, guestEmail)
+                              flash(err ? null : 'Guest booked (simulated).', err)
+                            }}
+                          >
+                            Book as guest
+                          </button>
+                        </>
+                      ) : null}
+                      {user?.role === 'member' && !held && !full ? (
+                        reshuffleFrom ? (
+                          <button
+                            type="button"
+                            className="btn primary"
+                            onClick={() => {
+                              const err = reshuffleBooking(reshuffleFrom, o.id)
+                              setReshuffleFrom(null)
+                              flash(err ? null : 'Reshuffled.', err)
+                            }}
+                          >
+                            Move booking here
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="btn primary"
+                            onClick={() => {
+                              const err = bookAsMember(o.id)
+                              flash(err ? null : 'Booked.', err)
+                            }}
+                          >
+                            Book with membership
+                          </button>
+                        )
+                      ) : null}
+                      {held ? (
+                        <button
+                          type="button"
+                          className="btn ghost"
+                          onClick={() => {
+                            const err = dropMemberBooking(o.id)
+                            flash(err ? null : 'Dropped.', err)
+                          }}
+                        >
+                          Drop this class
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            )
+          })}
+        </div>
+        <p className="sync-chip">{sync.calendar}</p>
+        <p className="sync-chip">{sync.firebase}</p>
+        <p className="hint">{site.contactDisplay}</p>
+      </section>
     </div>
   )
 }

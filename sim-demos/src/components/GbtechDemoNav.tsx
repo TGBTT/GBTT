@@ -1,24 +1,62 @@
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import { useDemoPresentation } from '../context/DemoPresentation'
 
-/** Sticky chrome while browsing GBTT fitness demos. */
-export function GbtechDemoNav() {
+function marketingHref(path: string): string {
+  const base = import.meta.env.BASE_URL
+  // /GBTT/sim/ → /GBTT/  or /sim/ → /
+  const root = base.replace(/\/?sim\/?$/, '/') || '/'
+  const clean = path.startsWith('/') ? path.slice(1) : path
+  return `${root}${clean}`
+}
+
+const MARKETING = [
+  { href: '', label: 'Home' },
+  { href: 'classes/', label: 'Classes' },
+  { href: 'locations/', label: 'Locations' },
+  { href: 'apps/', label: 'Apps' },
+  { href: 'contact/', label: 'Contact' },
+  { href: 'future/', label: 'Future' },
+] as const
+
+/** Sticky GBTT chrome — marketing pages + in-sim apps. */
+export function SiteDemoNav() {
   const { showShowcaseChrome } = useDemoPresentation()
+  const { pathname } = useLocation()
   if (!showShowcaseChrome) return null
 
   return (
-    <nav className="gbtech-demo-nav" aria-label="GBTT demo navigation">
-      <div className="gbtech-demo-nav__inner">
-        <a className="gbtech-demo-nav__brand" href={`${import.meta.env.BASE_URL}../`}>
-          <strong>GBTT</strong>
-          <span> · Fitness demos</span>
+    <nav className="site-demo-nav" aria-label="GBTT site">
+      <div className="site-demo-nav__inner">
+        <a className="site-demo-nav__brand" href={marketingHref('')}>
+          <img src={`${import.meta.env.BASE_URL}brand/gbtt-logo.png`} alt="" width={36} height={36} />
+          <span>
+            <strong>GBTT</strong>
+            <span className="site-demo-nav__tag"> · Simulated apps</span>
+          </span>
         </a>
-        <div className="gbtech-demo-nav__links">
-          <Link to="/">All demos</Link>
-          <a href={`${import.meta.env.BASE_URL}../apps/`}>Website apps</a>
-          <a href={`${import.meta.env.BASE_URL}../contact/`}>Contact Tom</a>
+        <div className="site-demo-nav__links">
+          {MARKETING.map((item) => (
+            <a key={item.href || 'home'} href={marketingHref(item.href)}>
+              {item.label}
+            </a>
+          ))}
+          <Link
+            to="/fitness/studioflow"
+            className={pathname.includes('studioflow') ? 'is-active' : undefined}
+          >
+            Book
+          </Link>
+          <Link
+            to="/fitness/classboard"
+            className={pathname.includes('classboard') ? 'is-active' : undefined}
+          >
+            Admin
+          </Link>
         </div>
       </div>
     </nav>
   )
 }
+
+/** @deprecated alias */
+export const GbtechDemoNav = SiteDemoNav

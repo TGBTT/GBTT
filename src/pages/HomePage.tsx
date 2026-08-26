@@ -2,6 +2,13 @@ import { Link } from 'react-router-dom'
 import { SITE } from '../data/siteConfig'
 import { activeVenues } from '../data/locations'
 
+function simHref(path: string): string {
+  const base = import.meta.env.BASE_URL.endsWith('/')
+    ? import.meta.env.BASE_URL
+    : `${import.meta.env.BASE_URL}/`
+  return `${base}sim/${path}`
+}
+
 export default function HomePage() {
   const venue = activeVenues()[0]
 
@@ -20,12 +27,15 @@ export default function HomePage() {
           <h1 className="hero__title visually-hidden">{SITE.name}</h1>
           <p className="hero__lead">{SITE.tagline}</p>
           <div className="hero__cta">
-            <Link className="btn btn--primary" to="/contact">
+            <a className="btn btn--primary" href={simHref('fitness/studioflow/')}>
+              Open booking demo
+            </a>
+            <a className="btn btn--ghost" href={simHref('fitness/classboard/')}>
+              Open admin demo
+            </a>
+            <Link className="btn btn--ghost" to="/contact">
               Contact Tom
             </Link>
-            <a className="btn btn--ghost" href={SITE.facebook} target="_blank" rel="noreferrer">
-              Facebook
-            </a>
           </div>
         </div>
       </section>
@@ -55,10 +65,13 @@ export default function HomePage() {
             </Link>
           </div>
           <div>
-            <h2>Class styles</h2>
-            <p>Sweat, Strong, Mobility, Circuits, and Les Mills BodyBalance.</p>
-            <Link className="text-link" to="/classes">
-              See offerings →
+            <h2>Try the apps</h2>
+            <p>
+              Simulated booking and admin console — localStorage until Firebase is ready. Sticky nav
+              keeps you linked to this site.
+            </p>
+            <Link className="text-link" to="/apps">
+              Apps showcase →
             </Link>
           </div>
         </div>

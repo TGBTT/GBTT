@@ -6,6 +6,7 @@ import Hub from './pages/Hub'
 import StudioFlow from './pages/fitness/StudioFlow'
 import ClassBoard from './pages/fitness/ClassBoard'
 import './styles/demos.css'
+import './styles/gbtt-theme.css'
 
 const basename = import.meta.env.BASE_URL.replace(/\/$/, '') || '/'
 

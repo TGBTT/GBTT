@@ -2,18 +2,18 @@ import { SITE } from '../data/siteConfig'
 
 const demos = [
   {
-    title: 'Studio Flow',
+    title: 'Book & membership',
     path: 'fitness/studioflow/',
-    role: 'Member booking',
+    role: 'Public + member',
     blurb:
-      'Prepaid pack wallet, class caps, almost-full cues, and waitlist — simulated Google Calendar and Firebase writes.',
+      'See how full each class is, book as a guest, or log in for a weekly subscription. Hover/click a session for exercises. Opt in to show your name only to classmates — never on the public view.',
   },
   {
-    title: 'Class Board',
+    title: 'Admin console',
     path: 'fitness/classboard/',
-    role: 'Instructor ops',
+    role: 'Tom + substitutes',
     blurb:
-      'Wall timetable with fill bars, substitute instructor, attendee roster, exercise catalog, and equipment checklist.',
+      'Simulated staff login. Set schedule and caps, mark who has paid, record limitations/risk, edit terms and payment instructions, email subscribers (mock outbox), reminders, substitute trainers, and public site copy — no code deploy needed for content tweaks.',
   },
 ] as const
 
@@ -31,9 +31,9 @@ export default function AppsPage() {
         <p className="eyebrow">Interactive showcase</p>
         <h1>Apps</h1>
         <p className="lede">
-          These fitness demos are the tools that introduced {SITE.shortName} to a digital workflow —
-          member booking and the instructor board. Everything here is simulated until Firebase and
-          live Calendar are wired for Tom’s data model.
+          {SITE.shortName} booking and backend — simulated until Google Firebase and live Calendar are
+          wired. Demo logins use password <code>demo</code>: <code>alex@demo</code> (member),{' '}
+          <code>tom@gbtt</code> (admin), <code>cover@gbtt</code> (substitute).
         </p>
         <ul className="demo-showcase">
           {demos.map((d) => (

@@ -5,33 +5,34 @@ export interface DemoFeatureMeta {
   features: string[]
 }
 
-/** Sales showroom metadata keyed by demo route path. */
 export const DEMO_FEATURES: Record<string, DemoFeatureMeta> = {
   '/fitness/studioflow': {
     role: 'booking',
     features: [
-      'Credit wallet',
-      'Wizard steps',
-      'Class caps',
-      'Almost-full cue',
-      'Waitlist join',
-      'Prepaid plans',
-      'Sync chips',
-      'Peak day data',
+      'Public fill bars',
+      'Guest book',
+      'Member login',
+      'Weekly subscription',
+      'Reshuffle slots',
+      'Exercise preview',
+      'Name privacy toggle',
+      'Terms acknowledge',
       'Demo mode',
     ],
   },
   '/fitness/classboard': {
     role: 'ops',
     features: [
+      'Simulated staff login',
+      'Schedule editor',
       'Fill bars',
-      'Fill urgency',
-      'Substitute instructor',
-      'Attendee roster',
-      'Class cap',
-      'Exercise catalog',
-      'Equipment checklist',
-      'Sync chips',
+      'Payments',
+      'Risk notes',
+      'Legal copy',
+      'Subscriber notify',
+      'Reminders',
+      'Substitute team',
+      'Site content CMS',
       'Demo mode',
     ],
   },
