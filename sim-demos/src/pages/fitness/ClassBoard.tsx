@@ -1,15 +1,18 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { DemoOutsideShell } from '../../components/DemoChrome'
+import { WeekSessionCalendar } from '../../components/WeekSessionCalendar'
 import {
   DEMO_CREDENTIALS,
+  WEEKDAYS,
   addExercise,
   addReminder,
   classTypeById,
+  confirmSubscriptionChange,
+  deleteOccurrence,
   getClassTypes,
   getEquipmentChecked,
   getExercises,
-  getOccurrences,
   getOutbox,
   getReminders,
   getSessionRole,
@@ -19,6 +22,9 @@ import {
   getUsers,
   login,
   logout,
+  occurrenceById,
+  occurrencesByWeekday,
+  planById,
   resetSimStore,
   sendSubscriberEmail,
   setClassCap,
@@ -31,9 +37,11 @@ import {
   toggleExercise,
   toggleReminder,
   updateClassType,
+  updateOccurrenceFields,
   updateSiteContent,
   updateTeamMember,
   upsertOccurrence,
+  type Weekday,
 } from '../../shared/fitnessStudio'
 import { ADMIN_ROADMAP } from '../../shared/capabilityRoadmap'
 
@@ -69,7 +77,7 @@ const ALL_TABS: { id: Tab; label: string; adminOnly?: boolean }[] = [
  * Admin console — simulated login; substitute gets restricted tabs.
  */
 export default function ClassBoard() {
-  const [, setTick] = useState(0)
+  const [tick, setTick] = useState(0)
   const refresh = () => setTick((n) => n + 1)
 
   const role = getSessionRole()
@@ -81,15 +89,16 @@ export default function ClassBoard() {
   const [loginError, setLoginError] = useState<string | null>(null)
   const [tab, setTab] = useState<Tab>('schedule')
   const [selectedTypeId, setSelectedTypeId] = useState(getClassTypes()[0]?.id ?? 'sweat')
+  const [selectedOccId, setSelectedOccId] = useState<string | null>(null)
   const [newExercise, setNewExercise] = useState('')
   const [mailSubject, setMailSubject] = useState('GBTT timetable update')
   const [mailBody, setMailBody] = useState('Hi team — here’s this week’s schedule.')
   const [remTitle, setRemTitle] = useState('')
-  const [newOccDay, setNewOccDay] = useState('Mon')
+  const [newOccDay, setNewOccDay] = useState<Weekday>('Mon')
   const [newOccTime, setNewOccTime] = useState('07:00')
 
   const classes = getClassTypes()
-  const occurrences = getOccurrences()
+  const byDay = useMemo(() => occurrencesByWeekday(), [tick, selectedOccId, tab])
   const exercises = getExercises()
   const users = getUsers().filter((u) => u.role === 'member')
   const site = getSiteContent()
@@ -97,9 +106,10 @@ export default function ClassBoard() {
   const reminders = getReminders()
   const outbox = getOutbox()
   const equipment = getEquipmentChecked()
-  const sync = useMemo(() => syncLabels(), [tab, selectedTypeId])
+  const sync = useMemo(() => syncLabels(), [tab, selectedTypeId, tick])
   const selected = classTypeById(selectedTypeId)
-  const typeOccs = occurrences.filter((o) => o.classTypeId === selectedTypeId)
+  const selectedOcc = selectedOccId ? occurrenceById(selectedOccId) : undefined
+  const selectedOccType = selectedOcc ? classTypeById(selectedOcc.classTypeId) : undefined
 
   const tabs = ALL_TABS.filter((t) => !t.adminOnly || role === 'admin')
 
@@ -216,54 +226,95 @@ export default function ClassBoard() {
         ))}
       </div>
 
-      {tab === 'schedule' && selected && (
-        <div className="classboard-deck demo-enter">
-          <aside className="classboard-schedule">
-            <h2>Fill &amp; schedule</h2>
-            <div className="class-type-tabs">
-              {classes.map((c) => (
-                <button
-                  key={c.id}
-                  type="button"
-                  className={`chip${selectedTypeId === c.id ? ' selected' : ''}`}
-                  onClick={() => setSelectedTypeId(c.id)}
-                >
-                  {c.name}
-                </button>
-              ))}
-            </div>
-            {typeOccs.map((o) => {
-              const type = classTypeById(o.classTypeId)
-              if (!type) return null
-              const left = spotsLeft(o)
-              const fill = Math.min(100, Math.round((o.bookedCount / type.cap) * 100))
-              const fillLevel =
-                left === 0 || fill >= 100
-                  ? 'fill-full'
-                  : fill >= 85
-                    ? 'fill-critical'
-                    : fill >= 60
-                      ? 'fill-warn'
-                      : 'fill-ok'
-              return (
-                <article key={o.id} className="class-fill-card">
-                  <header>
-                    <strong>
-                      {o.time} · {o.dayLabel}
-                    </strong>
-                    <span>
-                      {o.bookedCount}/{type.cap}
-                    </span>
-                  </header>
-                  <div className={`fill-bar ${fillLevel}`} aria-hidden="true">
-                    <span style={{ width: `${fill}%` }} />
-                  </div>
+      {tab === 'schedule' && (
+        <div className="classboard-deck demo-enter schedule-cal-layout">
+          <div className="schedule-cal-main">
+            <h2>Week calendar</h2>
+            <p className="hint">
+              Same Mon–Fri grid as member booking. Select a session badge to edit time, day, class, or
+              instructor{role === 'admin' ? ' — or add a new session below' : ''}.
+            </p>
+            <WeekSessionCalendar
+              byDay={byDay}
+              selectedId={selectedOccId}
+              onSelect={(id) => {
+                setSelectedOccId(id)
+                const o = occurrenceById(id)
+                if (o) setSelectedTypeId(o.classTypeId)
+              }}
+              mode="admin"
+            />
+            {selectedOcc && selectedOccType ? (
+              <div className="occ-detail cal-detail">
+                <h3>
+                  Edit · {selectedOccType.name} · {selectedOcc.dayLabel} {selectedOcc.time}
+                </h3>
+                <p>
+                  Fill {selectedOcc.bookedCount}/{selectedOccType.cap}
+                  {spotsLeft(selectedOcc) === 0 ? ' · Full' : ` · ${spotsLeft(selectedOcc)} left`}
+                </p>
+                <p className="roster-line">
+                  Roster:{' '}
+                  {selectedOcc.roster.length
+                    ? selectedOcc.roster
+                        .map((r) => `${r.displayName}${r.kind === 'guest' ? ' *' : ''}`)
+                        .join(', ')
+                    : 'None yet'}
+                </p>
+                <div className="admin-edit-grid">
+                  <label className="field">
+                    Day
+                    <select
+                      value={selectedOcc.dayLabel}
+                      disabled={role !== 'admin'}
+                      onChange={(e) => {
+                        updateOccurrenceFields(selectedOcc.id, { dayLabel: e.target.value })
+                        refresh()
+                      }}
+                    >
+                      {WEEKDAYS.map((d) => (
+                        <option key={d} value={d}>
+                          {d}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="field">
+                    Time
+                    <input
+                      type="time"
+                      value={selectedOcc.time}
+                      disabled={role !== 'admin'}
+                      onChange={(e) => {
+                        updateOccurrenceFields(selectedOcc.id, { time: e.target.value })
+                        refresh()
+                      }}
+                    />
+                  </label>
+                  <label className="field">
+                    Class
+                    <select
+                      value={selectedOcc.classTypeId}
+                      disabled={role !== 'admin'}
+                      onChange={(e) => {
+                        updateOccurrenceFields(selectedOcc.id, { classTypeId: e.target.value })
+                        setSelectedTypeId(e.target.value)
+                        refresh()
+                      }}
+                    >
+                      {classes.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                   <label className="field">
                     Instructor / cover
                     <select
-                      value={o.instructorId}
+                      value={selectedOcc.instructorId}
                       onChange={(e) => {
-                        setOccurrenceInstructor(o.id, e.target.value)
+                        setOccurrenceInstructor(selectedOcc.id, e.target.value)
                         refresh()
                       }}
                     >
@@ -274,159 +325,215 @@ export default function ClassBoard() {
                       ))}
                     </select>
                   </label>
-                  <p className="roster-line">
-                    Roster:{' '}
-                    {o.roster.length
-                      ? o.roster.map((r) => `${r.displayName}${r.kind === 'guest' ? ' *' : ''}`).join(', ')
-                      : 'None yet'}
-                  </p>
-                </article>
-              )
-            })}
-            {role === 'admin' ? (
-              <div className="add-occ-row">
-                <h3>Add occurrence</h3>
-                <input value={newOccDay} onChange={(e) => setNewOccDay(e.target.value)} aria-label="Day" />
-                <input value={newOccTime} onChange={(e) => setNewOccTime(e.target.value)} aria-label="Time" />
-                <button
-                  type="button"
-                  className="btn primary"
-                  onClick={() => {
-                    upsertOccurrence({
-                      classTypeId: selectedTypeId,
-                      dayLabel: newOccDay,
-                      time: newOccTime,
-                    })
-                    refresh()
-                  }}
-                >
-                  Add to schedule
-                </button>
-              </div>
-            ) : null}
-          </aside>
-          <aside className="classboard-side">
-            <section>
-              <h2>Class type</h2>
-              {role === 'admin' ? (
-                <>
-                  <label className="field">
-                    Name
-                    <input
-                      value={selected.name}
-                      onChange={(e) => {
-                        updateClassType(selected.id, { name: e.target.value })
-                        refresh()
-                      }}
-                    />
-                  </label>
-                  <label className="field">
-                    Short blurb
-                    <input
-                      value={selected.blurb}
-                      onChange={(e) => {
-                        updateClassType(selected.id, { blurb: e.target.value })
-                        refresh()
-                      }}
-                    />
-                  </label>
-                  <label className="field">
-                    Public description
-                    <textarea
-                      rows={4}
-                      value={selected.longDescription}
-                      onChange={(e) => {
-                        updateClassType(selected.id, { longDescription: e.target.value })
-                        refresh()
-                      }}
-                    />
-                  </label>
-                </>
-              ) : (
-                <p>{selected.longDescription}</p>
-              )}
-              <label className="field">
-                Cap
-                <input
-                  type="number"
-                  min={4}
-                  max={27}
-                  value={selected.cap}
-                  disabled={role !== 'admin'}
-                  onChange={(e) => {
-                    setClassCap(selected.id, Number(e.target.value))
-                    refresh()
-                  }}
-                />
-              </label>
-            </section>
-            <section>
-              <h2>Default exercises</h2>
-              <div className="exercise-checks">
-                {exercises.map((ex) => {
-                  const on = selected.exerciseIds.includes(ex.id)
-                  return (
-                    <label key={ex.id} className={`exercise-check${on ? ' on' : ''}`}>
-                      <input
-                        type="checkbox"
-                        checked={on}
-                        disabled={role !== 'admin' && role !== 'substitute'}
-                        onChange={() => {
-                          toggleExercise(selected.id, ex.id)
-                          refresh()
-                        }}
-                      />
-                      {ex.name}
-                    </label>
-                  )
-                })}
-              </div>
-              {role === 'admin' ? (
-                <div className="add-exercise-row">
-                  <input
-                    value={newExercise}
-                    onChange={(e) => setNewExercise(e.target.value)}
-                    placeholder="New exercise"
-                  />
+                </div>
+                {role === 'admin' ? (
                   <button
                     type="button"
                     className="btn ghost"
                     onClick={() => {
-                      const added = addExercise(newExercise)
-                      if (added) {
-                        toggleExercise(selected.id, added.id)
-                        setNewExercise('')
+                      if (confirm('Remove this session from the week?')) {
+                        deleteOccurrence(selectedOcc.id)
+                        setSelectedOccId(null)
                         refresh()
                       }
                     }}
                   >
-                    + Add
+                    Delete session
                   </button>
-                </div>
-              ) : null}
-            </section>
-            <section className="checklist-panel">
-              <h2>Equipment checklist</h2>
-              {EQUIPMENT_ITEMS.map((item) => (
-                <label key={item.id} className={`exercise-check${equipment.includes(item.id) ? ' on' : ''}`}>
+                ) : null}
+              </div>
+            ) : null}
+            {role === 'admin' ? (
+              <div className="add-occ-row">
+                <h3>Add session</h3>
+                <label className="field">
+                  Class
+                  <select value={selectedTypeId} onChange={(e) => setSelectedTypeId(e.target.value)}>
+                    {classes.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field">
+                  Day
+                  <select
+                    value={newOccDay}
+                    onChange={(e) => setNewOccDay(e.target.value as Weekday)}
+                  >
+                    {WEEKDAYS.map((d) => (
+                      <option key={d} value={d}>
+                        {d}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field">
+                  Time
                   <input
-                    type="checkbox"
-                    checked={equipment.includes(item.id)}
-                    onChange={() => {
-                      const next = equipment.includes(item.id)
-                        ? equipment.filter((x) => x !== item.id)
-                        : [...equipment, item.id]
-                      setEquipmentChecked(next)
+                    type="time"
+                    value={newOccTime}
+                    onChange={(e) => setNewOccTime(e.target.value)}
+                  />
+                </label>
+                <button
+                  type="button"
+                  className="btn primary"
+                  onClick={() => {
+                    const id = upsertOccurrence({
+                      classTypeId: selectedTypeId,
+                      dayLabel: newOccDay,
+                      time: newOccTime,
+                    })
+                    setSelectedOccId(id)
+                    refresh()
+                  }}
+                >
+                  Add to calendar
+                </button>
+              </div>
+            ) : null}
+          </div>
+
+          {selected && (
+            <aside className="classboard-side">
+              <section>
+                <h2>Class type defaults</h2>
+                <div className="class-type-tabs">
+                  {classes.map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      className={`chip${selectedTypeId === c.id ? ' selected' : ''}`}
+                      onClick={() => setSelectedTypeId(c.id)}
+                    >
+                      {c.name}
+                    </button>
+                  ))}
+                </div>
+                {role === 'admin' ? (
+                  <>
+                    <label className="field">
+                      Name
+                      <input
+                        value={selected.name}
+                        onChange={(e) => {
+                          updateClassType(selected.id, { name: e.target.value })
+                          refresh()
+                        }}
+                      />
+                    </label>
+                    <label className="field">
+                      Short blurb
+                      <input
+                        value={selected.blurb}
+                        onChange={(e) => {
+                          updateClassType(selected.id, { blurb: e.target.value })
+                          refresh()
+                        }}
+                      />
+                    </label>
+                    <label className="field">
+                      Public description
+                      <textarea
+                        rows={4}
+                        value={selected.longDescription}
+                        onChange={(e) => {
+                          updateClassType(selected.id, { longDescription: e.target.value })
+                          refresh()
+                        }}
+                      />
+                    </label>
+                  </>
+                ) : (
+                  <p>{selected.longDescription}</p>
+                )}
+                <label className="field">
+                  Cap
+                  <input
+                    type="number"
+                    min={4}
+                    max={27}
+                    value={selected.cap}
+                    disabled={role !== 'admin'}
+                    onChange={(e) => {
+                      setClassCap(selected.id, Number(e.target.value))
                       refresh()
                     }}
                   />
-                  {item.label}
                 </label>
-              ))}
-            </section>
-            <p className="sync-chip">{sync.calendar}</p>
-            <p className="sync-chip">{sync.firebase}</p>
-          </aside>
+              </section>
+              <section>
+                <h2>Default exercises</h2>
+                <div className="exercise-checks">
+                  {exercises.map((ex) => {
+                    const on = selected.exerciseIds.includes(ex.id)
+                    return (
+                      <label key={ex.id} className={`exercise-check${on ? ' on' : ''}`}>
+                        <input
+                          type="checkbox"
+                          checked={on}
+                          onChange={() => {
+                            toggleExercise(selected.id, ex.id)
+                            refresh()
+                          }}
+                        />
+                        {ex.name}
+                      </label>
+                    )
+                  })}
+                </div>
+                {role === 'admin' ? (
+                  <div className="add-exercise-row">
+                    <input
+                      value={newExercise}
+                      onChange={(e) => setNewExercise(e.target.value)}
+                      placeholder="New exercise"
+                    />
+                    <button
+                      type="button"
+                      className="btn ghost"
+                      onClick={() => {
+                        const added = addExercise(newExercise)
+                        if (added) {
+                          toggleExercise(selected.id, added.id)
+                          setNewExercise('')
+                          refresh()
+                        }
+                      }}
+                    >
+                      + Add
+                    </button>
+                  </div>
+                ) : null}
+              </section>
+              <section className="checklist-panel">
+                <h2>Equipment checklist</h2>
+                {EQUIPMENT_ITEMS.map((item) => (
+                  <label
+                    key={item.id}
+                    className={`exercise-check${equipment.includes(item.id) ? ' on' : ''}`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={equipment.includes(item.id)}
+                      onChange={() => {
+                        const next = equipment.includes(item.id)
+                          ? equipment.filter((x) => x !== item.id)
+                          : [...equipment, item.id]
+                        setEquipmentChecked(next)
+                        refresh()
+                      }}
+                    />
+                    {item.label}
+                  </label>
+                ))}
+              </section>
+              <p className="sync-chip">{sync.calendar}</p>
+              <p className="sync-chip">{sync.firebase}</p>
+            </aside>
+          )}
         </div>
       )}
 
@@ -436,7 +543,7 @@ export default function ClassBoard() {
           <ul className="admin-member-list">
             {users.map((u) => (
               <li key={u.id}>
-                <strong>{u.name}</strong> · {u.email} · {u.planId}
+                <strong>{u.name}</strong> · {u.email} · {planById(u.planId)?.name ?? u.planId}
                 <br />
                 <label className="exercise-check">
                   <input
@@ -455,6 +562,33 @@ export default function ClassBoard() {
                   Held: {u.heldOccurrenceIds.length}
                   {u.classesPerWeek ? ` / ${u.classesPerWeek} per week` : ` · credits ${u.creditsLeft}`}
                 </p>
+                {u.pendingPlanId && role === 'admin' ? (
+                  <div className="btn-row">
+                    <p className="form-success">
+                      Pending change → {planById(u.pendingPlanId)?.name}
+                    </p>
+                    <button
+                      type="button"
+                      className="btn primary"
+                      onClick={() => {
+                        confirmSubscriptionChange(u.id, true)
+                        refresh()
+                      }}
+                    >
+                      Confirm payment &amp; apply
+                    </button>
+                    <button
+                      type="button"
+                      className="btn ghost"
+                      onClick={() => {
+                        confirmSubscriptionChange(u.id, false)
+                        refresh()
+                      }}
+                    >
+                      Decline
+                    </button>
+                  </div>
+                ) : null}
               </li>
             ))}
           </ul>

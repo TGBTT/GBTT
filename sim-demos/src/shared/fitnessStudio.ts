@@ -67,6 +67,8 @@ export interface SimUser {
   limitations: string
   riskNotes: string
   termsAccepted: boolean
+  /** Subscription change awaiting Tom’s payment confirmation. */
+  pendingPlanId?: PlanId | null
 }
 
 export interface ReminderItem {
@@ -102,7 +104,9 @@ export interface TeamMember {
 }
 
 export const FITNESS_VENUE = 'Rec Park Centre, Golden Bay'
-export const STORAGE_KEY = 'gbtt-sim-v1'
+export const STORAGE_KEY = 'gbtt-sim-v2'
+export const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'] as const
+export type Weekday = (typeof WEEKDAYS)[number]
 
 export const FITNESS_PLANS: FitnessPlan[] = [
   {
@@ -238,55 +242,103 @@ function seedRoster(names: string[]): RosterEntry[] {
 
 const DEFAULT_OCCURRENCES: ClassOccurrence[] = [
   {
-    id: 'occ-strong-am',
+    id: 'occ-mon-strong',
     classTypeId: 'strong',
-    dayLabel: 'Thu',
+    dayLabel: 'Mon',
     time: '06:30',
     venueId: 'rec-park-centre',
     exerciseIds: [],
-    bookedCount: 14,
-    roster: seedRoster(['Aroha K.', 'Ben T.', 'Cara M.', 'Dan P.', 'Eli R.']),
-    calendarEventId: 'cal-strong-0630',
+    bookedCount: 12,
+    roster: seedRoster(['Aroha K.', 'Ben T.']),
+    calendarEventId: 'cal-mon-strong',
     instructorId: 'tom',
   },
   {
-    id: 'occ-sweat-noon',
+    id: 'occ-mon-sweat',
+    classTypeId: 'sweat',
+    dayLabel: 'Mon',
+    time: '17:30',
+    venueId: 'rec-park-centre',
+    exerciseIds: [],
+    bookedCount: 10,
+    roster: seedRoster(['Cara M.']),
+    calendarEventId: 'cal-mon-sweat',
+    instructorId: 'tom',
+  },
+  {
+    id: 'occ-tue-circuits',
+    classTypeId: 'circuits',
+    dayLabel: 'Tue',
+    time: '06:30',
+    venueId: 'rec-park-centre',
+    exerciseIds: [],
+    bookedCount: 9,
+    roster: seedRoster(['Dan P.']),
+    calendarEventId: 'cal-tue-circuits',
+    instructorId: 'tom',
+  },
+  {
+    id: 'occ-tue-mobility',
+    classTypeId: 'mobility',
+    dayLabel: 'Tue',
+    time: '17:30',
+    venueId: 'rec-park-centre',
+    exerciseIds: [],
+    bookedCount: 7,
+    roster: seedRoster(['Eli R.', 'Jo B.']),
+    calendarEventId: 'cal-tue-mobility',
+    instructorId: 'priya',
+  },
+  {
+    id: 'occ-wed-strong',
+    classTypeId: 'strong',
+    dayLabel: 'Wed',
+    time: '06:30',
+    venueId: 'rec-park-centre',
+    exerciseIds: [],
+    bookedCount: 11,
+    roster: seedRoster(['Fran S.']),
+    calendarEventId: 'cal-wed-strong',
+    instructorId: 'tom',
+  },
+  {
+    id: 'occ-wed-bodybalance',
+    classTypeId: 'bodybalance',
+    dayLabel: 'Wed',
+    time: '18:45',
+    venueId: 'rec-park-centre',
+    exerciseIds: [],
+    bookedCount: 13,
+    roster: seedRoster(['Gus W.', 'Hana L.']),
+    calendarEventId: 'cal-wed-bodybalance',
+    instructorId: 'jess',
+  },
+  {
+    id: 'occ-thu-sweat',
     classTypeId: 'sweat',
     dayLabel: 'Thu',
     time: '12:10',
     venueId: 'rec-park-centre',
     exerciseIds: [],
     bookedCount: 16,
-    roster: seedRoster(['Fran S.', 'Gus W.', 'Hana L.', 'Ivy N.']),
-    calendarEventId: 'cal-sweat-1210',
+    roster: seedRoster(['Ivy N.', 'Kai H.']),
+    calendarEventId: 'cal-thu-sweat',
     instructorId: 'tom',
   },
   {
-    id: 'occ-mob-pm',
-    classTypeId: 'mobility',
+    id: 'occ-thu-strong',
+    classTypeId: 'strong',
     dayLabel: 'Thu',
     time: '17:30',
     venueId: 'rec-park-centre',
     exerciseIds: [],
     bookedCount: 8,
-    roster: seedRoster(['Jo B.', 'Kai H.']),
-    calendarEventId: 'cal-mob-1730',
-    instructorId: 'priya',
+    roster: seedRoster(['Lea C.']),
+    calendarEventId: 'cal-thu-strong',
+    instructorId: 'tom',
   },
   {
-    id: 'occ-balance-eve',
-    classTypeId: 'bodybalance',
-    dayLabel: 'Thu',
-    time: '18:45',
-    venueId: 'rec-park-centre',
-    exerciseIds: [],
-    bookedCount: 14,
-    roster: seedRoster(['Lea C.', 'Mo T.', 'Nia V.']),
-    calendarEventId: 'cal-bodybalance-1845',
-    instructorId: 'jess',
-  },
-  {
-    id: 'occ-circuits-fri',
+    id: 'occ-fri-circuits',
     classTypeId: 'circuits',
     dayLabel: 'Fri',
     time: '06:30',
@@ -294,19 +346,19 @@ const DEFAULT_OCCURRENCES: ClassOccurrence[] = [
     exerciseIds: [],
     bookedCount: 11,
     roster: seedRoster(['Owen D.', 'Pip S.']),
-    calendarEventId: 'cal-circuits-fri-0630',
+    calendarEventId: 'cal-fri-circuits',
     instructorId: 'tom',
   },
   {
-    id: 'occ-sweat-sat',
-    classTypeId: 'sweat',
-    dayLabel: 'Sat',
-    time: '09:00',
+    id: 'occ-fri-mobility',
+    classTypeId: 'mobility',
+    dayLabel: 'Fri',
+    time: '17:00',
     venueId: 'rec-park-centre',
     exerciseIds: [],
-    bookedCount: 9,
-    roster: seedRoster(['Quinn A.', 'Rae J.']),
-    calendarEventId: 'cal-sweat-sat-0900',
+    bookedCount: 6,
+    roster: seedRoster(['Quinn A.']),
+    calendarEventId: 'cal-fri-mobility',
     instructorId: 'cover',
   },
 ]
@@ -321,13 +373,14 @@ const DEFAULT_USERS: SimUser[] = [
     planId: 'weekly2',
     creditsLeft: 0,
     classesPerWeek: 2,
-    heldOccurrenceIds: ['occ-strong-am'],
+    heldOccurrenceIds: ['occ-mon-strong', 'occ-wed-bodybalance'],
     showNameToClassmates: true,
     paid: true,
     paymentNote: '',
     limitations: 'Sensitive left knee — avoid deep lunges if sore.',
     riskNotes: '',
     termsAccepted: true,
+    pendingPlanId: null,
   },
   {
     id: 'u-tom',
@@ -642,12 +695,102 @@ export function setMemberPlan(planId: PlanId): string | null {
   if (!plan) return 'Unknown plan.'
   u.planId = planId
   u.classesPerWeek = plan.classesPerWeek
+  u.pendingPlanId = null
   if (plan.credits > 0) u.creditsLeft = plan.credits
   if (plan.classesPerWeek > 0 && u.heldOccurrenceIds.length > plan.classesPerWeek) {
     u.heldOccurrenceIds = u.heldOccurrenceIds.slice(0, plan.classesPerWeek)
   }
   persist()
   return null
+}
+
+/** Request a subscription change — notifies Tom; does not apply until admin confirms. */
+export function requestSubscriptionChange(planId: PlanId): string | null {
+  const u = getSessionUser()
+  if (!u || u.role !== 'member') return 'Log in as a member first.'
+  const plan = planById(planId)
+  if (!plan) return 'Unknown plan.'
+  if (planId === u.planId && !u.pendingPlanId) return 'You are already on that plan.'
+  u.pendingPlanId = planId
+  const from = planById(u.planId)?.name ?? u.planId
+  store.outbox = [
+    {
+      id: `mail-${Date.now()}`,
+      subject: `Subscription change request — ${u.name}`,
+      body: `${u.name} (${u.email}) requested a change from ${from} to ${plan.name}. Confirm payment logging in Trainer admin → Members.`,
+      sentAt: new Date().toLocaleString('en-NZ'),
+      recipientCount: 1,
+    },
+    ...store.outbox,
+  ]
+  store.reminders = [
+    {
+      id: `rem-pay-${Date.now()}`,
+      title: `Confirm payment: ${u.name} → ${plan.name}`,
+      dueLabel: 'Today',
+      done: false,
+      kind: 'ops',
+    },
+    ...store.reminders,
+  ]
+  persist()
+  return null
+}
+
+export function confirmSubscriptionChange(userId: string, approve: boolean): string | null {
+  const u = userById(userId)
+  if (!u?.pendingPlanId) return 'No pending change.'
+  if (!approve) {
+    u.pendingPlanId = null
+    persist()
+    return null
+  }
+  const plan = planById(u.pendingPlanId)
+  if (!plan) return 'Unknown pending plan.'
+  u.planId = plan.id
+  u.classesPerWeek = plan.classesPerWeek
+  if (plan.credits > 0) u.creditsLeft = plan.credits
+  if (plan.classesPerWeek > 0 && u.heldOccurrenceIds.length > plan.classesPerWeek) {
+    u.heldOccurrenceIds = u.heldOccurrenceIds.slice(0, plan.classesPerWeek)
+  }
+  u.pendingPlanId = null
+  u.paid = true
+  u.paymentNote = `Plan confirmed · ${plan.name}`
+  persist()
+  return null
+}
+
+export function occurrencesByWeekday(): Record<Weekday, ClassOccurrence[]> {
+  const map = Object.fromEntries(WEEKDAYS.map((d) => [d, [] as ClassOccurrence[]])) as Record<
+    Weekday,
+    ClassOccurrence[]
+  >
+  for (const o of store.occurrences) {
+    const day = o.dayLabel as Weekday
+    if (map[day]) map[day].push(o)
+  }
+  for (const d of WEEKDAYS) {
+    map[d].sort((a, b) => a.time.localeCompare(b.time))
+  }
+  return map
+}
+
+export function deleteOccurrence(id: string): void {
+  store.occurrences = store.occurrences.filter((o) => o.id !== id)
+  for (const u of store.users) {
+    u.heldOccurrenceIds = u.heldOccurrenceIds.filter((x) => x !== id)
+  }
+  persist()
+}
+
+export function updateOccurrenceFields(
+  id: string,
+  patch: Partial<Pick<ClassOccurrence, 'dayLabel' | 'time' | 'classTypeId' | 'instructorId'>>,
+): void {
+  const occ = occurrenceById(id)
+  if (!occ) return
+  Object.assign(occ, patch)
+  persist()
 }
 
 export function bookAsGuest(
