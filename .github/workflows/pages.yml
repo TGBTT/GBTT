@@ -1,0 +1,76 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install marketing deps
+        run: npm ci
+
+      - name: Generate icons
+        run: npm run icons
+
+      - name: Build marketing site
+        env:
+          VITE_BASE: /GBTT/
+        run: npm run build
+
+      - name: Install sim-demos deps
+        working-directory: sim-demos
+        run: npm ci
+
+      - name: Build sim-demos
+        working-directory: sim-demos
+        env:
+          VITE_SIM_BASE: /GBTT/sim/
+        run: npm run build
+
+      - name: Assemble site
+        run: |
+          mkdir -p _site
+          cp -R dist/* _site/
+          mkdir -p _site/sim
+          cp -R sim-demos/dist/* _site/sim/
+          mkdir -p _site/sim/fitness/studioflow _site/sim/fitness/classboard
+          cp _site/sim/index.html _site/sim/fitness/studioflow/index.html
+          cp _site/sim/index.html _site/sim/fitness/classboard/index.html
+          for path in classes locations apps contact future; do
+            mkdir -p "_site/$path"
+            cp _site/index.html "_site/$path/index.html"
+          done
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
