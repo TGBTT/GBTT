@@ -34,8 +34,14 @@ jobs:
       - name: Generate icons
         run: npm run icons
 
-      - name: Process class images
-        run: npm run class-images
+      - name: Ensure class images
+        run: |
+          if [ -f public/images/classes/sweat/card-480.jpg ]; then
+            echo "Using committed class images from public/images/classes"
+          else
+            npm run class-images
+          fi
+          test -f public/images/classes/sweat/card-480.jpg
 
       - name: Build marketing site
         env:

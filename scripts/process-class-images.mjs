@@ -42,7 +42,13 @@ function ensureDir(dir) {
 
 function findSource(id) {
   const names = [`class-${id}.png`, `${id}.png`]
-  for (const base of [LOCAL_ASSETS, CURSOR_ASSETS, path.join(IMG_CLASSES, id)]) {
+  const bases = [
+    LOCAL_ASSETS,
+    CURSOR_ASSETS,
+    path.join(IMG_CLASSES, id),
+    path.join(PUBLIC_CLASSES, id),
+  ]
+  for (const base of bases) {
     for (const name of names) {
       const p = path.join(base, name)
       if (fs.existsSync(p)) return p
@@ -100,6 +106,14 @@ async function main() {
     if (await processClass(id)) ok++
   }
   console.log(`done ${ok}/${CLASS_IDS.length} classes`)
+  if (ok === 0) {
+    const fallback = path.join(PUBLIC_CLASSES, 'sweat', 'card-480.jpg')
+    if (fs.existsSync(fallback)) {
+      console.log('No sources processed — committed public/images/classes will be used')
+      return
+    }
+    process.exitCode = 1
+  }
 }
 
 main().catch((err) => {
