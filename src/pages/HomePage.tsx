@@ -74,15 +74,9 @@ export default function HomePage() {
 
       <section className="section section--band builtbytom" id="builtbytom" aria-labelledby="builtbytom-heading">
         <div className="section__inner builtbytom__inner">
-          <p className="eyebrow">Member catchphrase</p>
           <h2 id="builtbytom-heading" className="builtbytom__mark">
             {SITE.hashtag}
           </h2>
-          <p className="lede lede--on-band builtbytom__lede">
-            Regulars coined it as a tongue-in-cheek nod to the fit bodies that show up after sticking
-            with Tom&apos;s sessions. Wear it as a badge of work done — not a brand slogan we invented
-            in a meeting.
-          </p>
         </div>
       </section>
 
