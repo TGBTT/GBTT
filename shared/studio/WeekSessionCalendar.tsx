@@ -1,4 +1,4 @@
-import { Fragment, useMemo } from 'react'
+import { useMemo } from 'react'
 import {
   WEEKDAYS,
   classTypeById,
@@ -87,44 +87,53 @@ export function WeekSessionCalendar({
   }, [byDay])
 
   return (
-    <div className={`week-cal ${className ?? ''}`} role="grid" aria-label="Weekly class timetable">
-      <div className="week-cal__grid">
-        <div className="week-cal__corner" aria-hidden="true" />
-        {WEEKDAYS.map((d) => (
-          <div key={d} className="week-cal__day-label" role="columnheader">
-            {d}
-          </div>
-        ))}
-
-        {times.map((time) => (
-          <Fragment key={time}>
-            <div className="week-cal__time-label" role="rowheader">
-              {formatTimetableTime(time)}
-            </div>
-            {WEEKDAYS.map((day) => {
-              const occ = lookup.get(`${day}|${time}`)
-              return (
-                <div
-                  key={`${day}-${time}`}
-                  className={`week-cal__cell${occ ? ' has-session' : ''}`}
-                  role="gridcell"
-                  aria-label={occ ? `${day} ${formatTimetableTime(time)}` : undefined}
-                >
-                  {occ ? (
-                    <SessionBadge
-                      occ={occ}
-                      mode={mode}
-                      selected={selectedId === occ.id}
-                      held={heldIds.includes(occ.id)}
-                      onSelect={onSelect}
-                    />
-                  ) : null}
-                </div>
-              )
-            })}
-          </Fragment>
-        ))}
-      </div>
+    <div className={`week-cal ${className ?? ''}`}>
+      <table className="week-cal__table" aria-label="Weekly class timetable">
+        <colgroup>
+          <col className="week-cal__col-time" />
+          {WEEKDAYS.map((d) => (
+            <col key={d} className="week-cal__col-day" />
+          ))}
+        </colgroup>
+        <thead>
+          <tr>
+            <th scope="col" className="week-cal__corner" aria-hidden="true" />
+            {WEEKDAYS.map((d) => (
+              <th key={d} scope="col" className="week-cal__day-label">
+                {d}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {times.map((time) => (
+            <tr key={time}>
+              <th scope="row" className="week-cal__time-label">
+                {formatTimetableTime(time)}
+              </th>
+              {WEEKDAYS.map((day) => {
+                const occ = lookup.get(`${day}|${time}`)
+                return (
+                  <td
+                    key={`${day}-${time}`}
+                    className={`week-cal__cell${occ ? ' has-session' : ''}`}
+                  >
+                    {occ ? (
+                      <SessionBadge
+                        occ={occ}
+                        mode={mode}
+                        selected={selectedId === occ.id}
+                        held={heldIds.includes(occ.id)}
+                        onSelect={onSelect}
+                      />
+                    ) : null}
+                  </td>
+                )
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   )
 }

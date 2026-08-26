@@ -12,8 +12,8 @@ export function ClassTypePhoto({
 }) {
   const src = classImageSources(classType.id, baseUrl, variant)
   const pictureClass = variant === 'thumb' ? 'class-type-thumb' : 'class-type-card__photo'
-  const width = variant === 'thumb' ? 88 : 800
-  const height = variant === 'thumb' ? 55 : 450
+  const width = variant === 'thumb' ? 116 : 800
+  const height = variant === 'thumb' ? 72 : 450
 
   return (
     <picture className={pictureClass}>
@@ -24,8 +24,16 @@ export function ClassTypePhoto({
         sizes={src.sizes}
         alt={`${classType.name} group session`}
         loading="lazy"
+        decoding="async"
         width={width}
         height={height}
+        onError={(e) => {
+          const img = e.currentTarget
+          if (img.dataset.fallback !== '1') {
+            img.dataset.fallback = '1'
+            img.src = src.primary
+          }
+        }}
       />
     </picture>
   )

@@ -385,6 +385,31 @@ h2 {
   margin: 0 0 1.5rem;
 }
 
+.class-schedule .week-cal {
+  max-width: 100%;
+}
+
+.class-schedule__types {
+  margin-top: 2.5rem;
+}
+
+.class-schedule__types-heading {
+  margin: 0 0 1.25rem;
+  font-family: var(--font-display);
+  font-size: clamp(1.65rem, 3vw, 2.1rem);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.class-schedule .class-type-desc {
+  grid-template-columns: 7.25rem minmax(0, 1fr);
+  gap: 1rem;
+}
+
+.class-schedule .class-type-thumb {
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
+}
+
 .hint,
 .class-schedule__types .hint {
   color: var(--muted);
@@ -417,7 +442,7 @@ h2 {
 
 .class-type-card__cap {
   margin: 0;
-  padding-left: calc(5.5rem + 0.85rem);
+  padding-left: calc(7.25rem + 1rem);
 }
 
 .class-type-card__photo {

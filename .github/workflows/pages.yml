@@ -56,8 +56,17 @@ jobs:
         run: |
           mkdir -p _site
           cp -R dist/* _site/
+          if [ ! -f _site/images/classes/sweat/card-480.jpg ]; then
+            echo "Class images missing from dist — copying from public/"
+            mkdir -p _site/images
+            cp -R public/images/classes _site/images/
+          fi
+          test -f _site/images/classes/sweat/card-480.jpg
           mkdir -p _site/sim
           cp -R sim-demos/dist/* _site/sim/
+          mkdir -p _site/sim/images
+          cp -R sim-demos/public/images/classes _site/sim/images/
+          test -f _site/sim/images/classes/sweat/card-480.jpg
           mkdir -p _site/sim/fitness/studioflow _site/sim/fitness/classboard
           cp _site/sim/index.html _site/sim/fitness/studioflow/index.html
           cp _site/sim/index.html _site/sim/fitness/classboard/index.html
@@ -65,6 +74,7 @@ jobs:
             mkdir -p "_site/$path"
             cp _site/index.html "_site/$path/index.html"
           done
+          ls -la _site/images/classes/sweat/card-480.jpg
 
       - name: Setup Pages
         uses: actions/configure-pages@v5

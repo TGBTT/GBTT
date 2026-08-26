@@ -780,25 +780,33 @@ export function formatSessionAttending(occ: ClassOccurrence): string {
   return `${occ.bookedCount}/${maxCapacity} attending`
 }
 
+/** Build a URL under the Vite base (same pattern as hero logo assets). */
+export function publicAssetUrl(baseUrl: string, path: string): string {
+  const base = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`
+  return `${base}${path.replace(/^\//, '')}`
+}
+
 /** Responsive card image paths under /images/classes/{id}/ */
 export function classImageSources(
   classTypeId: string,
   baseUrl: string,
   variant: 'card' | 'thumb' = 'card',
 ) {
-  const base = `${baseUrl.replace(/\/?$/, '')}/images/classes/${classTypeId}`
+  const dir = publicAssetUrl(baseUrl, `images/classes/${classTypeId}`)
   if (variant === 'thumb') {
     return {
-      webpSrcSet: `${base}/card-480.webp 480w`,
-      jpgSrcSet: `${base}/card-480.jpg 480w`,
-      fallback: `${base}/card-480.jpg`,
-      sizes: '88px',
+      webpSrcSet: `${dir}/card-480.webp 480w`,
+      jpgSrcSet: `${dir}/card-480.jpg 480w`,
+      fallback: `${dir}/card-480.jpg`,
+      primary: `${dir}/primary.jpg`,
+      sizes: '116px',
     }
   }
   return {
-    webpSrcSet: [480, 800, 1200].map((w) => `${base}/card-${w}.webp ${w}w`).join(', '),
-    jpgSrcSet: [480, 800, 1200].map((w) => `${base}/card-${w}.jpg ${w}w`).join(', '),
-    fallback: `${base}/card-800.jpg`,
+    webpSrcSet: [480, 800, 1200].map((w) => `${dir}/card-${w}.webp ${w}w`).join(', '),
+    jpgSrcSet: [480, 800, 1200].map((w) => `${dir}/card-${w}.jpg ${w}w`).join(', '),
+    fallback: `${dir}/card-800.jpg`,
+    primary: `${dir}/primary.jpg`,
     sizes: '(max-width: 640px) 100vw, (max-width: 960px) 50vw, 420px',
   }
 }

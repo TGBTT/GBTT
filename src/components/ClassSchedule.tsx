@@ -30,14 +30,21 @@ export function ClassSchedule() {
         Counts update when members book. Full sessions are greyed out.{' '}
         <a href={simAppHref('fitness/studioflow/')}>Book in the member app</a>.
       </p>
-      <ul className="class-type-grid">
-        {classTypes.map((c) => (
-          <li key={c.id} className="class-type-card">
-            <ClassTypeDescription classType={c} baseUrl={import.meta.env.BASE_URL} title={c.name} />
-            <p className="hint class-type-card__cap">Max capacity {c.cap} per session</p>
-          </li>
-        ))}
-      </ul>
+      <div className="class-schedule__types">
+        <h3 className="class-schedule__types-heading">Session types</h3>
+        <ul className="class-type-grid">
+          {classTypes.map((c) => (
+            <li key={c.id} className="class-type-card">
+              <ClassTypeDescription
+                classType={c}
+                baseUrl={import.meta.env.BASE_URL}
+                title={c.name}
+              />
+              <p className="hint class-type-card__cap">Max capacity {c.cap} per session</p>
+            </li>
+          ))}
+        </ul>
+      </div>
     </div>
   )
 }

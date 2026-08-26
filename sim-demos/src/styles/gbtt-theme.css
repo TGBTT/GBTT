@@ -562,6 +562,13 @@
     border-bottom-color: #444;
   }
 
+  .theme-gbtt .app-sections > .app-section .week-cal {
+    margin-left: -0.35rem;
+    margin-right: -0.35rem;
+    width: calc(100% + 0.7rem);
+    max-width: none;
+  }
+
   .theme-gbtt .app-sections > .app-section:nth-child(even) .week-cal {
     border-color: #444;
     background: #141414;
