@@ -97,8 +97,9 @@ button.week-cal__badge {
 }
 
 .week-cal__name {
-  font-size: 0.85rem;
+  font-size: 0.78rem;
   font-weight: 700;
+  line-height: 1.15;
 }
 
 .week-cal__fill {

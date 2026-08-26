@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { WeekSessionCalendar } from '@gbtt/shared/studio/WeekSessionCalendar'
+import { ClassTypePhoto } from '@gbtt/shared/studio/ClassTypePhoto'
 import {
   getClassTypes,
   occurrencesByWeekday,
@@ -29,12 +30,16 @@ export function ClassSchedule() {
         Counts update when members book. Full sessions are greyed out.{' '}
         <a href={simAppHref('fitness/studioflow/')}>Book in the member app</a>.
       </p>
-      <ul className="offering-list class-schedule__types">
+      <ul className="class-type-grid">
         {classTypes.map((c) => (
-          <li key={c.id}>
-            <h3>{c.name}</h3>
-            <p>{c.blurb}</p>
-            <p className="hint">Max capacity {c.cap} per session</p>
+          <li key={c.id} className="class-type-card">
+            <ClassTypePhoto classType={c} baseUrl={import.meta.env.BASE_URL} />
+            <div className="class-type-card__body">
+              <h3>{c.name}</h3>
+              <p className="class-type-card__blurb">{c.blurb}</p>
+              <p className="class-type-card__desc">{c.longDescription}</p>
+              <p className="hint">Max capacity {c.cap} per session</p>
+            </div>
           </li>
         ))}
       </ul>

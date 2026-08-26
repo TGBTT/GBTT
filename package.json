@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "icons": "node scripts/generate-icons.mjs",
     "build:sim": "npm --prefix sim-demos run build",
-    "build:all": "npm run icons && npm run build && npm run build:sim"
+    "class-images": "node scripts/process-class-images.mjs",
+    "build:all": "npm run icons && npm run class-images && npm run build && npm run build:sim"
   },
   "dependencies": {
     "leaflet": "^1.9.4",

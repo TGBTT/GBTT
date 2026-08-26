@@ -11,3 +11,5 @@ Thumbs.db
 .vite
 sim-demos/node_modules
 sim-demos/dist
+# Generated class photo sources (processed output lives in img/ and public/)
+assets/class-*.png

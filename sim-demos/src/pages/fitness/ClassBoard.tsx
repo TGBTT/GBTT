@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { ClassTypePhoto } from '@gbtt/shared/studio/ClassTypePhoto'
 import { DemoOutsideShell } from '../../components/DemoChrome'
 import { WeekSessionCalendar } from '../../components/WeekSessionCalendar'
 import {
@@ -402,6 +403,9 @@ export default function ClassBoard() {
             <aside className="classboard-side">
               <section>
                 <h2>Class type defaults</h2>
+                {selected ? (
+                  <ClassTypePhoto classType={selected} baseUrl={import.meta.env.BASE_URL} />
+                ) : null}
                 <div className="class-type-tabs">
                   {classes.map((c) => (
                     <button

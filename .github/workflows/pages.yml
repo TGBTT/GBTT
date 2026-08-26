@@ -34,6 +34,9 @@ jobs:
       - name: Generate icons
         run: npm run icons
 
+      - name: Process class images
+        run: npm run class-images
+
       - name: Build marketing site
         env:
           VITE_BASE: /GBTT/
