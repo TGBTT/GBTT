@@ -54,6 +54,7 @@
   margin: 0;
   display: grid;
   gap: 0.75rem;
+  width: 100%;
 }
 
 .class-type-accordion {
@@ -62,16 +63,21 @@
   background: rgba(255, 255, 255, 0.92);
   overflow: hidden;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+  width: 100%;
 }
 
 .class-type-accordion__summary {
   display: grid;
-  grid-template-columns: 7.25rem minmax(0, 1fr) auto;
-  gap: 1rem;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 0.85rem;
   align-items: center;
   padding: 0.85rem 1rem;
   cursor: pointer;
   list-style: none;
+}
+
+.class-type-accordion__summary .class-type-thumb {
+  width: 5.75rem;
 }
 
 .class-type-accordion__summary::-webkit-details-marker {
@@ -83,17 +89,18 @@
   flex-direction: column;
   gap: 0.25rem;
   min-width: 0;
+  text-align: left;
 }
 
 .class-type-accordion__title {
   font-family: var(--font-display, 'Bebas Neue', Impact, sans-serif);
-  font-size: 1.35rem;
+  font-size: clamp(1.25rem, 4vw, 1.55rem);
   letter-spacing: 0.05em;
   line-height: 1.1;
 }
 
 .class-type-accordion__blurb {
-  font-size: 0.95rem;
+  font-size: clamp(0.88rem, 2.5vw, 0.98rem);
   font-weight: 600;
   line-height: 1.35;
 }
@@ -121,9 +128,8 @@
 }
 
 .class-type-accordion__panel {
-  padding: 0 1rem 1.1rem 1rem;
+  padding: 0 1rem 1.1rem;
   border-top: 1px solid var(--line, #d4d4d0);
-  margin-left: calc(7.25rem + 1rem);
 }
 
 .class-type-accordion__block {
@@ -157,15 +163,53 @@
   line-height: 1.45;
 }
 
-@media (max-width: 560px) {
+@media (min-width: 761px) {
+  .class-type-accordion-list {
+    gap: 1rem;
+  }
+
   .class-type-accordion__summary {
-    grid-template-columns: 5.5rem minmax(0, 1fr) auto;
-    gap: 0.75rem;
-    padding: 0.75rem;
+    gap: 1.25rem;
+    padding: 1.1rem 1.35rem;
+  }
+
+  .class-type-accordion__summary .class-type-thumb {
+    width: 10.5rem;
+  }
+
+  .class-type-accordion__title {
+    font-size: clamp(1.65rem, 2.4vw, 2.05rem);
+  }
+
+  .class-type-accordion__blurb {
+    font-size: 1.05rem;
+  }
+
+  .class-type-accordion__meta {
+    font-size: 0.88rem;
   }
 
   .class-type-accordion__panel {
-    margin-left: 0;
+    padding: 0 1.35rem 1.35rem;
+  }
+
+  .class-type-accordion__block p,
+  .class-type-accordion__exercises {
+    font-size: 1rem;
+  }
+}
+
+@media (max-width: 560px) {
+  .class-type-accordion__summary {
+    gap: 0.65rem;
+    padding: 0.75rem;
+  }
+
+  .class-type-accordion__summary .class-type-thumb {
+    width: 4.75rem;
+  }
+
+  .class-type-accordion__panel {
     padding-left: 0.75rem;
     padding-right: 0.75rem;
   }

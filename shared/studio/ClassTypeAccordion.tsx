@@ -25,7 +25,6 @@ export function ClassTypeAccordion({
   return (
     <details className="class-type-accordion">
       <summary className="class-type-accordion__summary">
-        <ClassTypePhoto classType={classType} baseUrl={baseUrl} variant="thumb" />
         <span className="class-type-accordion__head">
           <span className="class-type-accordion__title">{classType.name}</span>
           <span className="class-type-accordion__blurb">{classType.blurb}</span>
@@ -33,6 +32,7 @@ export function ClassTypeAccordion({
             Max {classType.cap} · Tap for full details
           </span>
         </span>
+        <ClassTypePhoto classType={classType} baseUrl={baseUrl} variant="thumb" />
         <span className="class-type-accordion__chevron" aria-hidden="true" />
       </summary>
       <div className="class-type-accordion__panel">

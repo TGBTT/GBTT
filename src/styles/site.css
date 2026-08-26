@@ -404,6 +404,12 @@ h2 {
 
 .class-schedule__types {
   margin-top: 2.5rem;
+  width: 100%;
+}
+
+.class-schedule__types .class-type-accordion-list {
+  width: 100%;
+  max-width: none;
 }
 
 .class-schedule__types-heading {
