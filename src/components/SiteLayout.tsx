@@ -82,6 +82,8 @@ export function SiteLayout() {
             <a href={SITE.facebook} target="_blank" rel="noreferrer">
               Facebook
             </a>
+            {' · '}
+            <Link to="/#builtbytom">{SITE.hashtag}</Link>
           </p>
         </div>
       </footer>

@@ -11,6 +11,7 @@ function marketingHref(path: string): string {
 /** Same bookmarks as the main GBTT site header. */
 const MARKETING = [
   { href: '', label: 'Home' },
+  { href: '#trainer', label: 'Trainer' },
   { href: '#classes', label: 'Classes' },
   { href: '#location', label: 'Location' },
   { href: '#apps', label: 'Apps' },

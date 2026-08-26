@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { CLASS_OFFERINGS, SITE, simAppHref } from '../data/siteConfig'
+import { CLASS_OFFERINGS, SITE, TRAINER, simAppHref } from '../data/siteConfig'
 import { AREAS, activeVenues, areaById, directionsUrl } from '../data/locations'
 import { VenueMap } from '../components/VenueMap'
 
@@ -50,12 +50,48 @@ export default function HomePage() {
         </div>
       </section>
 
+      <section className="section" id="trainer">
+        <div className="section__inner trainer">
+          <p className="eyebrow">Meet your trainer</p>
+          <h2>{TRAINER.name}</h2>
+          <p className="trainer__role">{TRAINER.role}</p>
+          <div className="trainer__copy">
+            {TRAINER.paragraphs.map((p) => (
+              <p key={p.slice(0, 48)}>{p}</p>
+            ))}
+          </div>
+          <div className="trainer__cta">
+            <Link className="btn btn--primary" to="/contact">
+              Contact Tom
+            </Link>
+            <a className="btn btn--ghost" href={SITE.facebook} target="_blank" rel="noreferrer">
+              See classes on Facebook
+            </a>
+          </div>
+        </div>
+      </section>
+
+      <section className="section section--band builtbytom" id="builtbytom" aria-labelledby="builtbytom-heading">
+        <div className="section__inner builtbytom__inner">
+          <p className="eyebrow">Member catchphrase</p>
+          <h2 id="builtbytom-heading" className="builtbytom__mark">
+            {SITE.hashtag}
+          </h2>
+          <p className="lede lede--on-band builtbytom__lede">
+            Regulars coined it as a tongue-in-cheek nod to the fit bodies that show up after sticking
+            with Tom&apos;s sessions. Wear it as a badge of work done — not a brand slogan we invented
+            in a meeting.
+          </p>
+        </div>
+      </section>
+
       <section className="section section--tight" id="about">
         <div className="section__inner">
           <h2>Who can join</h2>
           <p>
             Classes cater to all fitness levels and abilities, with options for kids and teens. Turn up
-            ready to move — Tom scales the session so everyone works hard at their own level.
+            ready to move — Tom scales the session so everyone works hard at their own level. Results
+            optional; the hashtag is peer pressure of the friendly kind.
           </p>
         </div>
       </section>

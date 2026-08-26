@@ -340,10 +340,103 @@ h2 {
   margin-top: 1.5rem;
 }
 
+#trainer,
+#builtbytom,
+#about,
 #classes,
 #location,
 #apps {
   scroll-margin-top: 5rem;
+}
+
+.trainer__role {
+  margin: -0.35rem 0 1.25rem;
+  color: var(--muted);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-size: 0.85rem;
+}
+
+.trainer__copy {
+  max-width: 40rem;
+}
+
+.trainer__copy p {
+  margin: 0 0 1rem;
+}
+
+.trainer__cta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 1.5rem;
+}
+
+.builtbytom {
+  position: relative;
+  overflow: hidden;
+}
+
+.builtbytom__inner {
+  position: relative;
+  z-index: 1;
+  text-align: center;
+  max-width: 42rem;
+}
+
+.builtbytom__mark {
+  font-size: clamp(2.8rem, 10vw, 5.5rem);
+  letter-spacing: 0.06em;
+  margin: 0.35rem 0 1rem;
+  animation: stamp-in 0.85s cubic-bezier(0.2, 0.9, 0.2, 1.15) both;
+}
+
+.builtbytom__lede {
+  margin: 0 auto;
+}
+
+.builtbytom::before {
+  content: '';
+  position: absolute;
+  inset: -20% -10%;
+  background:
+    repeating-linear-gradient(
+      -12deg,
+      transparent 0 18px,
+      rgba(255, 255, 255, 0.035) 18px 19px
+    );
+  animation: stripe-drift 22s linear infinite;
+  pointer-events: none;
+}
+
+@keyframes stamp-in {
+  from {
+    opacity: 0;
+    transform: scale(1.18) rotate(-4deg);
+    filter: blur(2px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    filter: none;
+  }
+}
+
+@keyframes stripe-drift {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-40px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .builtbytom__mark,
+  .builtbytom::before {
+    animation: none;
+  }
 }
 
 .split {
