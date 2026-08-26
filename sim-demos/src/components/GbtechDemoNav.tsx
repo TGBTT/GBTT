@@ -1,4 +1,5 @@
-import { Link, useLocation } from 'react-router-dom'
+import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useDemoPresentation } from '../context/DemoPresentation'
 
 function marketingHref(path: string): string {
@@ -8,52 +9,66 @@ function marketingHref(path: string): string {
   return `${root}${clean}`
 }
 
-/** Same bookmarks as the main GBTT site header. */
-const MARKETING = [
+/** Mirrors marketing `NAV` in src/data/siteConfig.ts — keep in sync. */
+const NAV = [
   { href: '', label: 'Home' },
   { href: '#trainer', label: 'Trainer' },
   { href: '#classes', label: 'Classes' },
   { href: '#location', label: 'Location' },
-  { href: '#apps', label: 'Apps' },
+  { href: '#apps', label: 'Book' },
   { href: 'contact/', label: 'Contact' },
 ] as const
 
+/** Same header markup and labels as the main GBTT site. */
 export function SiteDemoNav() {
   const { showShowcaseChrome } = useDemoPresentation()
-  const { pathname } = useLocation()
+  const [open, setOpen] = useState(false)
   if (!showShowcaseChrome) return null
 
+  const logoSrc = `${import.meta.env.BASE_URL}brand/gbtt-logo.png`
+
   return (
-    <nav className="site-demo-nav" aria-label="GBTT site">
-      <div className="site-demo-nav__inner">
-        <a className="site-demo-nav__brand" href={marketingHref('')}>
-          <img src={`${import.meta.env.BASE_URL}brand/gbtt-logo.png`} alt="" width={36} height={36} />
-          <span>
-            <strong>GBTT</strong>
-            <span className="site-demo-nav__tag"> · Simulated apps</span>
+    <header className="site-header">
+      <div className="site-header__inner">
+        <a className="brand-mark" href={marketingHref('')} onClick={() => setOpen(false)}>
+          <img src={logoSrc} alt="" width={48} height={48} />
+          <span className="brand-mark__text">
+            <span className="brand-mark__name">GBTT</span>
+            <span className="brand-mark__sub">Golden Bay Team Training</span>
           </span>
         </a>
-        <div className="site-demo-nav__links">
-          {MARKETING.map((item) => (
-            <a key={item.href || 'home'} href={marketingHref(item.href)}>
-              {item.label}
-            </a>
-          ))}
-          <Link
-            to="/fitness/studioflow"
-            className={pathname.includes('studioflow') ? 'is-active' : undefined}
+        <div className="site-header__end">
+          <button
+            type="button"
+            className="nav-toggle"
+            aria-expanded={open}
+            aria-controls="site-nav"
+            onClick={() => setOpen((v) => !v)}
           >
-            Member booking
-          </Link>
+            {open ? 'Close' : 'Menu'}
+          </button>
+          <nav id="site-nav" className={`site-nav${open ? ' is-open' : ''}`} aria-label="Primary">
+            {NAV.map((item) => (
+              <a
+                key={item.href || 'home'}
+                href={marketingHref(item.href)}
+                onClick={() => setOpen(false)}
+              >
+                {item.label}
+              </a>
+            ))}
+          </nav>
           <Link
+            className="admin-nav-badge"
             to="/fitness/classboard"
-            className={pathname.includes('classboard') ? 'is-active' : undefined}
+            title="Staff login"
+            onClick={() => setOpen(false)}
           >
-            Trainer admin
+            Admin
           </Link>
         </div>
       </div>
-    </nav>
+    </header>
   )
 }
 

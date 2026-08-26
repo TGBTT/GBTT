@@ -3,6 +3,13 @@
   line-height: 1.5;
   color: #1a1a1a;
   background: #f4f1ec;
+  --ink: #0a0a0a;
+  --paper: #f5f5f3;
+  --muted: #5c5c5c;
+  --line: #d4d4d0;
+  --space: clamp(1rem, 2vw, 1.5rem);
+  --max: 68rem;
+  --font-display: 'Bebas Neue', 'Arial Narrow', Impact, sans-serif;
   --motion-fast: 160ms;
   --motion-med: 320ms;
   --motion-slow: 480ms;
@@ -282,58 +289,6 @@ textarea {
   max-width: 56rem;
   margin: 0 auto;
   padding: 1.25rem 1.25rem 4rem;
-}
-
-.gbtech-demo-nav {
-  position: sticky;
-  top: 0;
-  z-index: 200;
-  margin: 0 0 1.25rem;
-  padding: 0.75rem 1.25rem;
-  background: #2E7D32;
-  color: #F6F7F8;
-  box-shadow: 0 2px 10px rgba(46, 125, 50, 0.28);
-}
-
-.gbtech-demo-nav__inner {
-  max-width: 56rem;
-  margin: 0 auto;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.65rem 1rem;
-}
-
-.gbtech-demo-nav__brand {
-  color: rgba(246, 247, 248, 0.92);
-  text-decoration: none;
-  font-size: 0.92rem;
-}
-
-.gbtech-demo-nav__brand strong {
-  color: #D4AF37;
-}
-
-.gbtech-demo-nav__links {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.45rem 0.85rem;
-}
-
-.gbtech-demo-nav__links a {
-  color: #F6F7F8;
-  text-decoration: none;
-  font-size: 0.82rem;
-  font-weight: 600;
-  padding: 0.3rem 0.65rem;
-  border-radius: 999px;
-  border: 1px solid rgba(212, 175, 55, 0.4);
-}
-
-.gbtech-demo-nav__links a:hover {
-  background: rgba(167, 209, 41, 0.22);
-  border-color: #A7D129;
 }
 
 .hub-hero {
@@ -6360,7 +6315,7 @@ table.hall-time-grid {
 .showcase-chrome {
   width: 100%;
   max-width: none;
-  z-index: 2;
+  z-index: 50;
 }
 
 .tablet-stage {
@@ -6408,31 +6363,20 @@ table.hall-time-grid {
   }
 
   .showcase-chrome {
-    width: min(1180px, calc(100vw - 3rem));
-    padding: 0.65rem 0 0.55rem;
-    position: sticky;
-    top: 0;
-    z-index: 40;
-    background: linear-gradient(
-      180deg,
-      rgba(216, 210, 200, 0.96) 0%,
-      rgba(216, 210, 200, 0.88) 70%,
-      rgba(216, 210, 200, 0) 100%
-    );
+    width: 100%;
+    padding: 0;
+    position: static;
+    background: transparent;
   }
 
   .showcase-chrome .demo-outside-bar {
     display: flex;
     align-items: center;
-    margin-top: 0.4rem;
+    width: min(1180px, calc(100vw - 3rem));
+    margin: 0.55rem auto 0;
     padding: 0.55rem 1.1rem;
     background: rgba(255, 255, 255, 0.92);
     border: 1px solid rgba(0, 0, 0, 0.1);
-    border-radius: 12px;
-  }
-
-  .showcase-chrome .gbtech-demo-nav {
-    margin-bottom: 0;
     border-radius: 12px;
   }
 

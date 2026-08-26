@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, Outlet, useLocation } from 'react-router-dom'
-import { NAV, SITE } from '../data/siteConfig'
+import { NAV, SITE, adminAppHref } from '../data/siteConfig'
 
 function navIsActive(to: string, pathname: string, hash: string): boolean {
   if (to === '/') return pathname === '/' && !hash
@@ -29,19 +29,31 @@ export function SiteLayout() {
               <span className="brand-mark__sub">{SITE.name}</span>
             </span>
           </Link>
-          <button
-            type="button"
-            className="nav-toggle"
-            aria-expanded={open}
-            aria-controls="site-nav"
-            onClick={() => setOpen((v) => !v)}
-          >
-            {open ? 'Close' : 'Menu'}
-          </button>
-          <nav id="site-nav" className={`site-nav${open ? ' is-open' : ''}`} aria-label="Primary">
-            {NAV.map((item) => {
-              const active = navIsActive(item.to, pathname, hash)
-              if (item.to.startsWith('/#')) {
+          <div className="site-header__end">
+            <button
+              type="button"
+              className="nav-toggle"
+              aria-expanded={open}
+              aria-controls="site-nav"
+              onClick={() => setOpen((v) => !v)}
+            >
+              {open ? 'Close' : 'Menu'}
+            </button>
+            <nav id="site-nav" className={`site-nav${open ? ' is-open' : ''}`} aria-label="Primary">
+              {NAV.map((item) => {
+                const active = navIsActive(item.to, pathname, hash)
+                if (item.to.startsWith('/#')) {
+                  return (
+                    <Link
+                      key={item.to}
+                      to={item.to}
+                      className={active ? 'is-active' : undefined}
+                      onClick={() => setOpen(false)}
+                    >
+                      {item.label}
+                    </Link>
+                  )
+                }
                 return (
                   <Link
                     key={item.to}
@@ -52,19 +64,12 @@ export function SiteLayout() {
                     {item.label}
                   </Link>
                 )
-              }
-              return (
-                <Link
-                  key={item.to}
-                  to={item.to}
-                  className={active ? 'is-active' : undefined}
-                  onClick={() => setOpen(false)}
-                >
-                  {item.label}
-                </Link>
-              )
-            })}
-          </nav>
+              })}
+            </nav>
+            <a className="admin-nav-badge" href={adminAppHref()} title="Staff login">
+              Admin
+            </a>
+          </div>
         </div>
       </header>
       <main id="main">

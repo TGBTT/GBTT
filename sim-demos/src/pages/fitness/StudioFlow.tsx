@@ -1,5 +1,4 @@
 import { useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
 import { DemoChrome } from '../../components/DemoChrome'
 import { WeekSessionCalendar } from '../../components/WeekSessionCalendar'
 import {
@@ -10,6 +9,7 @@ import {
   bookAsMember,
   classTypeById,
   dropMemberBooking,
+  formatSessionAttending,
   formatPrepaid,
   getOccurrences,
   getSessionUser,
@@ -97,7 +97,7 @@ export default function StudioFlow() {
               {selectedType.name} · {selected.dayLabel} {selected.time}
             </h3>
             <p>
-              {selected.bookedCount}/{selectedType.cap} booked
+              {formatSessionAttending(selected)}
               {spotsLeft(selected) === 0 ? ' · Full' : ` · ${spotsLeft(selected)} spots left`}
             </p>
             <p>
@@ -239,9 +239,6 @@ export default function StudioFlow() {
                   <button type="button" className="btn ghost" onClick={() => setShowRegister(true)}>
                     New subscription
                   </button>
-                  <Link className="btn ghost" to="/fitness/classboard">
-                    Trainer admin →
-                  </Link>
                 </div>
               </>
             ) : (
@@ -391,9 +388,6 @@ export default function StudioFlow() {
               >
                 Log out
               </button>
-              <Link className="btn ghost" to="/fitness/classboard">
-                Trainer admin →
-              </Link>
             </div>
           </>
         )}

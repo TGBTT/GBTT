@@ -1,0 +1,124 @@
+.week-cal {
+  width: 100%;
+  margin: 1rem 0 1.25rem;
+  border: 1px solid var(--line, #d4d4d0);
+  background: #fff;
+}
+
+.week-cal__head,
+.week-cal__body {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.week-cal__day-label {
+  padding: 0.55rem 0.35rem;
+  text-align: center;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--line, #d4d4d0);
+  border-right: 1px solid var(--line, #d4d4d0);
+  background: #0a0a0a;
+  color: #f5f5f3;
+}
+
+.week-cal__day-label:last-child,
+.week-cal__cell:last-child {
+  border-right: none;
+}
+
+.week-cal__cell {
+  min-height: 9.5rem;
+  padding: 0.4rem;
+  border-right: 1px solid var(--line, #d4d4d0);
+  background: #fafaf8;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.week-cal__cell.has-sessions {
+  background: #ecece8;
+  box-shadow: inset 0 0 0 2px #111;
+}
+
+.week-cal__empty {
+  margin: auto;
+  color: #aaa;
+  font-size: 0.85rem;
+}
+
+.week-cal__badge {
+  display: grid;
+  gap: 0.1rem;
+  text-align: left;
+  padding: 0.4rem 0.45rem;
+  border: 1px solid #111;
+  background: #fff;
+  font: inherit;
+  cursor: default;
+  line-height: 1.2;
+  color: inherit;
+}
+
+button.week-cal__badge {
+  cursor: pointer;
+}
+
+.week-cal__badge:hover:not(.is-full),
+.week-cal__badge.is-selected {
+  background: #111;
+  color: #fff;
+}
+
+.week-cal__badge.is-held {
+  outline: 2px solid #111;
+  outline-offset: 1px;
+}
+
+.week-cal__badge.is-full {
+  opacity: 0.72;
+  background: #ddd;
+  border-color: #999;
+  color: #444;
+  cursor: not-allowed;
+}
+
+.week-cal__badge.is-full .week-cal__fill {
+  font-weight: 700;
+}
+
+.week-cal__time {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.week-cal__name {
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.week-cal__fill {
+  font-size: 0.68rem;
+  opacity: 0.85;
+}
+
+@media (max-width: 720px) {
+  .week-cal__head,
+  .week-cal__body {
+    grid-template-columns: 1fr;
+  }
+
+  .week-cal__day-label {
+    border-right: none;
+  }
+
+  .week-cal__cell {
+    min-height: auto;
+    border-right: none;
+    border-bottom: 1px solid var(--line, #d4d4d0);
+  }
+}

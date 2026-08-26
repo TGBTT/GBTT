@@ -59,7 +59,7 @@ export const NAV = [
   { to: '/#trainer', label: 'Trainer' },
   { to: '/#classes', label: 'Classes' },
   { to: '/#location', label: 'Location' },
-  { to: '/#apps', label: 'Apps' },
+  { to: '/#apps', label: 'Book' },
   { to: '/contact', label: 'Contact' },
 ] as const
 
@@ -68,4 +68,9 @@ export function simAppHref(path: string): string {
     ? import.meta.env.BASE_URL
     : `${import.meta.env.BASE_URL}/`
   return `${base}sim/${path}`
+}
+
+/** Staff-only trainer admin — linked from the discreet navbar badge. */
+export function adminAppHref(): string {
+  return simAppHref('fitness/classboard/')
 }

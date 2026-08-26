@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { CLASS_OFFERINGS, SITE, TRAINER, simAppHref } from '../data/siteConfig'
+import { SITE, TRAINER, simAppHref } from '../data/siteConfig'
+import { ClassSchedule } from '../components/ClassSchedule'
 import { AREAS, activeVenues, areaById, directionsUrl } from '../data/locations'
 import { VenueMap } from '../components/VenueMap'
 
@@ -38,7 +39,7 @@ export default function HomePage() {
           <p className="hero__lead">{SITE.tagline}</p>
           <div className="hero__cta">
             <a className="btn btn--primary" href="#apps">
-              Open the apps
+              Book a class
             </a>
             <Link className="btn btn--ghost" to="/contact">
               Contact Tom
@@ -98,24 +99,13 @@ export default function HomePage() {
 
       <section className="section" id="classes">
         <div className="section__inner">
-          <p className="eyebrow">Offerings</p>
+          <p className="eyebrow">Timetable</p>
           <h2>Classes</h2>
           <p className="lede">
-            Timetable changes with demand — check{' '}
-            <a href={SITE.facebook} target="_blank" rel="noreferrer">
-              Facebook
-            </a>{' '}
-            or <Link to="/contact">contact Tom</Link> for the current week. Live fill and booking live
-            in the member app.
+            This week&apos;s sessions at Rec Park Centre — attending counts and max capacity stay in
+            sync with member booking.
           </p>
-          <ul className="offering-list">
-            {CLASS_OFFERINGS.map((c) => (
-              <li key={c.id}>
-                <h3>{c.name}</h3>
-                <p>{c.blurb}</p>
-              </li>
-            ))}
-          </ul>
+          <ClassSchedule />
         </div>
       </section>
 
@@ -182,41 +172,21 @@ export default function HomePage() {
 
       <section className="section" id="apps">
         <div className="section__inner">
-          <p className="eyebrow">Simulated apps</p>
-          <h2>Member &amp; trainer apps</h2>
+          <p className="eyebrow">Member app</p>
+          <h2>Book a class</h2>
           <p className="lede">
-            Firebase is not live yet — these demos use localStorage. Password for all demo logins:{' '}
-            <code>demo</code>.
+            See live fill on the timetable above, then sign in to reserve your slot or drop in as a
+            guest.
           </p>
-          <ul className="demo-showcase home-apps">
-            <li>
-              <p className="demo-showcase__role">For members &amp; guests</p>
-              <h3>Member booking</h3>
-              <p>
-                See how full each class is, book as a guest, or sign in for a weekly subscription.
-                Reshuffle your slots, preview exercises, and choose whether classmates see your name.
-              </p>
-              <p className="hint">Try <code>alex@demo</code> / <code>demo</code></p>
-              <a className="btn btn--primary" href={simAppHref('fitness/studioflow/')}>
-                Open member booking
-              </a>
-            </li>
-            <li>
-              <p className="demo-showcase__role">For Tom &amp; substitutes</p>
-              <h3>Trainer admin</h3>
-              <p>
-                Staff login for schedule, fill, payments, risk notes, legal copy, subscriber email,
-                reminders, cover trainers, and public site text — so day-to-day changes do not need
-                code.
-              </p>
-              <p className="hint">
-                Try <code>tom@gbtt</code> or <code>cover@gbtt</code> / <code>demo</code>
-              </p>
-              <a className="btn btn--primary" href={simAppHref('fitness/classboard/')}>
-                Open trainer admin
-              </a>
-            </li>
-          </ul>
+          <div className="book-app-cta">
+            <p>
+              Weekly subscriptions, reshuffling your sessions, exercise previews, and optional name
+              sharing with classmates — all in member booking.
+            </p>
+            <a className="btn btn--primary" href={simAppHref('fitness/studioflow/')}>
+              Open member booking
+            </a>
+          </div>
         </div>
       </section>
     </>

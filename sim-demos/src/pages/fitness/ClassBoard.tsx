@@ -10,6 +10,7 @@ import {
   classTypeById,
   confirmSubscriptionChange,
   deleteOccurrence,
+  formatSessionAttending,
   getClassTypes,
   getEquipmentChecked,
   getExercises,
@@ -27,6 +28,7 @@ import {
   planById,
   resetSimStore,
   sendSubscriberEmail,
+  sessionIsFull,
   setClassCap,
   setEquipmentChecked,
   setMemberPaid,
@@ -250,8 +252,8 @@ export default function ClassBoard() {
                   Edit · {selectedOccType.name} · {selectedOcc.dayLabel} {selectedOcc.time}
                 </h3>
                 <p>
-                  Fill {selectedOcc.bookedCount}/{selectedOccType.cap}
-                  {spotsLeft(selectedOcc) === 0 ? ' · Full' : ` · ${spotsLeft(selectedOcc)} left`}
+                  {formatSessionAttending(selectedOcc)}
+                  {sessionIsFull(selectedOcc) ? ' · Full' : ` · ${spotsLeft(selectedOcc)} spots left`}
                 </p>
                 <p className="roster-line">
                   Roster:{' '}
@@ -450,7 +452,7 @@ export default function ClassBoard() {
                   <p>{selected.longDescription}</p>
                 )}
                 <label className="field">
-                  Cap
+                  Max capacity
                   <input
                     type="number"
                     min={4}
