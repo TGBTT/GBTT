@@ -516,6 +516,8 @@
   border-color: var(--ink);
   background: #fff;
   color: var(--ink);
+  font-weight: 700;
+  line-height: 1.25;
 }
 
 .theme-gbtt .admin-tabs .chip.selected {
@@ -524,11 +526,43 @@
   border-color: var(--ink);
 }
 
-@media (min-width: 961px) {
+@media (min-width: 761px) and (max-width: 1024px) {
+  .theme-gbtt .app-sections > .admin-tabs.app-section {
+    background: rgba(255, 255, 255, 0.96);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 0.85rem 1rem 1rem;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.06);
+  }
+
+  .theme-gbtt .admin-tabs {
+    gap: 0.5rem;
+  }
+
+  .theme-gbtt .admin-tabs .chip {
+    font-size: 0.92rem;
+    min-height: 2.6rem;
+    padding: 0.45rem 0.95rem;
+  }
+}
+
+@media (min-width: 860px) {
+  .theme-gbtt .classboard-deck,
   .theme-gbtt .classboard-deck.schedule-cal-layout,
-  .schedule-cal-layout {
-    grid-template-columns: minmax(0, 1.55fr) minmax(22rem, 1fr);
-    align-items: start;
+  .theme-gbtt .schedule-cal-layout {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .theme-gbtt .schedule-cal-main {
+    width: 100%;
+  }
+
+  .theme-gbtt .classboard-side {
+    order: unset;
+    width: 100%;
+    max-width: none;
+    margin-top: 0.25rem;
   }
 }
 
@@ -618,9 +652,41 @@
   }
 
   .theme-gbtt .app-sections > .admin-tabs.app-section {
-    padding: 0.65rem 0.75rem;
+    padding: 0.85rem 0.9rem 0.95rem;
     margin-top: 0;
     margin-bottom: 0;
+    background: rgba(255, 255, 255, 0.96);
+    color: var(--ink);
+    border-color: var(--line);
+    box-shadow: var(--app-section-bevel-light);
+  }
+
+  .theme-gbtt .app-sections > .admin-tabs.app-section .chip {
+    border-color: var(--ink);
+    background: #fff;
+    color: var(--ink);
+    font-size: 0.9rem;
+    min-height: 2.5rem;
+    padding: 0.42rem 0.85rem;
+    line-height: 1.25;
+  }
+
+  .theme-gbtt .app-sections > .admin-tabs.app-section:nth-child(even) .chip {
+    color: var(--ink);
+    background: #fff;
+    border-color: var(--ink);
+  }
+
+  .theme-gbtt .app-sections > .admin-tabs.app-section .chip.selected {
+    background: var(--ink);
+    color: #fff;
+    border-color: var(--ink);
+  }
+
+  .theme-gbtt .app-sections > .admin-tabs.app-section:nth-child(even) .chip.selected {
+    background: var(--ink);
+    color: #fff;
+    border-color: var(--ink);
   }
 
   .theme-gbtt .app-sections {
@@ -659,6 +725,29 @@
     color: var(--paper);
     border-color: #2a2a2a;
     box-shadow: var(--app-section-bevel-dark);
+  }
+
+  /* Tab bar stays light for readable pill labels on phone/tablet portrait */
+  .theme-gbtt .app-sections > .admin-tabs.app-section,
+  .theme-gbtt .app-sections > .admin-tabs.app-section:nth-child(even) {
+    background: rgba(255, 255, 255, 0.96);
+    color: var(--ink);
+    border-color: var(--line);
+    box-shadow: var(--app-section-bevel-light);
+  }
+
+  .theme-gbtt .app-sections > .admin-tabs.app-section .chip,
+  .theme-gbtt .app-sections > .admin-tabs.app-section:nth-child(even) .chip {
+    border-color: var(--ink);
+    background: #fff;
+    color: var(--ink);
+  }
+
+  .theme-gbtt .app-sections > .admin-tabs.app-section .chip.selected,
+  .theme-gbtt .app-sections > .admin-tabs.app-section:nth-child(even) .chip.selected {
+    background: var(--ink);
+    color: #fff;
+    border-color: var(--ink);
   }
 
   .theme-gbtt .app-sections > .app-section:nth-child(even) .hint,
@@ -808,26 +897,5 @@
     background: #fdecec;
     color: #7a1010;
     border-color: #f0bcbc;
-  }
-
-  .theme-gbtt .app-sections > .admin-tabs.app-section .chip {
-    border-color: #555;
-    color: inherit;
-  }
-
-  .theme-gbtt .app-sections > .admin-tabs.app-section:nth-child(even) .chip {
-    color: var(--paper);
-  }
-
-  .theme-gbtt .app-sections > .admin-tabs.app-section .chip.selected {
-    background: var(--ink);
-    color: var(--paper);
-    border-color: var(--ink);
-  }
-
-  .theme-gbtt .app-sections > .admin-tabs.app-section:nth-child(even) .chip.selected {
-    background: var(--paper);
-    color: var(--ink);
-    border-color: var(--paper);
   }
 }
