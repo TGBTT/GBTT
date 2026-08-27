@@ -28,14 +28,27 @@
 .theme-gbtt .btn.ghost {
   border: 1px solid var(--ink);
   color: var(--ink);
-  background: transparent;
+  background: #fff;
+}
+
+.theme-gbtt .btn.ghost:hover:not(:disabled) {
+  background: var(--ink);
+  color: #fff;
+}
+
+.theme-gbtt .chip {
+  border: 1px solid var(--ink);
+  background: #fff;
+  color: var(--ink);
 }
 
 .theme-gbtt .chip.selected,
 .theme-gbtt .pkg-card.selected,
 .theme-gbtt .class-occ-card.selected {
+  background: var(--ink);
+  color: #fff;
   border-color: var(--ink);
-  box-shadow: inset 3px 0 0 var(--ink);
+  box-shadow: none;
 }
 
 .theme-gbtt .yacht-panel,
@@ -299,9 +312,11 @@
   display: flex;
   flex-wrap: wrap;
   gap: 0.4rem;
-  max-width: 1100px;
-  margin: 0 auto 1rem;
-  padding: 0 1rem;
+  max-width: var(--max);
+  width: 100%;
+  margin: 0 auto;
+  padding: 0;
+  box-sizing: border-box;
 }
 
 .admin-login {
@@ -370,15 +385,161 @@
 .schedule-cal-layout {
   display: grid;
   gap: 1.25rem;
-  max-width: 1100px;
+  max-width: var(--max);
+  width: 100%;
   margin: 0 auto 1.5rem;
-  padding: 0 1rem;
+  padding: 0 var(--space);
+  box-sizing: border-box;
 }
 
-@media (min-width: 960px) {
+.theme-gbtt .classboard-deck {
+  max-width: var(--max);
+  width: 100%;
+  margin: 0 auto;
+  padding: 0;
+}
+
+.theme-gbtt .classboard-deck.schedule-cal-layout {
+  gap: 1.5rem;
+}
+
+.theme-gbtt .schedule-cal-main,
+.theme-gbtt .classboard-side {
+  min-width: 0;
+}
+
+.theme-gbtt .classboard-side {
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 1.1rem 1.15rem;
+  color: var(--ink);
+}
+
+.theme-gbtt .classboard-side h2,
+.theme-gbtt .classboard-schedule h2,
+.theme-gbtt .schedule-cal-main h2 {
+  margin: 0 0 0.5rem;
+  font-family: var(--font-display);
+  font-size: 0.82rem;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+
+.theme-gbtt .classboard-side section + section {
+  margin-top: 0.85rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--line);
+}
+
+.theme-gbtt .classboard-side .class-type-desc {
+  grid-template-columns: 1fr;
+  gap: 0.65rem;
+}
+
+.theme-gbtt .classboard-side .class-type-thumb {
+  max-width: 11rem;
+}
+
+.theme-gbtt .class-type-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.theme-gbtt .class-type-tabs .chip {
+  min-height: 2.25rem;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.82rem;
+}
+
+.theme-gbtt .exercise-check {
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink);
+}
+
+.theme-gbtt .exercise-check.on {
+  border-color: var(--ink);
+  background: var(--accent-soft);
+}
+
+.theme-gbtt .week-cal__badge {
+  background: #fff;
+  color: var(--ink);
+  border-color: var(--ink);
+}
+
+.theme-gbtt .week-cal__fill {
+  color: var(--muted);
+  opacity: 1;
+}
+
+.theme-gbtt .week-cal__badge:hover:not(.is-full),
+.theme-gbtt .week-cal__badge.is-selected {
+  background: var(--ink);
+  color: #fff;
+}
+
+.theme-gbtt .week-cal__badge:hover:not(.is-full) .week-cal__fill,
+.theme-gbtt .week-cal__badge.is-selected .week-cal__fill {
+  color: rgba(255, 255, 255, 0.88);
+}
+
+.theme-gbtt .week-cal__badge.is-full {
+  background: #e4e4e0;
+  border-color: #888;
+  color: #333;
+}
+
+.theme-gbtt .app-sections {
+  max-width: var(--max);
+  margin: 0 auto;
+  padding: 0 var(--space) 2rem;
+  box-sizing: border-box;
+}
+
+.theme-gbtt .app-sections > .classboard-top.app-section {
+  padding: 1.25rem 0 0.75rem;
+}
+
+.theme-gbtt .app-sections > .admin-tabs.app-section {
+  padding-bottom: 0.75rem;
+  margin: 0;
+  width: 100%;
+  max-width: none;
+}
+
+.theme-gbtt .admin-tabs .chip {
+  border-color: var(--ink);
+  background: #fff;
+  color: var(--ink);
+}
+
+.theme-gbtt .admin-tabs .chip.selected {
+  background: var(--ink);
+  color: #fff;
+  border-color: var(--ink);
+}
+
+@media (min-width: 961px) {
+  .theme-gbtt .classboard-deck.schedule-cal-layout,
   .schedule-cal-layout {
-    grid-template-columns: 1.5fr 1fr;
+    grid-template-columns: minmax(0, 1.55fr) minmax(22rem, 1fr);
     align-items: start;
+  }
+}
+
+@media (max-width: 960px) {
+  .theme-gbtt .classboard-deck.schedule-cal-layout,
+  .schedule-cal-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .theme-gbtt .classboard-side {
+    order: 2;
   }
 }
 
