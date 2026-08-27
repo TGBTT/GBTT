@@ -11,8 +11,11 @@ export default defineConfig({
   plugins: [react()],
   base,
   resolve: {
+    dedupe: ['react', 'react-dom'],
     alias: {
       '@gbtt/shared': path.resolve(root, 'shared'),
+      react: path.resolve(root, 'node_modules/react'),
+      'react-dom': path.resolve(root, 'node_modules/react-dom'),
     },
   },
   build: {

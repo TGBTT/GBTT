@@ -638,11 +638,15 @@ function migrateUser(u: SimUser): SimUser {
 }
 
 /** Apply recurring weekly locks to timetable rosters (idempotent). */
-function syncMemberWeeklyLocks(u: SimUser): void {
+function syncMemberWeeklyLocks(
+  u: SimUser,
+  occurrences: ClassOccurrence[] = store.occurrences,
+  classes: ClassType[] = store.classes,
+): void {
   if (u.role !== 'member') return
   u.heldOccurrenceIds = [...u.weeklyLockedOccurrenceIds]
 
-  for (const occ of store.occurrences) {
+  for (const occ of occurrences) {
     const onRoster = occ.roster.some((r) => r.memberId === u.id)
     const shouldBeOn = u.weeklyLockedOccurrenceIds.includes(occ.id)
     if (onRoster && !shouldBeOn) {
@@ -652,10 +656,11 @@ function syncMemberWeeklyLocks(u: SimUser): void {
   }
 
   for (const occId of u.weeklyLockedOccurrenceIds) {
-    const occ = store.occurrences.find((o) => o.id === occId)
+    const occ = occurrences.find((o) => o.id === occId)
     if (!occ) continue
     if (occ.roster.some((r) => r.memberId === u.id)) continue
-    if (occ.bookedCount >= (classTypeById(occ.classTypeId)?.cap ?? occ.bookedCount)) continue
+    const cap = classes.find((c) => c.id === occ.classTypeId)?.cap ?? occ.bookedCount
+    if (occ.bookedCount >= cap) continue
     occ.roster = [
       ...occ.roster,
       {
@@ -674,10 +679,13 @@ function migrateClass(cls: ClassType): ClassType {
   if (!def) return cls
   return {
     ...cls,
+    blurb: cls.blurb ?? def.blurb,
+    longDescription: cls.longDescription ?? def.longDescription,
     warnings: cls.warnings ?? def.warnings,
     restrictions: cls.restrictions ?? def.restrictions,
     recommendations: cls.recommendations ?? def.recommendations,
     whatToBring: cls.whatToBring ?? def.whatToBring,
+    cap: cls.cap ?? def.cap,
     exerciseIds: cls.exerciseIds?.length ? cls.exerciseIds : [...def.exerciseIds],
   }
 }
@@ -685,8 +693,13 @@ function migrateClass(cls: ClassType): ClassType {
 function normalizeStore(parsed: StoreState): StoreState {
   parsed.classes = parsed.classes.map(migrateClass)
   parsed.users = parsed.users.map(migrateUser)
+  parsed.site = { ...DEFAULT_SITE, ...(parsed.site ?? {}) }
+  parsed.team = parsed.team?.length ? parsed.team : DEFAULT_TEAM.map((t) => ({ ...t }))
+  parsed.reminders = parsed.reminders ?? DEFAULT_REMINDERS.map((r) => ({ ...r }))
+  parsed.outbox = parsed.outbox ?? []
+  parsed.equipmentChecked = parsed.equipmentChecked ?? []
   for (const u of parsed.users) {
-    syncMemberWeeklyLocks(u)
+    syncMemberWeeklyLocks(u, parsed.occurrences, parsed.classes)
   }
   return parsed
 }
