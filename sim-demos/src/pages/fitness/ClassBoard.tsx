@@ -118,7 +118,7 @@ export default function ClassBoard() {
   if (!staff) {
     return (
       <div className="classboard-page theme-gbtt">
-        <DemoOutsideShell imageId="classboard" backLabel="← Demos hub" />
+        <DemoOutsideShell imageId="classboard" showBackLink={false} />
         <div className="app-sections">
         <header className="classboard-top app-section">
           <div>
@@ -174,7 +174,7 @@ export default function ClassBoard() {
 
   return (
     <div className="classboard-page theme-gbtt">
-      <DemoOutsideShell imageId="classboard" backLabel="← Demos hub" />
+      <DemoOutsideShell imageId="classboard" showBackLink={false} />
       <div className="app-sections">
       <header className="classboard-top app-section">
         <div>

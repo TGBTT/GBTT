@@ -9,6 +9,7 @@ import type { DemoImageId } from '../shared/demoAssets'
 interface OutsideProps {
   backTo?: string
   backLabel?: string
+  showBackLink?: boolean
   /** Hero renders inside the tablet bezel (not in outside chrome). */
   imageId?: DemoImageId
   heroAlt?: string
@@ -39,6 +40,7 @@ function InAppHero({
 export function DemoOutsideShell({
   backTo = '/',
   backLabel = '← All demos',
+  showBackLink = true,
   imageId,
   heroAlt,
   heroCompact,
@@ -49,11 +51,13 @@ export function DemoOutsideShell({
   if (!showShowcaseChrome) {
     return (
       <>
-        <div className="demo-outside-bar demo-outside-bar--inline">
-          <Link to={backTo} className="demo-back">
-            {backLabel}
-          </Link>
-        </div>
+        {showBackLink ? (
+          <div className="demo-outside-bar demo-outside-bar--inline">
+            <Link to={backTo} className="demo-back">
+              {backLabel}
+            </Link>
+          </div>
+        ) : null}
         {imageId ? <InAppHero imageId={imageId} heroAlt={heroAlt} heroCompact={heroCompact} /> : null}
         {children}
       </>
@@ -64,11 +68,13 @@ export function DemoOutsideShell({
     <>
       <ShowcaseChrome>
         <GbtechDemoNav />
-        <div className="demo-outside-bar">
-          <Link to={backTo} className="demo-back">
-            {backLabel}
-          </Link>
-        </div>
+        {showBackLink ? (
+          <div className="demo-outside-bar">
+            <Link to={backTo} className="demo-back">
+              {backLabel}
+            </Link>
+          </div>
+        ) : null}
       </ShowcaseChrome>
       {imageId ? <InAppHero imageId={imageId} heroAlt={heroAlt} heroCompact={heroCompact} /> : null}
       {children}
