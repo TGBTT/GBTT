@@ -10,13 +10,36 @@ Firebase project: **`gbtt-c1130`**
 |------|-------|
 | Firestore database created | done |
 | `firestore.rules` + indexes deployed | done |
+| Rules hardened (billing, roster, signup gating) | done — 29 tests in `firestore-tests/` |
 | Web app registered (client config exists) | done |
 | GitHub repository secrets | **todo** — run `scripts/sync-github-secrets.ps1` |
 | Email/Password sign-in enabled | **todo** — console only |
 | First admin custom claim | **todo** — `functions/scripts/set-admin-claim.mjs` |
-| Blaze plan + Cloud Functions deployed | **todo** — blocked on billing |
+| Blaze plan + Cloud Functions deployed | **todo** — booking is blocked until this lands |
+| App Check + API key referrer restriction | **todo** |
 | Apps Script deployed → `VITE_FORM_ENDPOINT` | **todo** |
 | DNS for `gbtt.co.nz` → GitHub Pages | **todo** |
+
+### Security model
+
+Members book through the `bookSession` / `cancelBooking` callables, never by writing Firestore
+directly. Rules deny client roster writes, so capacity, membership status and the transfer window
+are enforced in one place that cannot be bypassed from the browser console.
+
+Self-registration creates a `pending` profile with no booking rights. An admin calls
+`approveMember`, which sets `profile.status: active` and the `member` custom claim.
+
+Members cannot write `billing`, `membership`, `clinical`, `profile.role` or `profile.status` on
+their own document — those drive what they are charged and what they can reach.
+
+Run the rules test suite after any change to `firestore.rules`:
+
+```bash
+cd firestore-tests && npm install && npm test
+```
+
+It needs Java for the emulator and pins its own `firebase-tools` because the current CLI requires
+JDK 21.
 
 Nothing below is destructive; steps can be re-run safely.
 
