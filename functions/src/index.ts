@@ -573,10 +573,30 @@ async function requireActiveMember(uid: string) {
   return snap
 }
 
+const DEFAULT_DROP_IN_RATE = 17
+
+/** Drop-in price. Extras are charged at the casual rate whatever plan the member is on. */
+async function dropInRateCents(): Promise<number> {
+  const snap = await db.doc('pricing/plans/casual').get()
+  const rate = Number(snap.data()?.ratePerClass)
+  return Math.round((Number.isFinite(rate) && rate > 0 ? rate : DEFAULT_DROP_IN_RATE) * 100)
+}
+
 /**
- * Member books a session. Rules block direct roster writes, so capacity and
- * membership status can only be enforced here. The count is read inside the
- * transaction so two people racing for the last seat cannot both win.
+ * Member books a single session as a paid drop-in.
+ *
+ * A subscription's included sessions are the recurring slots held through
+ * lockWeeklySlot, so anything booked one-off here is by definition on top of
+ * the allowance and chargeable. That one rule covers every plan level: an
+ * allowance of zero (casual, prepaid packs) simply means every booking arrives
+ * through this path, with no special case.
+ *
+ * `acknowledgeDropIn` is required so a member cannot be charged for an extra
+ * without the client having shown them what it costs. Refusing without it is
+ * what drives the confirmation dialog in the member app.
+ *
+ * Capacity is read inside the transaction so two people racing for the last
+ * seat cannot both win.
  */
 export const bookSession = onCall(async (request) => {
   const authCtx = requireAuth(request)
@@ -586,8 +606,28 @@ export const bookSession = onCall(async (request) => {
   }
 
   const userSnap = await requireActiveMember(authCtx.uid)
-  const profile = (userSnap.data()?.profile as Record<string, unknown>) ?? {}
-  const preferences = (userSnap.data()?.preferences as Record<string, unknown>) ?? {}
+  const userData = userSnap.data() ?? {}
+  const profile = (userData.profile as Record<string, unknown>) ?? {}
+  const preferences = (userData.preferences as Record<string, unknown>) ?? {}
+  const membership = (userData.membership as Record<string, unknown>) ?? {}
+  const allowance = Number(membership.classesPerWeek ?? 0)
+
+  const chargeCents = await dropInRateCents()
+
+  if (request.data?.acknowledgeDropIn !== true) {
+    const locksSnap = await db.collection(`users/${authCtx.uid}/weeklyLocks`).get()
+    throw new HttpsError(
+      'failed-precondition',
+      'This session is a paid drop-in on top of your included sessions.',
+      {
+        reason: 'drop-in-confirmation-required',
+        chargeCents,
+        allowance,
+        locked: locksSnap.size,
+        lockedSlotIds: locksSnap.docs.map((d) => d.id),
+      },
+    )
+  }
 
   const sessionRef = db.doc(`sessions/${sessionId}`)
   const rosterRef = sessionRef.collection('roster')
@@ -629,11 +669,15 @@ export const bookSession = onCall(async (request) => {
       showName: preferences.showNameToClassmates !== false,
       status: 'booked',
       bookedBy: 'self',
+      // Recorded per entry, not derived at invoice time, so a later plan change
+      // cannot retroactively alter what an already-booked extra costs.
+      dropIn: true,
+      chargeRateCents: chargeCents,
       bookedAt: FieldValue.serverTimestamp(),
     })
     tx.update(sessionRef, { bookedCount: rosterSnap.size + 1 })
 
-    return { spotsLeft: cap - (rosterSnap.size + 1) }
+    return { spotsLeft: cap - (rosterSnap.size + 1), chargeCents }
   })
 
   return { ok: true, sessionId, ...result }
@@ -761,6 +805,11 @@ async function bookMemberIntoSession(
   profile: Record<string, unknown>,
   preferences: Record<string, unknown>,
   bookedBy: 'self' | 'admin',
+  // A seat is "included" only when it comes from a recurring weekly lock, which
+  // is what the subscription allowance actually buys. Everything else is an
+  // extra, so admin-added seats are chargeable too and Tom waives them with a
+  // billing exception rather than by them being silently free.
+  charge: { dropIn: boolean; chargeRateCents: number },
 ): Promise<SeatResult> {
   const sessionRef = db.doc(`sessions/${sessionId}`)
   const rosterRef = sessionRef.collection('roster')
@@ -792,6 +841,8 @@ async function bookMemberIntoSession(
       showName: preferences.showNameToClassmates !== false,
       status: 'booked',
       bookedBy,
+      dropIn: charge.dropIn,
+      chargeRateCents: charge.dropIn ? charge.chargeRateCents : 0,
       bookedAt: FieldValue.serverTimestamp(),
     })
     tx.update(sessionRef, { bookedCount: rosterSnap.size + 1 })
@@ -833,6 +884,7 @@ export const addMemberToSession = onCall(async (request) => {
     (data.profile as Record<string, unknown>) ?? {},
     (data.preferences as Record<string, unknown>) ?? {},
     'admin',
+    { dropIn: true, chargeRateCents: await dropInRateCents() },
   )
 
   if (result === 'missing') throw new HttpsError('not-found', 'Session not found.')
@@ -901,6 +953,8 @@ export const lockWeeklySlot = onCall(async (request) => {
       profile,
       preferences,
       'self',
+      // Included: this seat is what the weekly allowance pays for.
+      { dropIn: false, chargeRateCents: 0 },
     )
     if (result === 'booked') booked.push(doc.id)
     else if (result === 'full') full.push(doc.id)

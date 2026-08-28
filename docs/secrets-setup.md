@@ -66,9 +66,15 @@ activation and calendar invites.
 
 These are working software decisions still outstanding, not setup chores:
 
-- **Guest drop-in booking has no server path.** The member app tells guests to
-  contact the studio instead. Self-service guest booking needs its own callable,
-  probably keyed on a signed guest-pass code since guests have no auth account.
+- **`calculateBillingPeriod` double-charges subscription members.** It adds a
+  line item at `ratePerClass` for every attended session *and* the subscription
+  base on top, so a `weekly2` member attending their included sessions for a
+  month is billed roughly twice the plan price. Booking now records `dropIn`
+  and `chargeRateCents` on each roster entry, which is the data a fix needs:
+  charge the subscription base plus only the entries flagged `dropIn`. Until
+  that lands, drop-ins are billed at the member's own plan rate rather than the
+  intended casual rate, because the invoice still prices every attended session
+  the same way. **Do not invoice from this until it is fixed.**
 - **No recurring session generator.** `seed-timetable.mjs` creates a fixed
   number of weeks; someone must re-run it, or a scheduled function should
   generate each new week from `timetable/slots`.

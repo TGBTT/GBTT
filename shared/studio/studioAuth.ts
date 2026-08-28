@@ -150,15 +150,69 @@ export async function studioRegisterMember(
   }
 }
 
-/** Booking runs server-side so capacity and the transfer window are enforced. */
-export async function studioBookSession(sessionId: string): Promise<string | null> {
+export interface DropInPrompt {
+  /** What this extra session will cost, in cents. */
+  chargeCents: number
+  /** Sessions included in the member's plan each week (0 for casual and packs). */
+  allowance: number
+  /** Recurring slots they currently hold against that allowance. */
+  locked: number
+  lockedSlotIds: string[]
+}
+
+export interface BookSessionResult {
+  error: string | null
+  /** Set when the server wants the member to confirm the extra charge first. */
+  needsDropInConfirmation: DropInPrompt | null
+  chargeCents: number
+}
+
+/**
+ * Book a single session. Anything booked this way is a paid extra on top of
+ * the recurring slots a subscription includes.
+ *
+ * The first call intentionally comes back asking for confirmation rather than
+ * booking, so a member is never charged for an extra without seeing the price.
+ * Call again with `acknowledge` once they have agreed.
+ */
+export async function studioBookSession(
+  sessionId: string,
+  acknowledge = false,
+): Promise<BookSessionResult> {
   const functions = getFirebaseFunctions()
-  if (!functions) return 'Firebase not configured.'
+  if (!functions) {
+    return { error: 'Firebase not configured.', needsDropInConfirmation: null, chargeCents: 0 }
+  }
   try {
-    await httpsCallable(functions, 'bookSession')({ sessionId })
-    return null
+    const res = await httpsCallable(functions, 'bookSession')({
+      sessionId,
+      acknowledgeDropIn: acknowledge,
+    })
+    const data = (res.data ?? {}) as { chargeCents?: number }
+    return {
+      error: null,
+      needsDropInConfirmation: null,
+      chargeCents: Number(data.chargeCents ?? 0),
+    }
   } catch (e) {
-    return e instanceof Error ? e.message : 'Could not book this session.'
+    const details = (e as { details?: Partial<DropInPrompt> & { reason?: string } })?.details
+    if (details?.reason === 'drop-in-confirmation-required') {
+      return {
+        error: null,
+        chargeCents: Number(details.chargeCents ?? 0),
+        needsDropInConfirmation: {
+          chargeCents: Number(details.chargeCents ?? 0),
+          allowance: Number(details.allowance ?? 0),
+          locked: Number(details.locked ?? 0),
+          lockedSlotIds: details.lockedSlotIds ?? [],
+        },
+      }
+    }
+    return {
+      error: e instanceof Error ? e.message : 'Could not book this session.',
+      needsDropInConfirmation: null,
+      chargeCents: 0,
+    }
   }
 }
 

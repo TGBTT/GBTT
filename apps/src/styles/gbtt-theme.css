@@ -337,6 +337,47 @@
   gap: 0.5rem;
 }
 
+.drop-in-prompt {
+  margin-top: 1rem;
+  padding: 1rem;
+  border: 2px solid #0a0a0a;
+  border-radius: 10px;
+  background: #fffdf6;
+}
+
+.drop-in-prompt h3 {
+  margin-top: 0;
+}
+
+.drop-in-swap {
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid #d4d4d0;
+}
+
+.drop-in-slot-list {
+  list-style: none;
+  padding: 0;
+  margin: 0.5rem 0 0;
+}
+
+.drop-in-slot-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid #d4d4d0;
+}
+
+@media (max-width: 32rem) {
+  .drop-in-slot-list li {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+}
+
 .remove-occ-list {
   margin-top: 1.75rem;
   padding-top: 1.25rem;
