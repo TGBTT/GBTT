@@ -1,9 +1,14 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ClassTypeDescription } from '@gbtt/shared/studio/ClassTypeDescription'
-import { studioStaffLogin } from '@gbtt/shared/studio/studioAuth'
+import {
+  studioAddMemberToSession,
+  studioMarkAttendance,
+  studioStaffLogin,
+} from '@gbtt/shared/studio/studioAuth'
 import { AppOutsideShell } from '../../components/AppChrome'
 import { WeekSessionCalendar } from '../../components/WeekSessionCalendar'
+import { useLiveSessions, useSessionRoster } from '../../hooks/useLiveSessions'
 import {
   WEEKDAYS,
   addExercise,
@@ -120,7 +125,16 @@ export default function ClassBoard() {
   const [renameExerciseName, setRenameExerciseName] = useState('')
 
   const classes = getClassTypes()
-  const byDay = useMemo(() => occurrencesByWeekday(), [tick, selectedOccId, tab])
+
+  // Firestore is the source of truth for the timetable, its counts and the
+  // roster. The seeded local store is only a development fallback; in
+  // production an empty week renders as empty rather than as seed numbers.
+  const live = useLiveSessions()
+  const liveRoster = useSessionRoster(live.status === 'ready' ? selectedOccId : null)
+  const usingLive = live.status !== 'unavailable'
+  const localByDay = useMemo(() => occurrencesByWeekday(), [tick, selectedOccId, tab])
+  const byDay = usingLive ? live.byDay : localByDay
+  const [actionError, setActionError] = useState<string | null>(null)
   const exercises = getExercises()
   const users = getUsers().filter((u) => u.role === 'member')
   const site = getSiteContent()
@@ -130,7 +144,18 @@ export default function ClassBoard() {
   const equipment = getEquipmentChecked()
   const sync = useMemo(() => syncLabels(), [tab, selectedTypeId, tick])
   const selected = classTypeById(selectedTypeId)
-  const selectedOcc = selectedOccId ? occurrenceById(selectedOccId) : undefined
+  const baseSelectedOcc = selectedOccId
+    ? usingLive
+      ? live.occurrences.find((o) => o.id === selectedOccId)
+      : occurrenceById(selectedOccId)
+    : undefined
+  // The calendar reads counts from the session document, but the roll call
+  // needs the roster docs themselves, which are fetched only for the open session.
+  const selectedOcc = baseSelectedOcc
+    ? usingLive
+      ? { ...baseSelectedOcc, roster: liveRoster.roster }
+      : baseSelectedOcc
+    : undefined
   const selectedOccType = selectedOcc ? classTypeById(selectedOcc.classTypeId) : undefined
 
   const tabs = ALL_TABS.filter((t) => !t.adminOnly || role === 'admin')
@@ -260,16 +285,33 @@ export default function ClassBoard() {
               Same Mon–Fri grid as member booking. Select a session badge to edit time, day, class, or
               instructor{role === 'admin' ? ' — or add a new session below' : ''}.
             </p>
-            <WeekSessionCalendar
-              byDay={byDay}
-              selectedId={selectedOccId}
-              onSelect={(id) => {
-                setSelectedOccId(id)
-                const o = occurrenceById(id)
-                if (o) setSelectedTypeId(o.classTypeId)
-              }}
-              mode="admin"
-            />
+            {usingLive && live.status === 'loading' ? (
+              <p className="hint">Loading this week’s sessions…</p>
+            ) : null}
+            {live.status === 'error' ? (
+              <p className="form-error">
+                Could not load the timetable: {live.error}
+              </p>
+            ) : null}
+            {live.status === 'ready' && live.occurrences.length === 0 ? (
+              <p className="hint">
+                No sessions scheduled for the week starting {live.weekStart}. Add one below and it
+                will appear here for members straight away.
+              </p>
+            ) : (
+              <WeekSessionCalendar
+                byDay={byDay}
+                selectedId={selectedOccId}
+                onSelect={(id) => {
+                  setSelectedOccId(id)
+                  const o = usingLive
+                    ? live.occurrences.find((x) => x.id === id)
+                    : occurrenceById(id)
+                  if (o) setSelectedTypeId(o.classTypeId)
+                }}
+                mode="admin"
+              />
+            )}
             {selectedOcc && selectedOccType ? (
               <div className="occ-detail cal-detail">
                 <ClassTypeDescription
@@ -291,6 +333,13 @@ export default function ClassBoard() {
                 </p>
                 <div className="role-call-panel">
                   <h3>Role-call</h3>
+                  {actionError ? <p className="form-error">{actionError}</p> : null}
+                  {usingLive && liveRoster.status === 'loading' ? (
+                    <p className="hint">Loading roster…</p>
+                  ) : null}
+                  {usingLive && liveRoster.status === 'ready' && !liveRoster.roster.length ? (
+                    <p className="hint">Nobody booked into this session yet.</p>
+                  ) : null}
                   <ul className="role-call-list">
                     {selectedOcc.roster.map((r) => (
                       <li key={`${r.memberId ?? r.displayName}`}>
@@ -299,14 +348,17 @@ export default function ClassBoard() {
                             type="checkbox"
                             checked={r.status === 'attended'}
                             onChange={(e) => {
-                              if (r.memberId) {
-                                setRosterStatus(
-                                  selectedOcc.id,
-                                  r.memberId,
-                                  e.target.checked ? 'attended' : 'booked',
+                              if (!r.memberId) return
+                              const next = e.target.checked ? 'attended' : 'booked'
+                              setActionError(null)
+                              if (usingLive) {
+                                studioMarkAttendance(selectedOcc.id, r.memberId, next).then(
+                                  (err) => setActionError(err),
                                 )
-                                refresh()
+                                return
                               }
+                              setRosterStatus(selectedOcc.id, r.memberId, next)
+                              refresh()
                             }}
                           />
                           {r.displayName}
@@ -335,6 +387,14 @@ export default function ClassBoard() {
                       className="btn ghost"
                       disabled={!addMemberId}
                       onClick={() => {
+                        setActionError(null)
+                        if (usingLive) {
+                          studioAddMemberToSession(selectedOcc.id, addMemberId).then((err) => {
+                            setActionError(err)
+                            if (!err) setAddMemberId('')
+                          })
+                          return
+                        }
                         const err = adminAddMemberToSession(selectedOcc.id, addMemberId)
                         if (!err) {
                           setAddMemberId('')

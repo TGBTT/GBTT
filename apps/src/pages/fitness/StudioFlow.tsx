@@ -2,6 +2,11 @@ import { useMemo, useState } from 'react'
 import { ClassTypeDescription } from '@gbtt/shared/studio/ClassTypeDescription'
 import { AppChrome } from '../../components/AppChrome'
 import { WeekSessionCalendar } from '../../components/WeekSessionCalendar'
+import { useLiveSessions, useWeeklyLocks } from '../../hooks/useLiveSessions'
+import {
+  studioLockWeeklySlot,
+  studioUnlockWeeklySlot,
+} from '@gbtt/shared/studio/studioAuth'
 import {
   DEMO_ACTIVATION_KEY,
   formEndpointConfigured,
@@ -32,6 +37,7 @@ import {
   spotsLeft,
   syncLabels,
   visibleRosterNames,
+  type ClassOccurrence,
   type PlanId,
 } from '../../shared/fitnessStudio'
 
@@ -60,15 +66,100 @@ export default function StudioFlow() {
   const user = getSessionUser()
   const member = user?.role === 'member' ? user : null
   const site = getSiteContent()
-  const byDay = useMemo(() => occurrencesByWeekday(), [tick])
+  // Firestore is authoritative for availability; the seeded store is only a
+  // development fallback so members are never shown an invented spot count.
+  const live = useLiveSessions()
+  const usingLive = live.status !== 'unavailable'
+  const lockedSlotIds = useWeeklyLocks(usingLive && !!member)
+  const localByDay = useMemo(() => occurrencesByWeekday(), [tick])
+  const byDay = usingLive ? live.byDay : localByDay
   const sync = useMemo(() => syncLabels(), [tick])
-  const selected = selectedId ? occurrenceById(selectedId) : undefined
+  const selected = selectedId
+    ? usingLive
+      ? live.occurrences.find((o) => o.id === selectedId)
+      : occurrenceById(selectedId)
+    : undefined
   const selectedType = selected ? classTypeById(selected.classTypeId) : undefined
+  const [busy, setBusy] = useState(false)
+
+  // A lock is stored against the recurring slot, so every session generated
+  // from that slot shows as held.
+  const heldIds = usingLive
+    ? live.occurrences.filter((o) => o.slotId && lockedSlotIds.includes(o.slotId)).map((o) => o.id)
+    : (member?.weeklyLockedOccurrenceIds ?? [])
+  const selectedIsLocked = selected ? heldIds.includes(selected.id) : false
 
   const flash = (ok: string | null, err: string | null) => {
     setMessage(ok)
     setError(err)
     refresh()
+  }
+
+  const lockSlot = async (slotId: string | undefined, occurrenceId: string) => {
+    if (!usingLive) {
+      const err = bookAsMember(occurrenceId)
+      flash(err ? null : 'Weekly slot locked — repeats every week.', err)
+      return
+    }
+    if (!slotId) {
+      flash(null, 'This session is not part of a recurring slot, so it cannot be locked weekly.')
+      return
+    }
+    setBusy(true)
+    const { error: err, booked, full } = await studioLockWeeklySlot(slotId)
+    setBusy(false)
+    flash(
+      err
+        ? null
+        : `Weekly slot locked — ${booked} upcoming session${booked === 1 ? '' : 's'} booked` +
+          (full ? `, ${full} already full.` : '.'),
+      err,
+    )
+  }
+
+  const unlockSlot = async (slotId: string | undefined, occurrenceId: string) => {
+    if (!usingLive) {
+      const err = dropMemberBooking(occurrenceId)
+      flash(err ? null : 'Weekly slot unlocked.', err)
+      return
+    }
+    if (!slotId) {
+      flash(null, 'This session is not part of a recurring slot.')
+      return
+    }
+    setBusy(true)
+    const { error: err, released, kept } = await studioUnlockWeeklySlot(slotId)
+    setBusy(false)
+    flash(
+      err
+        ? null
+        : `Weekly slot unlocked — ${released} seat${released === 1 ? '' : 's'} released` +
+          // Seats inside the transfer window stay booked and chargeable, so say so
+          // rather than letting the member assume they were refunded.
+          (kept ? `, ${kept} kept inside the transfer window.` : '.'),
+      err,
+    )
+  }
+
+  const moveLock = async (fromOccurrenceId: string, toOcc: ClassOccurrence) => {
+    if (!usingLive) {
+      const err = reshuffleBooking(fromOccurrenceId, toOcc.id)
+      setReshuffleFrom(null)
+      flash(err ? null : 'Weekly lock moved.', err)
+      return
+    }
+    const fromSlotId = live.occurrences.find((o) => o.id === fromOccurrenceId)?.slotId
+    if (!fromSlotId || !toOcc.slotId) {
+      flash(null, 'Both sessions must belong to a recurring slot to move a lock.')
+      return
+    }
+    setBusy(true)
+    const unlocked = await studioUnlockWeeklySlot(fromSlotId)
+    const locked = unlocked.error ? null : await studioLockWeeklySlot(toOcc.slotId)
+    setBusy(false)
+    setReshuffleFrom(null)
+    const err = unlocked.error ?? locked?.error ?? null
+    flash(err ? null : 'Weekly lock moved.', err)
   }
 
   return (
@@ -92,7 +183,7 @@ export default function StudioFlow() {
         <WeekSessionCalendar
           byDay={byDay}
           selectedId={selectedId}
-          heldIds={member?.weeklyLockedOccurrenceIds ?? []}
+          heldIds={heldIds}
           onSelect={setSelectedId}
           mode="member"
         />
@@ -121,7 +212,16 @@ export default function StudioFlow() {
               <p className="hint">Log in below to book with a membership. Guests can still drop in.</p>
             )}
 
-            {!member && spotsLeft(selected) > 0 ? (
+            {/* Guest drop-ins have no server-side booking path yet, so rather than
+                write a booking that only exists in this browser, point them at the
+                studio. */}
+            {!member && usingLive ? (
+              <p className="hint">
+                Guest drop-ins are booked by the studio — get in touch and Tom will add you to the
+                roster.
+              </p>
+            ) : null}
+            {!member && !usingLive && spotsLeft(selected) > 0 ? (
               <div className="btn-row guest-book-row">
                 <input
                   placeholder="Guest name"
@@ -150,7 +250,7 @@ export default function StudioFlow() {
 
             {member ? (
               <div className="btn-row">
-                {member.weeklyLockedOccurrenceIds.includes(selected.id) ? (
+                {selectedIsLocked ? (
                   <>
                     <button
                       type="button"
@@ -165,10 +265,8 @@ export default function StudioFlow() {
                     <button
                       type="button"
                       className="btn ghost"
-                      onClick={() => {
-                        const err = dropMemberBooking(selected.id)
-                        flash(err ? null : 'Weekly slot unlocked.', err)
-                      }}
+                      disabled={busy}
+                      onClick={() => unlockSlot(selected.slotId, selected.id)}
                     >
                       Unlock slot
                     </button>
@@ -177,11 +275,8 @@ export default function StudioFlow() {
                   <button
                     type="button"
                     className="btn primary"
-                    onClick={() => {
-                      const err = reshuffleBooking(reshuffleFrom, selected.id)
-                      setReshuffleFrom(null)
-                      flash(err ? null : 'Weekly lock moved.', err)
-                    }}
+                    disabled={busy}
+                    onClick={() => moveLock(reshuffleFrom, selected)}
                   >
                     Move lock here
                   </button>
@@ -189,11 +284,8 @@ export default function StudioFlow() {
                   <button
                     type="button"
                     className="btn primary"
-                    disabled={spotsLeft(selected) === 0}
-                    onClick={() => {
-                      const err = bookAsMember(selected.id)
-                      flash(err ? null : 'Weekly slot locked — repeats every week.', err)
-                    }}
+                    disabled={busy || spotsLeft(selected) === 0}
+                    onClick={() => lockSlot(selected.slotId, selected.id)}
                   >
                     Lock weekly slot
                   </button>

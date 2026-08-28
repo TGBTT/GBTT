@@ -71,6 +71,15 @@ function requireAdmin(request: { auth?: { uid: string; token: Record<string, unk
   return authCtx
 }
 
+function requireStaff(request: { auth?: { uid: string; token: Record<string, unknown> } }) {
+  const authCtx = requireAuth(request)
+  const role = authCtx.token.role
+  if (role !== 'admin' && role !== 'substitute') {
+    throw new HttpsError('permission-denied', 'Staff role required.')
+  }
+  return authCtx
+}
+
 function guestPassCode(): string {
   return randomBytes(4).toString('hex').toUpperCase()
 }
@@ -674,6 +683,293 @@ export const cancelBooking = onCall(async (request) => {
   })
 
   return { ok: true, sessionId }
+})
+
+/**
+ * Roll call. Staff mark a roster entry attended or not.
+ *
+ * This has to be a callable rather than a client write because
+ * `calculateBillingPeriod` invoices from roster entries where
+ * `status == 'attended'`: if the roll call only lived in the browser, every
+ * billing run would find nothing and charge nobody. The denormalized
+ * `attendanceSummary.totalAttended` on the member is adjusted in the same
+ * transaction so it cannot drift from the roster it summarizes.
+ */
+export const markAttendance = onCall(async (request) => {
+  const authCtx = requireStaff(request)
+
+  const sessionId = String(request.data?.sessionId ?? '').trim()
+  const memberId = String(request.data?.memberId ?? '').trim()
+  const status = String(request.data?.status ?? '').trim()
+
+  if (!sessionId || !memberId) {
+    throw new HttpsError('invalid-argument', 'sessionId and memberId are required.')
+  }
+  if (status !== 'booked' && status !== 'attended' && status !== 'noShow') {
+    throw new HttpsError('invalid-argument', 'status must be booked, attended or noShow.')
+  }
+
+  const entryRef = db.doc(`sessions/${sessionId}/roster/${memberId}`)
+  const userRef = db.doc(`users/${memberId}`)
+
+  await db.runTransaction(async (tx) => {
+    const entry = await tx.get(entryRef)
+    if (!entry.exists) {
+      throw new HttpsError('not-found', 'That member is not on this roster.')
+    }
+
+    const previous = String(entry.data()?.status ?? 'booked')
+    if (previous === status) {
+      return
+    }
+
+    tx.update(entryRef, {
+      status,
+      attendedAt: status === 'attended' ? FieldValue.serverTimestamp() : FieldValue.delete(),
+      markedBy: authCtx.uid,
+      markedAt: FieldValue.serverTimestamp(),
+    })
+
+    const delta = (status === 'attended' ? 1 : 0) - (previous === 'attended' ? 1 : 0)
+    if (delta !== 0) {
+      const userSnap = await tx.get(userRef)
+      if (userSnap.exists) {
+        tx.set(
+          userRef,
+          { attendanceSummary: { totalAttended: FieldValue.increment(delta) } },
+          { merge: true },
+        )
+      }
+    }
+  })
+
+  return { ok: true, sessionId, memberId, status }
+})
+
+type SeatResult = 'booked' | 'already-booked' | 'full' | 'no-capacity' | 'missing'
+
+/**
+ * Take one seat in one session, transactionally.
+ *
+ * Weekly locks book a member into many sessions at once, and a single full
+ * week should not abort the whole lock, so this reports the outcome instead of
+ * throwing. Callers that want a hard failure translate the result themselves.
+ */
+async function bookMemberIntoSession(
+  sessionId: string,
+  memberId: string,
+  profile: Record<string, unknown>,
+  preferences: Record<string, unknown>,
+  bookedBy: 'self' | 'admin',
+): Promise<SeatResult> {
+  const sessionRef = db.doc(`sessions/${sessionId}`)
+  const rosterRef = sessionRef.collection('roster')
+  const entryRef = rosterRef.doc(memberId)
+
+  return db.runTransaction<SeatResult>(async (tx) => {
+    const sessionSnap = await tx.get(sessionRef)
+    if (!sessionSnap.exists) return 'missing'
+    const session = sessionSnap.data() ?? {}
+
+    if ((await tx.get(entryRef)).exists) return 'already-booked'
+
+    let cap = Number(session.cap ?? 0)
+    if (!cap) {
+      const classTypeId = String(session.classTypeId ?? '')
+      if (classTypeId) {
+        cap = Number((await tx.get(db.doc(`catalog/classTypes/${classTypeId}`))).data()?.cap ?? 0)
+      }
+    }
+    if (!cap) return 'no-capacity'
+
+    const rosterSnap = await tx.get(rosterRef)
+    if (rosterSnap.size >= cap) return 'full'
+
+    tx.set(entryRef, {
+      memberId,
+      displayName: String(profile.name ?? ''),
+      kind: 'member',
+      showName: preferences.showNameToClassmates !== false,
+      status: 'booked',
+      bookedBy,
+      bookedAt: FieldValue.serverTimestamp(),
+    })
+    tx.update(sessionRef, { bookedCount: rosterSnap.size + 1 })
+    return 'booked'
+  })
+}
+
+/** Monday of the current week, matching the `weekStart` key sessions are filed under. */
+function currentWeekStartKey(now: Date = new Date()): string {
+  const d = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  d.setDate(d.getDate() + (d.getDay() === 0 ? -6 : 1 - d.getDay()))
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+
+/**
+ * Staff add a member to a session directly (phone bookings, walk-ins).
+ * Shares bookSession's capacity check so the admin path cannot overfill a
+ * class that the member-facing path would have refused.
+ */
+export const addMemberToSession = onCall(async (request) => {
+  requireStaff(request)
+
+  const sessionId = String(request.data?.sessionId ?? '').trim()
+  const memberId = String(request.data?.memberId ?? '').trim()
+  if (!sessionId || !memberId) {
+    throw new HttpsError('invalid-argument', 'sessionId and memberId are required.')
+  }
+
+  const userSnap = await db.doc(`users/${memberId}`).get()
+  if (!userSnap.exists) {
+    throw new HttpsError('not-found', 'Member not found.')
+  }
+  const data = userSnap.data() ?? {}
+
+  const result = await bookMemberIntoSession(
+    sessionId,
+    memberId,
+    (data.profile as Record<string, unknown>) ?? {},
+    (data.preferences as Record<string, unknown>) ?? {},
+    'admin',
+  )
+
+  if (result === 'missing') throw new HttpsError('not-found', 'Session not found.')
+  if (result === 'already-booked') {
+    throw new HttpsError('already-exists', 'That member is already on this roster.')
+  }
+  if (result === 'no-capacity') {
+    throw new HttpsError('failed-precondition', 'Session has no capacity configured.')
+  }
+  if (result === 'full') throw new HttpsError('resource-exhausted', 'This session is full.')
+
+  return { ok: true, sessionId, memberId }
+})
+
+/**
+ * Lock a recurring weekly slot: book the member into every upcoming session
+ * filed under that timetable slot.
+ *
+ * Weekly memberships are sold as "the same day and time every week", so the
+ * lock has to fan out into real roster entries — otherwise capacity, the roll
+ * call and billing would all be blind to it. A week that is already full is
+ * reported back rather than failing the whole lock, since the remaining weeks
+ * are still worth holding.
+ */
+export const lockWeeklySlot = onCall(async (request) => {
+  const authCtx = requireAuth(request)
+  const slotId = String(request.data?.slotId ?? '').trim()
+  if (!slotId) {
+    throw new HttpsError('invalid-argument', 'slotId is required.')
+  }
+
+  const userSnap = await requireActiveMember(authCtx.uid)
+  const data = userSnap.data() ?? {}
+  const profile = (data.profile as Record<string, unknown>) ?? {}
+  const preferences = (data.preferences as Record<string, unknown>) ?? {}
+  const membership = (data.membership as Record<string, unknown>) ?? {}
+
+  const locksRef = db.collection(`users/${authCtx.uid}/weeklyLocks`)
+  const locks = await locksRef.get()
+  const allowance = Number(membership.classesPerWeek ?? 0)
+  const alreadyLocked = locks.docs.some((d) => d.id === slotId)
+
+  if (allowance > 0 && !alreadyLocked && locks.size >= allowance) {
+    throw new HttpsError(
+      'resource-exhausted',
+      `Your plan includes ${allowance} weekly slot${allowance === 1 ? '' : 's'}. Unlock one before locking another.`,
+    )
+  }
+
+  const sessionsSnap = await db
+    .collection('sessions')
+    .where('slotId', '==', slotId)
+    .where('weekStart', '>=', currentWeekStartKey())
+    .get()
+
+  if (sessionsSnap.empty) {
+    throw new HttpsError('not-found', 'No upcoming sessions are scheduled for that slot.')
+  }
+
+  const booked: string[] = []
+  const full: string[] = []
+  for (const doc of sessionsSnap.docs) {
+    const result = await bookMemberIntoSession(
+      doc.id,
+      authCtx.uid,
+      profile,
+      preferences,
+      'self',
+    )
+    if (result === 'booked') booked.push(doc.id)
+    else if (result === 'full') full.push(doc.id)
+  }
+
+  await locksRef.doc(slotId).set(
+    { slotId, lockedAt: FieldValue.serverTimestamp(), classesPerWeek: allowance },
+    { merge: true },
+  )
+
+  return { ok: true, slotId, booked: booked.length, full: full.length, fullSessions: full }
+})
+
+/**
+ * Release a weekly lock and give back the seats.
+ *
+ * Sessions already inside the transfer window are kept rather than released:
+ * the terms members accept on join make those non-refundable because the seat
+ * is still holding their place, and only an admin can grant an exception.
+ */
+export const unlockWeeklySlot = onCall(async (request) => {
+  const authCtx = requireAuth(request)
+  const slotId = String(request.data?.slotId ?? '').trim()
+  if (!slotId) {
+    throw new HttpsError('invalid-argument', 'slotId is required.')
+  }
+
+  await requireActiveMember(authCtx.uid)
+
+  const windowHours = await transferWindowHours()
+  const now = new Date()
+
+  const sessionsSnap = await db
+    .collection('sessions')
+    .where('slotId', '==', slotId)
+    .where('weekStart', '>=', currentWeekStartKey())
+    .get()
+
+  let released = 0
+  let kept = 0
+
+  for (const doc of sessionsSnap.docs) {
+    let startsAt: Date
+    try {
+      startsAt = sessionStartsAt(doc.data() ?? {})
+    } catch {
+      continue
+    }
+    if (now > new Date(startsAt.getTime() - windowHours * 60 * 60 * 1000)) {
+      kept += 1
+      continue
+    }
+
+    const sessionRef = doc.ref
+    const entryRef = sessionRef.collection('roster').doc(authCtx.uid)
+    const removed = await db.runTransaction(async (tx) => {
+      const entry = await tx.get(entryRef)
+      if (!entry.exists) return false
+      const rosterSnap = await tx.get(sessionRef.collection('roster'))
+      tx.delete(entryRef)
+      tx.update(sessionRef, { bookedCount: Math.max(0, rosterSnap.size - 1) })
+      return true
+    })
+    if (removed) released += 1
+  }
+
+  await db.doc(`users/${authCtx.uid}/weeklyLocks/${slotId}`).delete()
+
+  return { ok: true, slotId, released, kept }
 })
 
 /** Admin approves a pending self-registration, unlocking booking. */

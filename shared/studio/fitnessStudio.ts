@@ -62,6 +62,11 @@ export interface ClassOccurrence {
   exerciseDisplay?: ExerciseDisplay
   /** Attendees booked for this session (members + guests). */
   bookedCount: number
+  /** Session-level capacity override; falls back to the class type cap. */
+  cap?: number
+  cancelled?: boolean
+  /** Recurring timetable slot this session belongs to; the key weekly locks use. */
+  slotId?: string
   roster: RosterEntry[]
   calendarEventId: string
   instructorId: string
@@ -874,12 +879,20 @@ export function userById(id: string): SimUser | undefined {
 }
 
 export function spotsLeft(occ: ClassOccurrence): number {
-  const maxCapacity = classTypeById(occ.classTypeId)?.cap ?? occ.bookedCount
+  const maxCapacity = capacityFor(occ)
   return Math.max(0, maxCapacity - occ.bookedCount)
 }
 
 export function maxCapacityFor(classTypeId: string): number {
   return classTypeById(classTypeId)?.cap ?? 0
+}
+
+/**
+ * Live sessions carry their own cap, which is what the server enforces in
+ * bookSession, so it wins over the class-type default here too.
+ */
+export function capacityFor(occ: ClassOccurrence): number {
+  return occ.cap ?? classTypeById(occ.classTypeId)?.cap ?? occ.bookedCount
 }
 
 export function sessionIsFull(occ: ClassOccurrence): boolean {
@@ -888,8 +901,7 @@ export function sessionIsFull(occ: ClassOccurrence): boolean {
 
 /** Shared label: "12/16 attending" */
 export function formatSessionAttending(occ: ClassOccurrence): string {
-  const maxCapacity = maxCapacityFor(occ.classTypeId)
-  return `${occ.bookedCount}/${maxCapacity} attending`
+  return `${occ.bookedCount}/${capacityFor(occ)} attending`
 }
 
 /** Build a URL under the Vite base (same pattern as hero logo assets). */

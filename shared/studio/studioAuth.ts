@@ -173,6 +173,81 @@ export async function studioCancelBooking(sessionId: string): Promise<string | n
   }
 }
 
+/**
+ * Roll call. Runs server-side so the mark lands in the roster document that
+ * calculateBillingPeriod invoices from — a local-only tick would never be billed.
+ */
+export async function studioMarkAttendance(
+  sessionId: string,
+  memberId: string,
+  status: 'booked' | 'attended' | 'noShow',
+): Promise<string | null> {
+  const functions = getFirebaseFunctions()
+  if (!functions) return 'Firebase not configured.'
+  try {
+    await httpsCallable(functions, 'markAttendance')({ sessionId, memberId, status })
+    return null
+  } catch (e) {
+    return e instanceof Error ? e.message : 'Could not update attendance.'
+  }
+}
+
+/** Staff add a client to a session (phone bookings, walk-ins). */
+export async function studioAddMemberToSession(
+  sessionId: string,
+  memberId: string,
+): Promise<string | null> {
+  const functions = getFirebaseFunctions()
+  if (!functions) return 'Firebase not configured.'
+  try {
+    await httpsCallable(functions, 'addMemberToSession')({ sessionId, memberId })
+    return null
+  } catch (e) {
+    return e instanceof Error ? e.message : 'Could not add this member.'
+  }
+}
+
+/**
+ * Lock a recurring weekly slot. The server fans the lock out into real roster
+ * entries for every upcoming week, so capacity and billing see it.
+ */
+export async function studioLockWeeklySlot(
+  slotId: string,
+): Promise<{ error: string | null; booked: number; full: number }> {
+  const functions = getFirebaseFunctions()
+  if (!functions) return { error: 'Firebase not configured.', booked: 0, full: 0 }
+  try {
+    const res = await httpsCallable(functions, 'lockWeeklySlot')({ slotId })
+    const data = (res.data ?? {}) as { booked?: number; full?: number }
+    return { error: null, booked: Number(data.booked ?? 0), full: Number(data.full ?? 0) }
+  } catch (e) {
+    return {
+      error: e instanceof Error ? e.message : 'Could not lock this slot.',
+      booked: 0,
+      full: 0,
+    }
+  }
+}
+
+/** Release a weekly lock; seats inside the transfer window are kept. */
+export async function studioUnlockWeeklySlot(
+  slotId: string,
+): Promise<{ error: string | null; released: number; kept: number }> {
+  const functions = getFirebaseFunctions()
+  if (!functions) return { error: 'Firebase not configured.', released: 0, kept: 0 }
+  try {
+    const res = await httpsCallable(functions, 'unlockWeeklySlot')({ slotId })
+    const data = (res.data ?? {}) as { released?: number; kept?: number }
+    return { error: null, released: Number(data.released ?? 0), kept: Number(data.kept ?? 0) }
+  } catch (e) {
+    return {
+      error: e instanceof Error ? e.message : 'Could not unlock this slot.',
+      released: 0,
+      kept: 0,
+    }
+  }
+}
+
 export async function studioApproveMember(uid: string): Promise<string | null> {
   const functions = getFirebaseFunctions()
   if (!functions) return 'Firebase not configured.'
