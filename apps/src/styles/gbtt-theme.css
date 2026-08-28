@@ -337,6 +337,46 @@
   gap: 0.5rem;
 }
 
+.remove-occ-list {
+  margin-top: 1.75rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid #d4d4d0;
+}
+
+.admin-session-list {
+  list-style: none;
+  padding: 0;
+  margin: 0.75rem 0 0;
+}
+
+.admin-session-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.6rem 0;
+  border-bottom: 1px solid #d4d4d0;
+}
+
+/* Inline cross-reference to another tab; reads as prose, behaves as a button. */
+.link-button {
+  font: inherit;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+@media (max-width: 32rem) {
+  .admin-session-list li {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+}
+
 .theme-gbtt .field input,
 .theme-gbtt .field textarea,
 .theme-gbtt .add-exercise-row input,

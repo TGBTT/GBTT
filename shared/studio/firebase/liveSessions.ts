@@ -16,8 +16,11 @@
 
 import {
   collection,
+  doc,
   onSnapshot,
   query,
+  setDoc,
+  Timestamp,
   where,
   type DocumentData,
 } from 'firebase/firestore'
@@ -39,6 +42,55 @@ export interface LiveRosterState {
 }
 
 const noop = () => {}
+
+/** Studio wall-clock timezone. Session times mean this zone, not the viewer's. */
+const TIME_ZONE = 'Pacific/Auckland'
+
+const DAY_INDEX: Record<string, number> = { Mon: 0, Tue: 1, Wed: 2, Thu: 3, Fri: 4 }
+
+function zoneOffsetMs(utcMs: number, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hour12: false,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  })
+    .formatToParts(new Date(utcMs))
+    .reduce<Record<string, string>>((acc, p) => ({ ...acc, [p.type]: p.value }), {})
+
+  return (
+    Date.UTC(
+      Number(parts.year),
+      Number(parts.month) - 1,
+      Number(parts.day),
+      Number(parts.hour) % 24,
+      Number(parts.minute),
+      Number(parts.second),
+    ) - utcMs
+  )
+}
+
+/**
+ * Studio wall-clock time to a UTC instant. Resolved twice so a session near a
+ * daylight-saving change lands on the right side of the transition — the
+ * transfer window is measured from this, so an hour of drift is a real bug.
+ */
+function zonedToUtc(
+  year: number,
+  month: number,
+  day: number,
+  hour: number,
+  minute: number,
+): Date {
+  const guess = Date.UTC(year, month - 1, day, hour, minute)
+  let instant = guess - zoneOffsetMs(guess, TIME_ZONE)
+  instant = guess - zoneOffsetMs(instant, TIME_ZONE)
+  return new Date(instant)
+}
 
 /** Monday of the week containing `now`, as the YYYY-MM-DD key sessions are stored under. */
 export function currentWeekStart(now: Date = new Date()): string {
@@ -107,6 +159,75 @@ export function subscribeLiveSessions(
     },
     (err) => onChange({ status: 'error', occurrences: [], error: err.message }),
   )
+}
+
+export interface NewSessionInput {
+  classTypeId: string
+  className: string
+  cap: number
+  dayLabel: string
+  time: string
+  weekStart: string
+  instructorId?: string
+  venueId?: string
+}
+
+/**
+ * Add a one-off session to a week.
+ *
+ * Rules permit staff to write session documents directly, so this does not
+ * need a callable — but `startsAt` must be a real timestamp or cancelBooking
+ * and unlockWeeklySlot will refuse to act on it, and `cap` must be set or
+ * bookSession has nothing to enforce.
+ */
+export async function createLiveSession(
+  input: NewSessionInput,
+): Promise<{ id: string | null; error: string | null }> {
+  const db = getFirestoreDb()
+  if (!db) return { id: null, error: 'Firebase not configured.' }
+
+  const dayOffset = DAY_INDEX[input.dayLabel]
+  if (dayOffset === undefined) {
+    return { id: null, error: `Unsupported day "${input.dayLabel}".` }
+  }
+
+  const [y, m, d] = input.weekStart.split('-').map(Number)
+  const [hour, minute] = input.time.split(':').map(Number)
+  if (!y || !m || !d || Number.isNaN(hour) || Number.isNaN(minute)) {
+    return { id: null, error: 'Could not read the week or time for this session.' }
+  }
+
+  const date = new Date(y, m - 1, d + dayOffset)
+  const slotId = `${input.dayLabel.toLowerCase()}-${input.time.replace(':', '')}-${input.classTypeId}`
+  const id = `${slotId}-${input.weekStart}`
+
+  try {
+    await setDoc(
+      doc(db, 'sessions', id),
+      {
+        slotId,
+        weekStart: input.weekStart,
+        dayLabel: input.dayLabel,
+        time: input.time,
+        classTypeId: input.classTypeId,
+        className: input.className,
+        cap: input.cap,
+        instructorId: input.instructorId ?? 'tom',
+        venueId: input.venueId ?? 'rec-park-centre',
+        venue: input.venueId ?? 'rec-park-centre',
+        durationMinutes: 60,
+        cancelled: false,
+        bookedCount: 0,
+        startsAt: Timestamp.fromDate(
+          zonedToUtc(date.getFullYear(), date.getMonth() + 1, date.getDate(), hour, minute),
+        ),
+      },
+      { merge: true },
+    )
+    return { id, error: null }
+  } catch (e) {
+    return { id: null, error: e instanceof Error ? e.message : 'Could not add this session.' }
+  }
 }
 
 /**

@@ -152,6 +152,22 @@ describe('booking cannot bypass the server', () => {
     await assertFails(updateDoc(doc(memberDb(), 'sessions', 'sess-1'), { cap: 999 }))
   })
 
+  // Deleting a session leaves its roster subcollection orphaned but still
+  // matching the collection-group query billing runs on, so removal must go
+  // through the removeSession callable, which archives instead when a roster
+  // exists. Even an admin is blocked from doing it directly.
+  it('admin cannot delete a session directly and orphan its roster', async () => {
+    await assertFails(deleteDoc(doc(adminDb(), 'sessions', 'sess-1')))
+  })
+
+  it('member certainly cannot delete a session', async () => {
+    await assertFails(deleteDoc(doc(memberDb(), 'sessions', 'sess-1')))
+  })
+
+  it('admin can still archive a session by cancelling it', async () => {
+    await assertSucceeds(updateDoc(doc(adminDb(), 'sessions', 'sess-1'), { cancelled: true }))
+  })
+
   it('admin can still write roster for role-call', async () => {
     await assertSucceeds(
       setDoc(doc(adminDb(), 'sessions/sess-1/roster', MEMBER), {

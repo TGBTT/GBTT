@@ -70,7 +70,13 @@ service cloud.firestore {
     match /sessions/{sessionId} {
       allow read: if true;
       allow create, update: if isStaff();
-      allow delete: if isAdmin();
+
+      // Deleting a session document does NOT delete its roster subcollection,
+      // so a direct delete would orphan attendance records that still match
+      // the roster collection-group query billing runs on. The removeSession
+      // callable deletes only when the roster is empty and archives otherwise,
+      // so removal has to go through it.
+      allow delete: if false;
 
       // Members never write roster entries directly: capacity, membership
       // status and the transfer window are enforced by the bookSession /

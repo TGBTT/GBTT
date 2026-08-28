@@ -972,6 +972,77 @@ export const unlockWeeklySlot = onCall(async (request) => {
   return { ok: true, slotId, released, kept }
 })
 
+/**
+ * Remove a session from the timetable without losing attendance history.
+ *
+ * Deleting a Firestore document does not delete its subcollections, so hard
+ * deleting a session that has a roster would leave those entries orphaned —
+ * still matching the `roster` collection-group query calculateBillingPeriod
+ * uses, but no longer reachable from any session. That is the worst outcome:
+ * invisible records that still bill.
+ *
+ * So a session is only truly deleted when nothing is attached to it. As soon
+ * as anyone has booked or attended, it is archived instead: hidden from the
+ * timetable via `cancelled`, with the roster left intact so a member's record
+ * of what they attended, and what they were charged for, survives.
+ *
+ * Rules forbid client deletes of sessions so this invariant cannot be bypassed.
+ */
+export const removeSession = onCall(async (request) => {
+  const authCtx = requireAdmin(request)
+
+  const sessionId = String(request.data?.sessionId ?? '').trim()
+  const reason = String(request.data?.reason ?? '').trim()
+  if (!sessionId) {
+    throw new HttpsError('invalid-argument', 'sessionId is required.')
+  }
+
+  const sessionRef = db.doc(`sessions/${sessionId}`)
+  const snap = await sessionRef.get()
+  if (!snap.exists) {
+    throw new HttpsError('not-found', 'Session not found.')
+  }
+
+  const rosterSnap = await sessionRef.collection('roster').get()
+
+  if (rosterSnap.empty) {
+    await sessionRef.delete()
+    await db.collection('audit').add({
+      type: 'removeSession',
+      mode: 'deleted',
+      sessionId,
+      actorUid: authCtx.uid,
+      at: FieldValue.serverTimestamp(),
+    })
+    return { ok: true, mode: 'deleted', booked: 0, attended: 0 }
+  }
+
+  const attended = rosterSnap.docs.filter((d) => d.data()?.status === 'attended').length
+
+  await sessionRef.set(
+    {
+      cancelled: true,
+      cancelledAt: FieldValue.serverTimestamp(),
+      cancelledBy: authCtx.uid,
+      cancelReason: reason || null,
+    },
+    { merge: true },
+  )
+
+  await db.collection('audit').add({
+    type: 'removeSession',
+    mode: 'archived',
+    sessionId,
+    booked: rosterSnap.size,
+    attended,
+    reason: reason || null,
+    actorUid: authCtx.uid,
+    at: FieldValue.serverTimestamp(),
+  })
+
+  return { ok: true, mode: 'archived', booked: rosterSnap.size, attended }
+})
+
 /** Admin approves a pending self-registration, unlocking booking. */
 export const approveMember = onCall(async (request) => {
   requireAdmin(request)

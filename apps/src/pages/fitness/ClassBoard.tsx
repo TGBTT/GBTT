@@ -4,8 +4,10 @@ import { ClassTypeDescription } from '@gbtt/shared/studio/ClassTypeDescription'
 import {
   studioAddMemberToSession,
   studioMarkAttendance,
+  studioRemoveSession,
   studioStaffLogin,
 } from '@gbtt/shared/studio/studioAuth'
+import { createLiveSession } from '@gbtt/shared/studio/firebase/liveSessions'
 import { AppOutsideShell } from '../../components/AppChrome'
 import { WeekSessionCalendar } from '../../components/WeekSessionCalendar'
 import { useLiveSessions, useSessionRoster } from '../../hooks/useLiveSessions'
@@ -62,12 +64,14 @@ import {
   updateSiteContent,
   updateTeamMember,
   upsertOccurrence,
+  type ClassOccurrence,
   type ExerciseDisplay,
   type Weekday,
 } from '../../shared/fitnessStudio'
 
 type Tab =
   | 'schedule'
+  | 'sessions'
   | 'members'
   | 'risk'
   | 'legal'
@@ -85,6 +89,7 @@ const EQUIPMENT_ITEMS = [
 
 const ALL_TABS: { id: Tab; label: string; adminOnly?: boolean }[] = [
   { id: 'schedule', label: 'Schedule' },
+  { id: 'sessions', label: 'Add & remove sessions', adminOnly: true },
   { id: 'members', label: 'Members & payments' },
   { id: 'risk', label: 'Risk & notes' },
   { id: 'legal', label: 'Legal & payments copy', adminOnly: true },
@@ -135,6 +140,88 @@ export default function ClassBoard() {
   const localByDay = useMemo(() => occurrencesByWeekday(), [tick, selectedOccId, tab])
   const byDay = usingLive ? live.byDay : localByDay
   const [actionError, setActionError] = useState<string | null>(null)
+  const [actionNote, setActionNote] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  const sessionList = useMemo(() => WEEKDAYS.flatMap((d) => byDay[d] ?? []), [byDay])
+
+  const addSession = async () => {
+    setActionError(null)
+    setActionNote(null)
+    const type = classTypeById(selectedTypeId)
+    if (!type) {
+      setActionError('Pick a class type first.')
+      return
+    }
+    const label = `${type.name} on ${newOccDay} at ${newOccTime}`
+
+    if (!usingLive) {
+      setSelectedOccId(
+        upsertOccurrence({
+          classTypeId: selectedTypeId,
+          dayLabel: newOccDay,
+          time: newOccTime,
+        }),
+      )
+      refresh()
+      setActionNote(`Added ${label}.`)
+      return
+    }
+
+    setBusy(true)
+    const { id, error } = await createLiveSession({
+      classTypeId: type.id,
+      className: type.name,
+      cap: type.cap,
+      dayLabel: newOccDay,
+      time: newOccTime,
+      weekStart: live.weekStart,
+    })
+    setBusy(false)
+    if (error) setActionError(error)
+    else {
+      setSelectedOccId(id)
+      setActionNote(`Added ${label}.`)
+    }
+  }
+
+  const removeSession = async (occ: ClassOccurrence) => {
+    setActionError(null)
+    setActionNote(null)
+    const label = `${classTypeById(occ.classTypeId)?.name ?? occ.classTypeId} · ${occ.dayLabel} ${occ.time}`
+
+    // Spell out which of the two outcomes this is before doing it, so an
+    // archive is never mistaken for a delete or the other way round.
+    const confirmed = confirm(
+      occ.bookedCount > 0
+        ? `${label} has ${occ.bookedCount} booked.\n\nIt will be archived: hidden from the timetable, but the roster is kept so attendance and billing records survive. Continue?`
+        : `Delete ${label}?\n\nNobody has booked it, so it will be removed completely.`,
+    )
+    if (!confirmed) return
+
+    if (!usingLive) {
+      deleteOccurrence(occ.id)
+      if (selectedOccId === occ.id) setSelectedOccId(null)
+      refresh()
+      setActionNote(`Removed ${label}.`)
+      return
+    }
+
+    setBusy(true)
+    const result = await studioRemoveSession(occ.id)
+    setBusy(false)
+    if (result.error) {
+      setActionError(result.error)
+      return
+    }
+    if (selectedOccId === occ.id) setSelectedOccId(null)
+    setActionNote(
+      result.mode === 'archived'
+        ? `Archived ${label} — ${result.booked} booking${result.booked === 1 ? '' : 's'} kept` +
+          (result.attended ? `, including ${result.attended} marked attended.` : '.')
+        : `Deleted ${label}.`,
+    )
+  }
   const exercises = getExercises()
   const users = getUsers().filter((u) => u.role === 'member')
   const site = getSiteContent()
@@ -489,71 +576,18 @@ export default function ClassBoard() {
                   </label>
                 </div>
                 {role === 'admin' ? (
-                  <button
-                    type="button"
-                    className="btn ghost"
-                    onClick={() => {
-                      if (confirm('Remove this session from the week?')) {
-                        deleteOccurrence(selectedOcc.id)
-                        setSelectedOccId(null)
-                        refresh()
-                      }
-                    }}
-                  >
-                    Delete session
-                  </button>
+                  <p className="hint">
+                    Sessions are added and removed from the{' '}
+                    <button
+                      type="button"
+                      className="link-button"
+                      onClick={() => setTab('sessions')}
+                    >
+                      Add &amp; remove sessions
+                    </button>{' '}
+                    tab.
+                  </p>
                 ) : null}
-              </div>
-            ) : null}
-            {role === 'admin' ? (
-              <div className="add-occ-row">
-                <h3>Add session</h3>
-                <label className="field">
-                  Class
-                  <select value={selectedTypeId} onChange={(e) => setSelectedTypeId(e.target.value)}>
-                    {classes.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="field">
-                  Day
-                  <select
-                    value={newOccDay}
-                    onChange={(e) => setNewOccDay(e.target.value as Weekday)}
-                  >
-                    {WEEKDAYS.map((d) => (
-                      <option key={d} value={d}>
-                        {d}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="field">
-                  Time
-                  <input
-                    type="time"
-                    value={newOccTime}
-                    onChange={(e) => setNewOccTime(e.target.value)}
-                  />
-                </label>
-                <button
-                  type="button"
-                  className="btn primary"
-                  onClick={() => {
-                    const id = upsertOccurrence({
-                      classTypeId: selectedTypeId,
-                      dayLabel: newOccDay,
-                      time: newOccTime,
-                    })
-                    setSelectedOccId(id)
-                    refresh()
-                  }}
-                >
-                  Add to calendar
-                </button>
               </div>
             ) : null}
           </div>
@@ -837,6 +871,87 @@ export default function ClassBoard() {
             </aside>
           )}
         </div>
+      )}
+
+      {tab === 'sessions' && role === 'admin' && (
+        <section className="yacht-panel app-enter app-section">
+          <h2>Add &amp; remove sessions</h2>
+          {actionError ? <p className="form-error">{actionError}</p> : null}
+          {actionNote ? <p className="form-success">{actionNote}</p> : null}
+
+          <div className="add-occ-row">
+            <h3>Add a session</h3>
+            <p className="hint">
+              Added to the week beginning {live.weekStart}. Members can book it as soon as it
+              appears.
+            </p>
+            <label className="field">
+              Class
+              <select value={selectedTypeId} onChange={(e) => setSelectedTypeId(e.target.value)}>
+                {classes.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              Day
+              <select value={newOccDay} onChange={(e) => setNewOccDay(e.target.value as Weekday)}>
+                {WEEKDAYS.map((d) => (
+                  <option key={d} value={d}>
+                    {d}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              Time
+              <input
+                type="time"
+                value={newOccTime}
+                onChange={(e) => setNewOccTime(e.target.value)}
+              />
+            </label>
+            <button type="button" className="btn primary" disabled={busy} onClick={addSession}>
+              Add to calendar
+            </button>
+          </div>
+
+          <div className="remove-occ-list">
+            <h3>Remove a session</h3>
+            <p className="hint">
+              A session nobody has booked is deleted outright. Once anyone has booked or attended,
+              it is archived instead — hidden from the timetable, with the roster kept so members
+              keep their record of what they attended and were charged for.
+            </p>
+            {sessionList.length === 0 ? (
+              <p className="hint">No sessions scheduled this week.</p>
+            ) : (
+              <ul className="admin-session-list">
+                {sessionList.map((occ) => {
+                  const type = classTypeById(occ.classTypeId)
+                  return (
+                    <li key={occ.id}>
+                      <span>
+                        <strong>{type?.name ?? occ.classTypeId}</strong> · {occ.dayLabel}{' '}
+                        {occ.time} · {formatSessionAttending(occ)}
+                      </span>
+                      <button
+                        type="button"
+                        className="btn ghost"
+                        disabled={busy}
+                        onClick={() => removeSession(occ)}
+                      >
+                        {occ.bookedCount > 0 ? 'Archive' : 'Delete'}
+                      </button>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </div>
+        </section>
       )}
 
       {tab === 'members' && (

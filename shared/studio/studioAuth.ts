@@ -248,6 +248,49 @@ export async function studioUnlockWeeklySlot(
   }
 }
 
+export interface RemoveSessionResult {
+  error: string | null
+  /** `deleted` when nothing was attached; `archived` when a roster was preserved. */
+  mode: 'deleted' | 'archived' | null
+  booked: number
+  attended: number
+}
+
+/**
+ * Remove a session. The server deletes it only when no one is attached and
+ * archives it otherwise, so attendance history is never destroyed.
+ */
+export async function studioRemoveSession(
+  sessionId: string,
+  reason = '',
+): Promise<RemoveSessionResult> {
+  const functions = getFirebaseFunctions()
+  if (!functions) {
+    return { error: 'Firebase not configured.', mode: null, booked: 0, attended: 0 }
+  }
+  try {
+    const res = await httpsCallable(functions, 'removeSession')({ sessionId, reason })
+    const data = (res.data ?? {}) as {
+      mode?: 'deleted' | 'archived'
+      booked?: number
+      attended?: number
+    }
+    return {
+      error: null,
+      mode: data.mode ?? null,
+      booked: Number(data.booked ?? 0),
+      attended: Number(data.attended ?? 0),
+    }
+  } catch (e) {
+    return {
+      error: e instanceof Error ? e.message : 'Could not remove this session.',
+      mode: null,
+      booked: 0,
+      attended: 0,
+    }
+  }
+}
+
 export async function studioApproveMember(uid: string): Promise<string | null> {
   const functions = getFirebaseFunctions()
   if (!functions) return 'Firebase not configured.'
