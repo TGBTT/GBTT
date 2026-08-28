@@ -1,0 +1,261 @@
+/**
+ * Security rules tests for firestore.rules.
+ *
+ * These encode the exploits the rules exist to prevent, so a future rule edit
+ * that reopens one fails here rather than in production.
+ *
+ *   cd firestore-tests && npm install && npm test
+ *
+ * Requires Java (the Firestore emulator runs on the JVM).
+ */
+
+import { after, before, describe, it } from 'node:test'
+import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import {
+  assertFails,
+  assertSucceeds,
+  initializeTestEnvironment,
+} from '@firebase/rules-unit-testing'
+import { doc, getDoc, setDoc, updateDoc, deleteDoc } from 'firebase/firestore'
+
+const MEMBER = 'member-uid'
+const OTHER = 'other-uid'
+const ADMIN = 'admin-uid'
+const PENDING = 'pending-uid'
+
+let testEnv
+
+const activeMember = {
+  profile: { name: 'Alex', email: 'alex@example.com', role: 'member', status: 'active' },
+  membership: { planId: 'weekly2', classesPerWeek: 2 },
+  billing: { balanceCents: 12000, customDiscountPct: 0 },
+  clinical: { riskNotes: 'none' },
+  preferences: { showNameToClassmates: true },
+}
+
+before(async () => {
+  testEnv = await initializeTestEnvironment({
+    projectId: 'gbtt-rules-test',
+    firestore: {
+      rules: readFileSync('../firestore.rules', 'utf8'),
+      host: '127.0.0.1',
+      port: 8080,
+    },
+  })
+
+  // Seed with rules disabled.
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    const db = ctx.firestore()
+    await setDoc(doc(db, 'users', MEMBER), activeMember)
+    await setDoc(doc(db, 'users', PENDING), {
+      profile: { name: 'Pat', email: 'pat@example.com', role: 'member', status: 'pending' },
+      preferences: { showNameToClassmates: true },
+    })
+    await setDoc(doc(db, 'sessions', 'sess-1'), {
+      classTypeId: 'sweat',
+      weekStart: '2026-08-24',
+      cap: 12,
+      bookedCount: 0,
+    })
+    await setDoc(doc(db, 'sessions/sess-1/roster', OTHER), {
+      memberId: OTHER,
+      displayName: 'Someone',
+      status: 'booked',
+    })
+  })
+})
+
+after(async () => {
+  await testEnv?.cleanup()
+})
+
+function memberDb() {
+  return testEnv.authenticatedContext(MEMBER, { role: 'member' }).firestore()
+}
+function adminDb() {
+  return testEnv.authenticatedContext(ADMIN, { role: 'admin' }).firestore()
+}
+function anonDb() {
+  return testEnv.unauthenticatedContext().firestore()
+}
+
+describe('billing cannot be self-edited', () => {
+  it('member cannot set their own discount to 100%', async () => {
+    await assertFails(
+      updateDoc(doc(memberDb(), 'users', MEMBER), { 'billing.customDiscountPct': 100 }),
+    )
+  })
+
+  it('member cannot zero their own balance', async () => {
+    await assertFails(updateDoc(doc(memberDb(), 'users', MEMBER), { 'billing.balanceCents': 0 }))
+  })
+
+  it('member cannot downgrade their own plan rate', async () => {
+    await assertFails(updateDoc(doc(memberDb(), 'users', MEMBER), { 'membership.planId': 'casual' }))
+  })
+})
+
+describe('privilege escalation is blocked', () => {
+  it('member cannot make themselves admin', async () => {
+    await assertFails(updateDoc(doc(memberDb(), 'users', MEMBER), { 'profile.role': 'admin' }))
+  })
+
+  it('pending member cannot self-approve to active', async () => {
+    const db = testEnv.authenticatedContext(PENDING, { role: 'member' }).firestore()
+    await assertFails(updateDoc(doc(db, 'users', PENDING), { 'profile.status': 'active' }))
+  })
+
+  it('pending member can still fix their own name while waiting', async () => {
+    const db = testEnv.authenticatedContext(PENDING, { role: 'member' }).firestore()
+    await assertSucceeds(updateDoc(doc(db, 'users', PENDING), { 'profile.name': 'Patricia' }))
+  })
+
+  it('member cannot edit their own clinical notes', async () => {
+    await assertFails(updateDoc(doc(memberDb(), 'users', MEMBER), { 'clinical.riskNotes': 'x' }))
+  })
+})
+
+describe('members retain the edits they should have', () => {
+  it('member can update their display name', async () => {
+    await assertSucceeds(updateDoc(doc(memberDb(), 'users', MEMBER), { 'profile.name': 'Alexandra' }))
+  })
+
+  it('member can change their privacy preference', async () => {
+    await assertSucceeds(
+      updateDoc(doc(memberDb(), 'users', MEMBER), { 'preferences.showNameToClassmates': false }),
+    )
+  })
+})
+
+describe('booking cannot bypass the server', () => {
+  it('member cannot insert their own roster entry', async () => {
+    await assertFails(
+      setDoc(doc(memberDb(), 'sessions/sess-1/roster', MEMBER), {
+        memberId: MEMBER,
+        status: 'booked',
+      }),
+    )
+  })
+
+  it('member cannot mark themselves attended', async () => {
+    await assertFails(
+      setDoc(doc(memberDb(), 'sessions/sess-1/roster', MEMBER), { status: 'attended' }),
+    )
+  })
+
+  it('member cannot delete another members booking', async () => {
+    await assertFails(deleteDoc(doc(memberDb(), 'sessions/sess-1/roster', OTHER)))
+  })
+
+  it('member cannot inflate session capacity', async () => {
+    await assertFails(updateDoc(doc(memberDb(), 'sessions', 'sess-1'), { cap: 999 }))
+  })
+
+  it('admin can still write roster for role-call', async () => {
+    await assertSucceeds(
+      setDoc(doc(adminDb(), 'sessions/sess-1/roster', MEMBER), {
+        memberId: MEMBER,
+        status: 'attended',
+      }),
+    )
+  })
+})
+
+describe('self-registration is gated', () => {
+  it('new signup must be pending', async () => {
+    const uid = 'fresh-uid'
+    const db = testEnv.authenticatedContext(uid).firestore()
+    await assertFails(
+      setDoc(doc(db, 'users', uid), {
+        profile: { name: 'New', email: 'n@e.com', role: 'member', status: 'active' },
+      }),
+    )
+    await assertSucceeds(
+      setDoc(doc(db, 'users', uid), {
+        profile: { name: 'New', email: 'n@e.com', role: 'member', status: 'pending' },
+      }),
+    )
+  })
+
+  it('signup cannot self-assign admin', async () => {
+    const uid = 'sneaky-uid'
+    const db = testEnv.authenticatedContext(uid).firestore()
+    await assertFails(
+      setDoc(doc(db, 'users', uid), {
+        profile: { name: 'S', email: 's@e.com', role: 'admin', status: 'pending' },
+      }),
+    )
+  })
+
+  it('signup cannot supply its own billing', async () => {
+    const uid = 'billing-uid'
+    const db = testEnv.authenticatedContext(uid).firestore()
+    await assertFails(
+      setDoc(doc(db, 'users', uid), {
+        profile: { name: 'B', email: 'b@e.com', role: 'member', status: 'pending' },
+        billing: { balanceCents: 0, customDiscountPct: 100 },
+      }),
+    )
+  })
+})
+
+describe('cross-member and anonymous access', () => {
+  it('member cannot read another members profile', async () => {
+    await assertFails(getDoc(doc(memberDb(), 'users', OTHER)))
+  })
+
+  it('anonymous cannot read any member profile', async () => {
+    await assertFails(getDoc(doc(anonDb(), 'users', MEMBER)))
+  })
+
+  it('anonymous cannot read bank details in meta', async () => {
+    await assertFails(getDoc(doc(anonDb(), 'meta', 'settings')))
+  })
+
+  it('anonymous can still read the public timetable', async () => {
+    await assertSucceeds(getDoc(doc(anonDb(), 'sessions', 'sess-1')))
+  })
+
+  it('anonymous cannot write site content', async () => {
+    await assertFails(setDoc(doc(anonDb(), 'siteContent', 'home'), { hero: 'hacked' }))
+  })
+})
+
+describe('server-only collections', () => {
+  it('member cannot write their own billing period', async () => {
+    await assertFails(
+      setDoc(doc(memberDb(), `users/${MEMBER}/billingPeriods`, '2026-08-01'), { totalCents: 0 }),
+    )
+  })
+
+  it('admin cannot forge a billing period either', async () => {
+    await assertFails(
+      setDoc(doc(adminDb(), `users/${MEMBER}/billingPeriods`, '2026-08-01'), { totalCents: 0 }),
+    )
+  })
+
+  it('member cannot mint a guest pass', async () => {
+    await assertFails(setDoc(doc(memberDb(), 'guestPasses', 'FREE1234'), { restricted: false }))
+  })
+
+  it('member cannot write the audit log', async () => {
+    await assertFails(setDoc(doc(memberDb(), 'audit', 'evt1'), { type: 'forged' }))
+  })
+})
+
+describe('admin retains control', () => {
+  it('admin can adjust member billing', async () => {
+    await assertSucceeds(
+      updateDoc(doc(adminDb(), 'users', MEMBER), { 'billing.customDiscountPct': 10 }),
+    )
+  })
+
+  it('admin can approve a member', async () => {
+    await assertSucceeds(updateDoc(doc(adminDb(), 'users', MEMBER), { 'profile.status': 'active' }))
+  })
+})
+
+it('sanity: seeded state is intact', () => {
+  assert.equal(activeMember.profile.role, 'member')
+})

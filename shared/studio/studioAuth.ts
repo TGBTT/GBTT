@@ -6,11 +6,13 @@ import {
   type User,
 } from 'firebase/auth'
 import { doc, getDoc, setDoc } from 'firebase/firestore'
-import { getFirebaseAuth, getFirestoreDb } from './firebase/init'
+import { httpsCallable } from 'firebase/functions'
+import { getFirebaseAuth, getFirebaseFunctions, getFirestoreDb } from './firebase/init'
 import { isFirebaseConfigured } from './firebase/config'
 import { login as localLogin, logout as localLogout } from './fitnessStudio'
 
 export type StudioRole = 'member' | 'admin' | 'substitute'
+export type StudioStatus = 'pending' | 'active' | 'suspended'
 
 export async function studioLogin(email: string, password: string): Promise<string | null> {
   if (!isFirebaseConfigured()) {
@@ -23,6 +25,9 @@ export async function studioLogin(email: string, password: string): Promise<stri
     const cred = await signInWithEmailAndPassword(auth, email.trim(), password)
     const profile = await getDoc(doc(db, 'users', cred.user.uid))
     if (!profile.exists()) return 'No profile found for this account.'
+    if (profile.data()?.profile?.status === 'pending') {
+      return 'Your account is awaiting approval by the studio — you will be emailed once it is active.'
+    }
     return null
   } catch {
     return 'Sign-in failed. Check email and password.'
@@ -50,6 +55,12 @@ export async function studioRequestPasswordReset(email: string): Promise<string 
   }
 }
 
+/**
+ * Self-registration creates a `pending` profile only. Booking stays locked
+ * until an admin approves, and the requested plan is recorded as a preference
+ * rather than a membership: security rules reject client-written `membership`
+ * and `billing`, since those drive what the member is charged.
+ */
 export async function studioRegisterMember(
   name: string,
   email: string,
@@ -62,13 +73,53 @@ export async function studioRegisterMember(
   try {
     const cred = await createUserWithEmailAndPassword(auth, email.trim(), password)
     await setDoc(doc(db, 'users', cred.user.uid), {
-      profile: { name: name.trim(), email: email.trim().toLowerCase(), role: 'member', status: 'active' },
-      membership: { planId, classesPerWeek: 2, weeklySlotIds: [], creditsRemaining: 0 },
-      compliance: { termsAcceptedAt: null, termsVersion: 1 },
+      profile: {
+        name: name.trim(),
+        email: email.trim().toLowerCase(),
+        role: 'member',
+        status: 'pending',
+      },
+      requested: { planId },
+      preferences: { showNameToClassmates: true },
+      compliance: { termsAcceptedAt: new Date().toISOString(), termsVersion: 1 },
     })
     return null
   } catch (e) {
     return e instanceof Error ? e.message : 'Registration failed.'
+  }
+}
+
+/** Booking runs server-side so capacity and the transfer window are enforced. */
+export async function studioBookSession(sessionId: string): Promise<string | null> {
+  const functions = getFirebaseFunctions()
+  if (!functions) return 'Firebase not configured.'
+  try {
+    await httpsCallable(functions, 'bookSession')({ sessionId })
+    return null
+  } catch (e) {
+    return e instanceof Error ? e.message : 'Could not book this session.'
+  }
+}
+
+export async function studioCancelBooking(sessionId: string): Promise<string | null> {
+  const functions = getFirebaseFunctions()
+  if (!functions) return 'Firebase not configured.'
+  try {
+    await httpsCallable(functions, 'cancelBooking')({ sessionId })
+    return null
+  } catch (e) {
+    return e instanceof Error ? e.message : 'Could not cancel this booking.'
+  }
+}
+
+export async function studioApproveMember(uid: string): Promise<string | null> {
+  const functions = getFirebaseFunctions()
+  if (!functions) return 'Firebase not configured.'
+  try {
+    await httpsCallable(functions, 'approveMember')({ uid })
+    return null
+  } catch (e) {
+    return e instanceof Error ? e.message : 'Could not approve this member.'
   }
 }
 

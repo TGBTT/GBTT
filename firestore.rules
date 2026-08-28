@@ -1,5 +1,13 @@
 rules_version = '2';
 
+// Firestore denies any path that no `match` block allows, so there is no
+// catch-all deny at the bottom: in Firestore a request is permitted if ANY
+// rule grants it, which means a trailing `allow read, write: if false` cannot
+// revoke an allow above it. Unmatched paths are already closed.
+//
+// Cloud Functions use the Admin SDK and bypass these rules entirely. Anything
+// that needs to check capacity, money, or roles is enforced there, not here.
+
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -27,6 +35,25 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == uid;
     }
 
+    // Read a nested profile field without erroring when the parent map is
+    // absent. Touching a missing field aborts rule evaluation and denies the
+    // request, which would break otherwise-legitimate writes.
+    function profileVal(data, key) {
+      return data.get('profile', {}).get(key, null);
+    }
+
+    // Fields a member must never be able to write on their own document.
+    // `billing` and `membership` feed calculateBillingPeriod, so a member who
+    // could edit them could set their own discount or plan rate and invoice
+    // themselves nothing. `role` and `status` gate access and approval.
+    function selfEditAllowed() {
+      return profileVal(request.resource.data, 'role') == profileVal(resource.data, 'role')
+        && profileVal(request.resource.data, 'status') == profileVal(resource.data, 'status')
+        && request.resource.data.get('billing', null) == resource.data.get('billing', null)
+        && request.resource.data.get('membership', null) == resource.data.get('membership', null)
+        && request.resource.data.get('clinical', null) == resource.data.get('clinical', null);
+    }
+
     // —— Public catalog (class types, exercises, venues, team) ——
     match /catalog/{document=**} {
       allow read: if true;
@@ -39,16 +66,18 @@ service cloud.firestore {
       allow write: if isStaff();
     }
 
-    // —— Concrete week sessions (public summary; roster is subcollection) ——
+    // —— Concrete week sessions (public summary; roster is a subcollection) ——
     match /sessions/{sessionId} {
       allow read: if true;
       allow create, update: if isStaff();
       allow delete: if isAdmin();
 
+      // Members never write roster entries directly: capacity, membership
+      // status and the transfer window are enforced by the bookSession /
+      // cancelBooking callables. Direct writes would bypass all of it.
       match /roster/{userId} {
         allow read: if isStaff() || isOwner(userId);
-        allow create: if isOwner(userId) || isStaff();
-        allow update, delete: if isOwner(userId) || isStaff();
+        allow write: if isStaff();
       }
     }
 
@@ -58,20 +87,30 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
-    // —— Member profiles — members own; admin full; substitute read for role-call search ——
+    // —— Member profiles ——
     match /users/{uid} {
       allow read: if isOwner(uid) || isStaff();
-      allow create: if isOwner(uid);
-      allow update: if isOwner(uid) || isAdmin();
+
+      // Self-registration lands in `pending` with no booking rights until an
+      // admin approves. Billing and clinical data may not be self-supplied.
+      allow create: if isOwner(uid)
+        && profileVal(request.resource.data, 'status') == 'pending'
+        && profileVal(request.resource.data, 'role') == 'member'
+        && !('billing' in request.resource.data)
+        && !('clinical' in request.resource.data);
+
+      allow update: if isAdmin() || (isOwner(uid) && selfEditAllowed());
       allow delete: if isAdmin();
 
+      // Recurring slot locks are bookings; server-side only.
       match /weeklyLocks/{slotId} {
-        allow read, write: if isOwner(uid) || isAdmin();
+        allow read: if isOwner(uid) || isStaff();
+        allow write: if isAdmin();
       }
 
       match /bookings/{bookingId} {
         allow read: if isOwner(uid) || isStaff();
-        allow create, update, delete: if isOwner(uid) || isStaff();
+        allow write: if isStaff();
       }
 
       match /billingPeriods/{periodId} {
