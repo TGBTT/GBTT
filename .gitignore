@@ -18,5 +18,10 @@ functions/lib
 serviceAccount*.json
 *service-account*.json
 .firebase/
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+database-debug.log
+pubsub-debug.log
 # Generated class photo sources (processed output lives in img/ and public/)
 assets/class-*.png
