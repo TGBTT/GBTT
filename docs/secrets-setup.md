@@ -15,17 +15,27 @@ Complete this checklist before live Firebase integration testing. The app code a
    - `projectId`
    - `appId`
 5. **Functions** → set default region to `australia-southeast1` (matches `functions/src/index.ts`).
-6. Create the first **admin** user (temporary):
-   - Authentication → Add user (Tom’s email).
-   - Firestore → `users/{uid}` with `profile.role: admin`.
-   - Run once from a secured shell or Admin SDK:
-
-     ```bash
-     firebase functions:shell
-     # Or use Firebase Admin locally to setCustomUserClaims(uid, { role: 'admin' })
-     ```
-
+6. Create the first **admin** user — see “Bootstrap the first admin” in section 6 below. This
+   cannot be done from the console alone.
 7. Recommended: set a **budget alert** on Blaze billing.
+
+### Deploying the rules
+
+`firestore.rules` and `firestore.indexes.json` in this repo are the source of truth. Editing rules
+in the console works, but the next deploy overwrites it. Deploy with:
+
+```bash
+npm install -g firebase-tools
+firebase login
+firebase deploy --only firestore:rules,firestore:indexes
+```
+
+`.firebaserc` already pins the default project, so no `--project` flag is needed.
+
+> **Realtime Database is not used.** This project is Cloud Firestore only — `firestore.rules` is
+> written in the Firestore rules language and will not parse in the RTDB console. If an RTDB
+> instance was created by accident, lock it down with
+> `{"rules": {".read": false, ".write": false}}` so it is not left world-readable.
 
 ---
 
@@ -132,7 +142,44 @@ Security model (see `firestore.rules`):
 - **Staff**: `admin` or `substitute` custom claim on Auth token
 - **Server-only**: `guestPasses` writes, `billingPeriods` writes, audit entries
 
-Custom claims (`role: admin | substitute | member`) are set via Admin SDK when creating accounts or promoting staff.
+### Bootstrap the first admin
+
+The rules authorise staff from the **`role` custom claim** on the Auth token
+(`request.auth.token.role`), not from any Firestore field. Adding `profile.role: admin` to a
+`users/{uid}` document does **nothing** on its own, and custom claims cannot be set from the
+Firebase console. So until this runs, every admin-only path denies for everyone — including Tom.
+
+Bootstrap it once with the Admin SDK:
+
+1. Authentication → Add user → Tom's email and a temporary password.
+2. Project settings → **Service accounts** → Generate new private key. Save it **outside the repo**
+   (for example `C:\keys\gbtt-sa.json`).
+3. From the repo root:
+
+   ```bash
+   node functions/scripts/set-admin-claim.mjs --key C:\keys\gbtt-sa.json --email tom@example.com
+   ```
+
+   Useful variants:
+
+   ```bash
+   # inspect current claims without changing anything
+   node functions/scripts/set-admin-claim.mjs --key <key> --email <addr> --show
+
+   # promote a cover instructor
+   node functions/scripts/set-admin-claim.mjs --key <key> --email <addr> --role substitute
+
+   # create the Auth user at the same time
+   node functions/scripts/set-admin-claim.mjs --key <key> --email <addr> --create --name "Tom"
+   ```
+
+4. **Delete the service-account key** once the claim is set. It is a full-project credential.
+
+The claim is embedded in the ID token, so Tom must sign out and back in before admin screens
+unlock (otherwise it takes up to an hour for the token to refresh).
+
+After this, further staff can be managed in-app — `createMemberAccount` assigns the `member` claim
+automatically.
 
 ---
 

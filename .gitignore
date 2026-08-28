@@ -13,5 +13,10 @@ apps/node_modules
 apps/dist
 functions/node_modules
 functions/lib
+# Firebase service-account keys are full-project credentials — never commit
+*-firebase-adminsdk-*.json
+serviceAccount*.json
+*service-account*.json
+.firebase/
 # Generated class photo sources (processed output lives in img/ and public/)
 assets/class-*.png
