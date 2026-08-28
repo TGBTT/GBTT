@@ -10,15 +10,72 @@ Firebase project: **`gbtt-c1130`**
 |------|-------|
 | Firestore database created | done |
 | `firestore.rules` + indexes deployed | done |
-| Rules hardened (billing, roster, signup gating) | done — 29 tests in `firestore-tests/` |
+| Rules hardened (billing, roster, signup gating, session deletes) | done — 32 tests in `firestore-tests/` |
 | Web app registered (client config exists) | done |
+| App reads timetable/attendance from Firestore | done — code committed, never yet run against live data |
+| **Blaze plan + Cloud Functions deployed** | **todo — blocks everything below** |
+| Timetable seeded into Firestore | **todo** — `functions/scripts/seed-timetable.mjs` |
 | GitHub repository secrets | **todo** — run `scripts/sync-github-secrets.ps1` |
 | Email/Password sign-in enabled | **todo** — console only |
 | First admin custom claim | **todo** — `functions/scripts/set-admin-claim.mjs` |
-| Blaze plan + Cloud Functions deployed | **todo** — booking is blocked until this lands |
-| App Check + API key referrer restriction | **todo** |
 | Apps Script deployed → `VITE_FORM_ENDPOINT` | **todo** |
 | DNS for `gbtt.co.nz` → GitHub Pages | **todo** |
+| App Check + API key referrer restriction | **todo** — hardening, not required to go live |
+
+## Route to completion
+
+The steps below are ordered because each unblocks the next. Everything before
+step 1 is already done and committed.
+
+**1. Upgrade to Blaze.** [Console → usage](https://console.firebase.google.com/project/gbtt-c1130/usage/details).
+Cloud Functions cannot deploy on Spark: the CLI fails enabling
+`artifactregistry.googleapis.com`. Set a budget alert at the same time. Nothing
+else on this list can be finished first.
+
+**2. Deploy the functions.** `firebase deploy --only functions`.
+
+Until this lands the app is not merely incomplete, it is partly inoperative:
+booking, roll call and session removal all call functions that do not exist
+yet. Session removal in particular now fails closed — rules refuse client
+deletes so that a session with attendance can never be hard-deleted, and the
+`removeSession` callable that does it safely is not deployed. That is the safe
+failure, but it is a failure.
+
+**3. Seed the timetable.** `node functions/scripts/seed-timetable.mjs --key ./sa.json --weeks 8`
+(`--dry-run` first). Firestore has no sessions yet, and the app deliberately
+renders an empty week rather than inventing numbers, so the timetable stays
+blank until this runs.
+
+**4. Enable Email/Password sign-in** in the console, then **bootstrap the first
+admin** with `functions/scripts/set-admin-claim.mjs`. The `role` claim cannot be
+set from the console, and staff sign-in checks it, so the admin console is
+unreachable until this is done.
+
+**5. Set the GitHub secrets** with `scripts/sync-github-secrets.ps1`. Without
+them the deployed site builds without Firebase config and falls back to local
+seed data — which, given step 3's honest empty state, now means the live
+timetable renders blank. This is the step most likely to look like a broken
+site.
+
+**6. Deploy Apps Script** and set `VITE_FORM_ENDPOINT` for contact email,
+activation and calendar invites.
+
+**7. Point DNS at GitHub Pages** for `gbtt.co.nz`.
+
+### Known gaps after step 7
+
+These are working software decisions still outstanding, not setup chores:
+
+- **Guest drop-in booking has no server path.** The member app tells guests to
+  contact the studio instead. Self-service guest booking needs its own callable,
+  probably keyed on a signed guest-pass code since guests have no auth account.
+- **No recurring session generator.** `seed-timetable.mjs` creates a fixed
+  number of weeks; someone must re-run it, or a scheduled function should
+  generate each new week from `timetable/slots`.
+- **The Firestore path has never run against live data.** It is typechecked,
+  built and covered by rules tests, but every browser check to date exercised
+  the local development fallback. The first real booking, roll call, weekly lock
+  and archive are all worth watching directly.
 
 ### Security model
 
