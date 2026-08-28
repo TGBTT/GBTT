@@ -2,6 +2,24 @@
 
 Complete this checklist before live Firebase integration testing. The app code and Cloud Functions are committed; they stay in a graceful “configuration required” state until these values exist.
 
+## Status
+
+Firebase project: **`gbtt-c1130`**
+
+| Step | State |
+|------|-------|
+| Firestore database created | done |
+| `firestore.rules` + indexes deployed | done |
+| Web app registered (client config exists) | done |
+| GitHub repository secrets | **todo** — run `scripts/sync-github-secrets.ps1` |
+| Email/Password sign-in enabled | **todo** — console only |
+| First admin custom claim | **todo** — `functions/scripts/set-admin-claim.mjs` |
+| Blaze plan + Cloud Functions deployed | **todo** — blocked on billing |
+| Apps Script deployed → `VITE_FORM_ENDPOINT` | **todo** |
+| DNS for `gbtt.co.nz` → GitHub Pages | **todo** |
+
+Nothing below is destructive; steps can be re-run safely.
+
 ---
 
 ## 1. Firebase console (Tom’s Google account)
@@ -41,7 +59,16 @@ firebase deploy --only firestore:rules,firestore:indexes
 
 ## 2. GitHub repository secrets
 
-Repo → Settings → Secrets and variables → Actions → **Repository secrets**:
+There are exactly **five**. Set them with the helper script rather than by hand — it reads the
+Firebase values live from the project, so they cannot drift from what is deployed:
+
+```powershell
+gh auth login          # once
+./scripts/sync-github-secrets.ps1
+./scripts/sync-github-secrets.ps1 -FormEndpoint "https://script.google.com/macros/s/.../exec"
+```
+
+Or manually via Repo → Settings → Secrets and variables → Actions → **Repository secrets**:
 
 | Secret | Value | Used by |
 |--------|-------|---------|
@@ -50,10 +77,19 @@ Repo → Settings → Secrets and variables → Actions → **Repository secrets
 | `VITE_FIREBASE_PROJECT_ID` | Firebase `projectId` | Same |
 | `VITE_FIREBASE_APP_ID` | Firebase `appId` | Same |
 | `VITE_FORM_ENDPOINT` | Apps Script web app URL | Contact form, activation, Functions |
-| `VITE_BASE` | `/` on production (`gbtt.co.nz`) | Marketing site |
-| `VITE_APP_BASE` | `/app/` | Member/trainer apps |
 
-Client Firebase keys are not secret in practice (protected by Security Rules), but storing them in GitHub Secrets keeps one deploy path.
+To read the current Firebase values at any time:
+
+```bash
+firebase apps:sdkconfig WEB --project gbtt-c1130
+```
+
+> `VITE_BASE` and `VITE_APP_BASE` are **not** secrets. They are hard-coded in
+> `.github/workflows/pages.yml` (`/` and `/app/`) because they are deploy-layout constants, not
+> configuration. Adding them as secrets has no effect.
+
+Client Firebase keys are not secret in practice — they ship inside the JS bundle and are protected
+by Security Rules, not by obscurity. They live in GitHub Secrets only to keep a single deploy path.
 
 ---
 
@@ -101,21 +137,38 @@ Each Function → Script POST includes `webhookSecret` in the JSON body; Apps Sc
 
 ## 5. Firebase Functions secrets & deploy
 
-From repo root (after `npm ci` in `functions/`):
+> **Requires the Blaze (pay-as-you-go) plan.** Cloud Functions cannot deploy on Spark, and
+> `firebase functions:list` will fail with `Failed to list functions` until billing is enabled.
+> Upgrade at Console → ⚙ → Usage and billing, and set a **budget alert** while you are there.
+
+`FUNCTIONS_WEBHOOK_SECRET` is a value you invent — it is a shared password proving to Apps Script
+that a request really came from your Cloud Functions. The *same* string must be set in two places:
+Firebase (below) and Apps Script Script properties (section 4). Generate one with:
+
+```powershell
+# PowerShell
+$b = New-Object byte[] 32
+[System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b)
+([Convert]::ToBase64String($b) -replace '[+/=]','')
+```
+
+Then, from the repo root (after `npm ci` in `functions/`):
 
 ```bash
 firebase login
-firebase use <project-id>
 
-# String param (Apps Script URL)
+# String param (Apps Script URL) — same value as VITE_FORM_ENDPOINT
 firebase functions:params:set FORM_ENDPOINT "https://script.google.com/macros/s/.../exec"
 
-# Secret (shared webhook key)
+# Secret (shared webhook key) — prompts for the value, paste the generated string
 firebase functions:secrets:set FUNCTIONS_WEBHOOK_SECRET
 
 # Deploy rules, indexes, and functions
 firebase deploy --only firestore:rules,firestore:indexes,functions
 ```
+
+Note both depend on the Apps Script web app existing first (section 4), so the usual order is:
+deploy Apps Script → set `FORM_ENDPOINT` + `FUNCTIONS_WEBHOOK_SECRET` → deploy Functions.
 
 Functions in this repo:
 
