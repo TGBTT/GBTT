@@ -52,6 +52,7 @@ Each action logs a row to a dedicated tab:
 | `CalendarDeletes` | `calendarDeleteSession` |
 | `CalendarSubscribe` | `calendarGetSubscribeUrl` |
 | `CalendarMemberSlots` | `calendarSyncMemberSlots` |
+| `BookingInvites` | `sendBookingInvite`, `sendBookingCancellation` |
 
 ## Actions
 
@@ -65,6 +66,8 @@ Each action logs a row to a dedicated tab:
 | `sendTransferNotice` | Webhook | Email + Sheet | Member reschedule confirmation |
 | `sendPaymentReminder` | Webhook | Email + Sheet | Billing reminder to member |
 | `sendGuestPass` | Webhook | Email + Sheet | Complimentary session code |
+| `sendBookingInvite` | Webhook | Email + Sheet | ICS `METHOD:REQUEST` to one member on booking |
+| `sendBookingCancellation` | Webhook | Email + Sheet | ICS `METHOD:CANCEL` to one member on cancel |
 | `calendarUpsertSession` | Webhook | Calendar + Sheet | Create/update session event |
 | `calendarDeleteSession` | Webhook | Calendar + Sheet | Delete session event |
 | `calendarGetSubscribeUrl` | Webhook | Sheet | Return public calendar / ICS URLs |

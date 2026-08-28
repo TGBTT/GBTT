@@ -187,7 +187,16 @@ export const adminResetPassword = onCall(async (request) => {
   return { ok: true, resetLink }
 })
 
-/** Sync roster changes to Google Calendar via Apps Script. */
+/**
+ * Email the member a calendar invite when they book, and a cancellation when
+ * they leave.
+ *
+ * This deliberately does NOT push attendance counts to the shared calendar.
+ * Counts change all day and the website already shows them live from
+ * Firestore, so syncing them here would burn Apps Script quota and, on any
+ * event carrying guests, email everyone repeatedly. The shared class calendar
+ * is updated by onSessionWrite instead, only when the schedule itself moves.
+ */
 export const onRosterWrite = onDocumentWritten(
   {
     document: 'sessions/{sessionId}/roster/{userId}',
@@ -195,23 +204,48 @@ export const onRosterWrite = onDocumentWritten(
   },
   async (event) => {
     const sessionId = event.params.sessionId
+    const userId = event.params.userId
+
+    const existedBefore = event.data?.before.exists ?? false
+    const existsAfter = event.data?.after.exists ?? false
+
+    // Status edits (booked -> attended during role-call) must not re-send.
+    if (existedBefore === existsAfter) {
+      return
+    }
+
     const sessionSnap = await db.doc(`sessions/${sessionId}`).get()
     if (!sessionSnap.exists) {
       return
     }
-
     const session = sessionSnap.data() ?? {}
-    const rosterSnap = await db.collection(`sessions/${sessionId}/roster`).get()
-    const rosterCount = rosterSnap.size
+
+    const userSnap = await db.doc(`users/${userId}`).get()
+    const profile = (userSnap.data()?.profile as Record<string, unknown>) ?? {}
+    const memberEmail = String(profile.email ?? '')
+    if (!memberEmail) {
+      return
+    }
+
+    let className = String(session.className ?? '')
+    const classTypeId = String(session.classTypeId ?? '')
+    if (!className && classTypeId) {
+      const classSnap = await db.doc(`catalog/classTypes/${classTypeId}`).get()
+      className = String(classSnap.data()?.name ?? classTypeId)
+    }
 
     const result = await callAppsScript(
       {
-        action: 'calendarUpsertSession',
+        action: existsAfter ? 'sendBookingInvite' : 'sendBookingCancellation',
+        memberEmail,
+        memberName: String(profile.name ?? ''),
         sessionId,
-        session: {
-          ...session,
-          rosterCount,
-        },
+        weekStart: String(session.weekStart ?? ''),
+        dayLabel: String(session.dayLabel ?? ''),
+        time: String(session.time ?? ''),
+        className,
+        venue: String(session.venue ?? ''),
+        durationMinutes: Number(session.durationMinutes ?? 60),
         source: 'onRosterWrite',
       },
       webhookSecret.value(),
@@ -219,7 +253,68 @@ export const onRosterWrite = onDocumentWritten(
     )
 
     if (!result.ok) {
-      console.error('calendarUpsertSession failed', sessionId, result.error)
+      console.error('booking calendar email failed', sessionId, userId, result.error)
+    }
+  },
+)
+
+/** Schedule fields that justify rewriting the shared calendar event. */
+const SCHEDULE_FIELDS = [
+  'weekStart',
+  'dayLabel',
+  'time',
+  'classTypeId',
+  'className',
+  'instructorId',
+  'venue',
+  'durationMinutes',
+  'cancelled',
+] as const
+
+/**
+ * Keep the shared class calendar in step with the timetable.
+ *
+ * Guarded on the schedule fields so the bookedCount churn written by every
+ * booking does not trigger a calendar write — that churn is exactly what made
+ * the previous roster-driven sync too noisy.
+ */
+export const onSessionWrite = onDocumentWritten(
+  { document: 'sessions/{sessionId}', secrets: [webhookSecret] },
+  async (event) => {
+    const before = event.data?.before.data()
+    const after = event.data?.after.data()
+    if (!after) {
+      return
+    }
+
+    if (before) {
+      const changed = SCHEDULE_FIELDS.some(
+        (field) => JSON.stringify(before[field]) !== JSON.stringify(after[field]),
+      )
+      if (!changed) {
+        return
+      }
+    }
+
+    const result = await callAppsScript(
+      {
+        action: 'calendarUpsertSession',
+        sessionId: event.params.sessionId,
+        calendarEventId: String(after.calendarEventId ?? ''),
+        weekStart: String(after.weekStart ?? ''),
+        dayLabel: String(after.dayLabel ?? ''),
+        time: String(after.time ?? ''),
+        className: String(after.className ?? after.classTypeId ?? ''),
+        venue: String(after.venue ?? ''),
+        durationMinutes: Number(after.durationMinutes ?? 60),
+        source: 'onSessionWrite',
+      },
+      webhookSecret.value(),
+      formEndpoint.value(),
+    )
+
+    if (!result.ok) {
+      console.error('calendarUpsertSession failed', event.params.sessionId, result.error)
     }
   },
 )

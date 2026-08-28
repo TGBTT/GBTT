@@ -20,6 +20,8 @@
  *     { action: "sendTransferNotice", webhookSecret, memberName, memberEmail, fromSession, toSession, notes? }
  *     { action: "sendPaymentReminder", webhookSecret, memberName, memberEmail, amountDue, dueDate?, paymentInstructions?, balanceNote? }
  *     { action: "sendGuestPass", webhookSecret, guestName, guestEmail, passCode, sessionLabel, expiresAt?, notes? }
+ *     { action: "sendBookingInvite", webhookSecret, memberEmail, memberName, sessionId, weekStart, dayLabel, time, className, venue?, durationMinutes? }
+ *     { action: "sendBookingCancellation", webhookSecret, memberEmail, memberName, sessionId, weekStart, dayLabel, time, className, sequence? }
  *     { action: "calendarUpsertSession", webhookSecret, sessionId, weekStart, dayLabel, time, className, ... }
  *     { action: "calendarDeleteSession", webhookSecret, calendarEventId?, sessionId? }
  *     { action: "calendarGetSubscribeUrl", webhookSecret }
@@ -40,6 +42,7 @@ const SHEET_CALENDAR_UPSERTS = 'CalendarUpserts'
 const SHEET_CALENDAR_DELETES = 'CalendarDeletes'
 const SHEET_CALENDAR_SUBSCRIBE = 'CalendarSubscribe'
 const SHEET_CALENDAR_MEMBER_SLOTS = 'CalendarMemberSlots'
+const SHEET_BOOKING_INVITES = 'BookingInvites'
 
 const PUBLIC_ACTIONS = ['enquiry', 'activation']
 const DEFAULT_SESSION_MINUTES = 60
@@ -313,6 +316,8 @@ function doGet() {
       'sendTransferNotice',
       'sendPaymentReminder',
       'sendGuestPass',
+      'sendBookingInvite',
+      'sendBookingCancellation',
       'calendarUpsertSession',
       'calendarDeleteSession',
       'calendarGetSubscribeUrl',
@@ -651,6 +656,205 @@ function handleSendGuestPass_(data) {
   return jsonResponse({ ok: true })
 }
 
+/**
+ * Per-member calendar invites.
+ *
+ * Members are deliberately NOT added as guests on the shared class event.
+ * Guest lists are visible to every other guest, which would leak the roster
+ * and override each member's showNameToClassmates preference, and any edit to
+ * a guest-bearing event emails everyone on it. Sending each member their own
+ * VEVENT keeps rosters private and means attendance counts can change all day
+ * without generating a single email.
+ */
+
+function icsEscape_(value) {
+  return String(value == null ? '' : value)
+    .replace(/\\/g, '\\\\')
+    .replace(/;/g, '\\;')
+    .replace(/,/g, '\\,')
+    .replace(/\r?\n/g, '\\n')
+}
+
+/** UTC stamps avoid shipping VTIMEZONE blocks for Pacific/Auckland DST. */
+function icsStamp_(date) {
+  return Utilities.formatDate(date, 'UTC', "yyyyMMdd'T'HHmmss'Z'")
+}
+
+/** RFC 5545 caps content lines at 75 octets; continuations start with a space. */
+function icsFold_(line) {
+  if (line.length <= 73) return line
+  let out = line.slice(0, 73)
+  let rest = line.slice(73)
+  while (rest.length > 72) {
+    out += '\r\n ' + rest.slice(0, 72)
+    rest = rest.slice(72)
+  }
+  return out + '\r\n ' + rest
+}
+
+/**
+ * Stable per (session, member) UID so a later CANCEL updates the same event
+ * the REQUEST created rather than adding a duplicate.
+ */
+function bookingUid_(sessionId, memberEmail) {
+  const key = String(sessionId) + '|' + String(memberEmail || '').toLowerCase()
+  const digest = Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, key)
+  const hex = digest
+    .map(function (byte) {
+      const value = (byte < 0 ? byte + 256 : byte).toString(16)
+      return value.length === 1 ? '0' + value : value
+    })
+    .join('')
+  return 'gbtt-' + hex + '@gbtt.co.nz'
+}
+
+function buildBookingIcs_(opts) {
+  const lines = [
+    'BEGIN:VCALENDAR',
+    'PRODID:-//Golden Bay Team Training//Bookings//EN',
+    'VERSION:2.0',
+    'CALSCALE:GREGORIAN',
+    'METHOD:' + opts.method,
+    'BEGIN:VEVENT',
+    'UID:' + opts.uid,
+    'SEQUENCE:' + opts.sequence,
+    'DTSTAMP:' + icsStamp_(new Date()),
+    'DTSTART:' + icsStamp_(opts.start),
+    'DTEND:' + icsStamp_(opts.end),
+    'SUMMARY:' + icsEscape_(opts.summary),
+    'DESCRIPTION:' + icsEscape_(opts.description),
+    'LOCATION:' + icsEscape_(opts.location),
+    'STATUS:' + (opts.method === 'CANCEL' ? 'CANCELLED' : 'CONFIRMED'),
+    'ORGANIZER;CN=Golden Bay Team Training:mailto:' + opts.organizerEmail,
+    'ATTENDEE;CN=' +
+      icsEscape_(opts.attendeeName) +
+      ';RSVP=FALSE;PARTSTAT=ACCEPTED:mailto:' +
+      opts.attendeeEmail,
+    'END:VEVENT',
+    'END:VCALENDAR',
+  ]
+  return lines.map(icsFold_).join('\r\n')
+}
+
+function bookingIcsPayload_(data, method) {
+  const memberEmail = String(data.memberEmail || '').trim()
+  const memberName = String(data.memberName || '').trim()
+  const sessionId = String(data.sessionId || '').trim()
+  const weekStart = String(data.weekStart || '').trim()
+  const dayLabel = String(data.dayLabel || '').trim()
+  const time = String(data.time || '').trim()
+
+  if (!memberEmail || !sessionId || !weekStart || !dayLabel || !time) {
+    return {
+      error: 'memberEmail, sessionId, weekStart, dayLabel and time are required.',
+    }
+  }
+
+  const className = String(data.className || 'GBTT class').trim()
+  const venue = String(data.venue || 'Rec Park Centre, Tākaka').trim()
+  const instructor = String(data.instructor || 'Tom').trim()
+  const durationMinutes = Number(data.durationMinutes || DEFAULT_SESSION_MINUTES)
+
+  const start = sessionStartDate_(weekStart, dayLabel, time)
+  const end = new Date(start.getTime() + durationMinutes * 60 * 1000)
+
+  const ics = buildBookingIcs_({
+    method: method,
+    uid: bookingUid_(sessionId, memberEmail),
+    sequence: Number(data.sequence || (method === 'CANCEL' ? 1 : 0)),
+    start: start,
+    end: end,
+    summary: className + ' · GBTT',
+    description:
+      'Instructor: ' + instructor + '\nVenue: ' + venue + '\nManage your booking at https://gbtt.co.nz/app/fitness/studioflow/',
+    location: venue,
+    organizerEmail: notifyEmail_(),
+    attendeeEmail: memberEmail,
+    attendeeName: memberName || memberEmail,
+  })
+
+  return {
+    ics: ics,
+    memberEmail: memberEmail,
+    memberName: memberName,
+    sessionId: sessionId,
+    className: className,
+    venue: venue,
+    start: start,
+    when: dayLabel + ' ' + time,
+  }
+}
+
+/** Member booked a class — email them a calendar invite for their own diary. */
+function handleSendBookingInvite_(data) {
+  const payload = bookingIcsPayload_(data, 'REQUEST')
+  if (payload.error) return jsonResponse({ ok: false, error: payload.error })
+
+  MailApp.sendEmail({
+    to: payload.memberEmail,
+    subject: 'Booked: ' + payload.className + ' — ' + payload.when,
+    body:
+      'Hi ' +
+      (payload.memberName || 'there') +
+      ",\n\nYou're booked into " +
+      payload.className +
+      ' on ' +
+      payload.when +
+      ' at ' +
+      payload.venue +
+      '.\n\nThe attached invite adds it to your calendar.\n\nNeed to change it? Manage your bookings at https://gbtt.co.nz/app/fitness/studioflow/\n\n— Tom · Golden Bay Team Training',
+    attachments: [
+      {
+        fileName: 'gbtt-booking.ics',
+        mimeType: 'text/calendar; method=REQUEST',
+        content: payload.ics,
+      },
+    ],
+  })
+
+  auditLog_(
+    SHEET_BOOKING_INVITES,
+    ['Timestamp', 'Action', 'MemberEmail', 'SessionId', 'Class', 'When'],
+    [stamp_(), 'invite', payload.memberEmail, payload.sessionId, payload.className, payload.when],
+  )
+
+  return jsonResponse({ ok: true, sessionId: payload.sessionId })
+}
+
+/** Member cancelled — send a CANCEL so the event disappears from their diary. */
+function handleSendBookingCancellation_(data) {
+  const payload = bookingIcsPayload_(data, 'CANCEL')
+  if (payload.error) return jsonResponse({ ok: false, error: payload.error })
+
+  MailApp.sendEmail({
+    to: payload.memberEmail,
+    subject: 'Cancelled: ' + payload.className + ' — ' + payload.when,
+    body:
+      'Hi ' +
+      (payload.memberName || 'there') +
+      ',\n\nYour booking for ' +
+      payload.className +
+      ' on ' +
+      payload.when +
+      ' has been cancelled and removed from your calendar.\n\nBook another session at https://gbtt.co.nz/app/fitness/studioflow/\n\n— Tom · Golden Bay Team Training',
+    attachments: [
+      {
+        fileName: 'gbtt-cancellation.ics',
+        mimeType: 'text/calendar; method=CANCEL',
+        content: payload.ics,
+      },
+    ],
+  })
+
+  auditLog_(
+    SHEET_BOOKING_INVITES,
+    ['Timestamp', 'Action', 'MemberEmail', 'SessionId', 'Class', 'When'],
+    [stamp_(), 'cancel', payload.memberEmail, payload.sessionId, payload.className, payload.when],
+  )
+
+  return jsonResponse({ ok: true, sessionId: payload.sessionId })
+}
+
 function handleCalendarUpsertSession_(data) {
   const calResult = requireCalendar_()
   if (calResult.error) return jsonResponse({ ok: false, error: calResult.error })
@@ -832,6 +1036,8 @@ function doPost(e) {
     if (action === 'sendTransferNotice') return handleSendTransferNotice_(data)
     if (action === 'sendPaymentReminder') return handleSendPaymentReminder_(data)
     if (action === 'sendGuestPass') return handleSendGuestPass_(data)
+    if (action === 'sendBookingInvite') return handleSendBookingInvite_(data)
+    if (action === 'sendBookingCancellation') return handleSendBookingCancellation_(data)
     if (action === 'calendarUpsertSession') return handleCalendarUpsertSession_(data)
     if (action === 'calendarDeleteSession') return handleCalendarDeleteSession_(data)
     if (action === 'calendarGetSubscribeUrl') return handleCalendarGetSubscribeUrl_(data)
