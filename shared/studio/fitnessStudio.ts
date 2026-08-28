@@ -944,11 +944,28 @@ export function visibleRosterNames(occ: ClassOccurrence, viewer: SimUser | null)
   return occ.roster.filter((r) => r.showName).map((r) => r.displayName)
 }
 
+/**
+ * Local seed login for development only.
+ *
+ * Seed passwords are compiled into the public bundle, so in a production build
+ * they must never open the staff portal — real staff sign-in goes through
+ * Firebase Auth and is authorised by the `role` custom claim. Note that hiding
+ * the admin UI is not itself security: anyone can force it to render from the
+ * browser console. What actually protects data is that Firestore rules reject
+ * a token without the claim, so every read and write fails.
+ */
 export function login(email: string, password: string): string | null {
   const user = store.users.find(
     (u) => u.email.toLowerCase() === email.trim().toLowerCase() && u.password === password,
   )
-  if (!user) return 'Unknown email or password (try demo credentials).'
+  if (!user) {
+    return import.meta.env.PROD
+      ? 'Unknown email or password.'
+      : 'Unknown email or password (try seed credentials).'
+  }
+  if (import.meta.env.PROD && (user.role === 'admin' || user.role === 'substitute')) {
+    return 'Staff sign-in requires a Firebase account. Contact Tom if you cannot get in.'
+  }
   if (user.role === 'member' && !user.activated) {
     return 'Account not activated — enter the key from your confirmation email.'
   }
@@ -960,6 +977,48 @@ export function login(email: string, password: string): string | null {
 
 export function logout(): void {
   store.sessionUserId = null
+  persist()
+}
+
+/**
+ * Bind a Firebase-authenticated staff member to the local UI session.
+ *
+ * The admin screens still read this store, so signing in through Firebase
+ * alone would leave them blank. This only drives what renders — authorisation
+ * still comes from the `role` custom claim, which Firestore rules check on
+ * every request. Remove once the admin screens read Firestore directly.
+ */
+export function bindStaffSession(
+  email: string,
+  name: string,
+  role: 'admin' | 'substitute',
+): void {
+  const lower = email.trim().toLowerCase()
+  let user = store.users.find((u) => u.email.toLowerCase() === lower)
+  if (!user) {
+    user = {
+      id: `staff-${lower}`,
+      email: lower,
+      password: '',
+      name: name || lower,
+      role,
+      planId: 'casual',
+      creditsLeft: 0,
+      classesPerWeek: 0,
+      weeklyLockedOccurrenceIds: [],
+      heldOccurrenceIds: [],
+      activated: true,
+      showNameToClassmates: false,
+      paid: true,
+      paymentNote: '',
+      limitations: '',
+      riskNotes: '',
+      termsAccepted: true,
+    }
+    store.users.push(user)
+  }
+  user.role = role
+  store.sessionUserId = user.id
   persist()
 }
 

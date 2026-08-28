@@ -9,7 +9,11 @@ import { doc, getDoc, setDoc } from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions'
 import { getFirebaseAuth, getFirebaseFunctions, getFirestoreDb } from './firebase/init'
 import { isFirebaseConfigured } from './firebase/config'
-import { login as localLogin, logout as localLogout } from './fitnessStudio'
+import {
+  bindStaffSession,
+  login as localLogin,
+  logout as localLogout,
+} from './fitnessStudio'
 
 export type StudioRole = 'member' | 'admin' | 'substitute'
 export type StudioStatus = 'pending' | 'active' | 'suspended'
@@ -32,6 +36,63 @@ export async function studioLogin(email: string, password: string): Promise<stri
   } catch {
     return 'Sign-in failed. Check email and password.'
   }
+}
+
+/**
+ * Read the role from the signed-in user's ID token.
+ *
+ * The role lives in a custom claim set by the Admin SDK, not in a Firestore
+ * field, so it cannot be forged from the browser: the token is signed by
+ * Google and verified by Firestore rules on every request.
+ */
+export async function studioRole(): Promise<StudioRole | null> {
+  const user = getFirebaseAuth()?.currentUser
+  if (!user) return null
+  const token = await user.getIdTokenResult()
+  const role = token.claims.role
+  return role === 'admin' || role === 'substitute' || role === 'member' ? role : null
+}
+
+/**
+ * Staff sign-in for the trainer admin. Falls back to the local seed store in
+ * development only; a production build refuses seed staff logins because those
+ * passwords ship inside the public bundle.
+ */
+export async function studioStaffLogin(
+  email: string,
+  password: string,
+): Promise<{ error: string | null; role: StudioRole | null }> {
+  if (!isFirebaseConfigured()) {
+    if (import.meta.env.PROD) {
+      return {
+        error: 'Staff sign-in is unavailable until Firebase is configured.',
+        role: null,
+      }
+    }
+    return { error: localLogin(email, password), role: null }
+  }
+
+  const auth = getFirebaseAuth()
+  if (!auth) return { error: 'Firebase not configured.', role: null }
+
+  try {
+    await signInWithEmailAndPassword(auth, email.trim(), password)
+  } catch {
+    return { error: 'Sign-in failed. Check email and password.', role: null }
+  }
+
+  const role = await studioRole()
+  if (role !== 'admin' && role !== 'substitute') {
+    // Signed in, but not staff. Drop the session so the app never renders the
+    // admin shell for an account Firestore would reject anyway.
+    await signOut(auth)
+    return { error: 'This account does not have staff access.', role: null }
+  }
+
+  const current = auth.currentUser
+  bindStaffSession(current?.email ?? email, current?.displayName ?? '', role)
+
+  return { error: null, role }
 }
 
 export async function studioLogout(): Promise<void> {

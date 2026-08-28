@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ClassTypeDescription } from '@gbtt/shared/studio/ClassTypeDescription'
+import { studioStaffLogin } from '@gbtt/shared/studio/studioAuth'
 import { AppOutsideShell } from '../../components/AppChrome'
 import { WeekSessionCalendar } from '../../components/WeekSessionCalendar'
 import {
@@ -29,7 +30,6 @@ import {
   getTeam,
   getTransferWindowHours,
   getUsers,
-  login,
   logout,
   occurrenceById,
   occurrencesByWeekday,
@@ -100,9 +100,10 @@ export default function ClassBoard() {
   const session = getSessionUser()
   const staff = role === 'admin' || role === 'substitute'
 
-  const [email, setEmail] = useState('tom@gbtt')
-  const [password, setPassword] = useState('demo')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
   const [loginError, setLoginError] = useState<string | null>(null)
+  const [signingIn, setSigningIn] = useState(false)
   const [tab, setTab] = useState<Tab>('schedule')
   const [selectedTypeId, setSelectedTypeId] = useState(getClassTypes()[0]?.id ?? 'sweat')
   const [selectedOccId, setSelectedOccId] = useState<string | null>(null)
@@ -159,6 +160,7 @@ export default function ClassBoard() {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
+              autoComplete="current-password"
             />
           </label>
           {loginError ? <p className="form-error">{loginError}</p> : null}
@@ -166,16 +168,20 @@ export default function ClassBoard() {
             <button
               type="button"
               className="btn primary"
+              disabled={signingIn}
               onClick={() => {
-                const err = login(email, password)
-                if (err) setLoginError(err)
-                else {
-                  setLoginError(null)
-                  refresh()
-                }
+                setSigningIn(true)
+                setLoginError(null)
+                studioStaffLogin(email, password)
+                  .then(({ error }) => {
+                    if (error) setLoginError(error)
+                    else refresh()
+                  })
+                  .catch(() => setLoginError('Sign-in failed. Try again.'))
+                  .finally(() => setSigningIn(false))
               }}
             >
-              Sign in
+              {signingIn ? 'Signing in…' : 'Sign in'}
             </button>
             <Link className="btn ghost" to="/fitness/studioflow">
               Member app →
