@@ -9,7 +9,9 @@ dist-ssr
 Thumbs.db
 *.tsbuildinfo
 .vite
-sim-demos/node_modules
-sim-demos/dist
+apps/node_modules
+apps/dist
+functions/node_modules
+functions/lib
 # Generated class photo sources (processed output lives in img/ and public/)
 assets/class-*.png

@@ -1,0 +1,120 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function role() {
+      return isSignedIn() ? request.auth.token.role : null;
+    }
+
+    function isAdmin() {
+      return role() == 'admin';
+    }
+
+    function isSubstitute() {
+      return role() == 'substitute';
+    }
+
+    function isStaff() {
+      return isAdmin() || isSubstitute();
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    // —— Public catalog (class types, exercises, venues, team) ——
+    match /catalog/{document=**} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // —— Recurring timetable template ——
+    match /timetable/slots/{slotId} {
+      allow read: if true;
+      allow write: if isStaff();
+    }
+
+    // —— Concrete week sessions (public summary; roster is subcollection) ——
+    match /sessions/{sessionId} {
+      allow read: if true;
+      allow create, update: if isStaff();
+      allow delete: if isAdmin();
+
+      match /roster/{userId} {
+        allow read: if isStaff() || isOwner(userId);
+        allow create: if isOwner(userId) || isStaff();
+        allow update, delete: if isOwner(userId) || isStaff();
+      }
+    }
+
+    // —— Public site copy (hero, terms, waiver) ——
+    match /siteContent/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // —— Member profiles — members own; admin full; substitute read for role-call search ——
+    match /users/{uid} {
+      allow read: if isOwner(uid) || isStaff();
+      allow create: if isOwner(uid);
+      allow update: if isOwner(uid) || isAdmin();
+      allow delete: if isAdmin();
+
+      match /weeklyLocks/{slotId} {
+        allow read, write: if isOwner(uid) || isAdmin();
+      }
+
+      match /bookings/{bookingId} {
+        allow read: if isOwner(uid) || isStaff();
+        allow create, update, delete: if isOwner(uid) || isStaff();
+      }
+
+      match /billingPeriods/{periodId} {
+        allow read: if isOwner(uid) || isAdmin();
+        allow write: if false;
+      }
+
+      match /exceptions/{exceptionId} {
+        allow read: if isOwner(uid) || isAdmin();
+        allow write: if isAdmin();
+      }
+    }
+
+    // —— Pricing plans & discounts (signed-in members read; admin writes) ——
+    match /pricing/{document=**} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // —— Studio settings, transfer windows, bank details ——
+    match /meta/{docId} {
+      allow read: if isStaff();
+      allow write: if isAdmin();
+    }
+
+    // —— Guest passes: server creates; staff reads ——
+    match /guestPasses/{code} {
+      allow read: if isStaff();
+      allow write: if false;
+    }
+
+    // —— Admin audit log ——
+    match /audit/{eventId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    match /outbox/{messageId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /reminders/{reminderId} {
+      allow read, write: if isStaff();
+    }
+  }
+}

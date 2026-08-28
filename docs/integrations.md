@@ -1,24 +1,24 @@
 # Integrations
 
-## Now (simulated)
+## Production stack
 
-- **Studio Flow / Class Board** persist to browser `localStorage` (`gbtt-sim-v1`) as a stand-in for Firebase Auth + client/group records and Google Calendar writes.
-- Demo accounts (password `demo`): `alex@demo` (member), `tom@gbtt` (admin), `cover@gbtt` (substitute).
-- Admin can reset seed data from the console. Sync chips still label Calendar / Firebase as simulated.
-- **Contact form** posts to Apps Script when `VITE_FORM_ENDPOINT` is configured; otherwise mailto fallback.
+- **Marketing site** (`src/`) — homepage, contact form, public timetable
+- **Member & trainer apps** (`apps/`) — booking, admin, role-call, billing
+- **Firestore** — system of record (see `firestore.rules`)
+- **Firebase Auth** — members, admin, substitutes
+- **Cloud Functions** (`functions/`) — account creation, billing, calendar webhooks
+- **Apps Script** (`google-apps-script/Code.gs`) — email + Google Calendar on Tom's account
 
-## Deferred — Firebase
+Configure secrets per [`docs/secrets-setup.md`](secrets-setup.md).
 
-Tom will likely use Firebase for private clients and group/family records. The data tree (individuals vs households vs packs vs venues) is **not fixed yet**. Do not invent a production schema until that workshop happens.
+## Contact form
 
-Suggested future keys (illustrative only):
+Posts to Apps Script when `VITE_FORM_ENDPOINT` is configured; otherwise mailto fallback.
 
-- `venues/{venueId}` — aligned with `src/data/locations.ts`
-- `members/{memberId}` — packs, weekly allowance, waivers, name privacy
-- `groups/{groupId}` — kids/teens or family units
-- `occurrences/{id}` — class instances with `venueId` + roster
-- `siteContent` — public blurbs currently edited in the admin Site content tab
+## Google Calendar
 
-## Deferred — Google Calendar
+Session roster changes trigger `calendarUpsertSession` via Cloud Functions → Apps Script.
 
-Live class events and holds will go through Apps Script (or a Cloud Function) once `CALENDAR_ID` exists. Demo apps already show fill bars, caps, and sync acknowledgements.
+## Local development without Firebase
+
+Apps show a configuration banner when `VITE_FIREBASE_*` env vars are missing. Studio data uses browser `localStorage` until Firestore is connected.

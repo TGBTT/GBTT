@@ -7,7 +7,7 @@ import {
   reloadStore,
   subscribeStore,
 } from '@gbtt/shared/studio/fitnessStudio'
-import { simAppHref } from '../data/siteConfig'
+import { appHref } from '../data/siteConfig'
 
 /** Live Mon–Fri timetable — same localStorage store as member + trainer apps. */
 export function ClassSchedule() {
@@ -28,7 +28,7 @@ export function ClassSchedule() {
       <WeekSessionCalendar byDay={byDay} mode="public" />
       <p className="class-schedule__hint">
         Counts update when members book. Full sessions are greyed out.{' '}
-        <a href={simAppHref('fitness/studioflow/')}>Book in the member app</a>.
+        <a href={appHref('fitness/studioflow/')}>Book in the member app</a>.
       </p>
       <div className="class-schedule__types">
         <h3 className="class-schedule__types-heading">Session types</h3>

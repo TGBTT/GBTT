@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { SITE, TRAINER, simAppHref } from '../data/siteConfig'
+import { SITE, TRAINER, appHref } from '../data/siteConfig'
 import { ClassSchedule } from '../components/ClassSchedule'
 import { AREAS, activeVenues, areaById, directionsUrl } from '../data/locations'
 import { VenueMap } from '../components/VenueMap'
@@ -72,9 +72,9 @@ export default function HomePage() {
         </div>
       </section>
 
-      <section className="section section--band builtbytom" id="builtbytom" aria-labelledby="builtbytom-heading">
-        <div className="section__inner builtbytom__inner">
-          <h2 id="builtbytom-heading" className="builtbytom__mark">
+      <section className="section section--band fitforlife" id="fitforlife" aria-labelledby="fitforlife-heading">
+        <div className="section__inner fitforlife__inner">
+          <h2 id="fitforlife-heading" className="fitforlife__mark">
             {SITE.hashtag}
           </h2>
         </div>
@@ -177,7 +177,7 @@ export default function HomePage() {
               Weekly subscriptions, reshuffling your sessions, exercise previews, and optional name
               sharing with classmates — all in member booking.
             </p>
-            <a className="btn btn--primary" href={simAppHref('fitness/studioflow/')}>
+            <a className="btn btn--primary" href={appHref('fitness/studioflow/')}>
               Open member booking
             </a>
           </div>

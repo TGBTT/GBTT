@@ -1,10 +1,8 @@
 # Feature roadmap
 
-Live showcase apps (only fitness demos remain):
+Live apps at `https://gbtt.co.nz/app/`:
 
-- **Member booking** (`/sim/fitness/studioflow/`) — public fill, guest book, weekly reshuffle, exercise preview, name privacy. Roadmap items render inside the app.
-- **Trainer admin** (`/sim/fitness/classboard/`) — staff login, schedule, payments, risk, legal, notify, reminders, site content. Ops roadmap items render inside the admin shell.
+- **Member booking** (`/app/fitness/studioflow/`) — weekly lock, guest book, reshuffle, planned exercises, name privacy, terms
+- **Trainer admin** (`/app/fitness/classboard/`) — schedule, role-call, payments, risk, legal, notify, reminders, site content
 
-Capability catalog archive: [`sim-demos/DEMO-FEATURES.md`](../sim-demos/DEMO-FEATURES.md).
-
-Marketing site is a single homepage with section bookmarks (`#classes`, `#location`, `#apps`) plus `/contact`.
+Marketing site: homepage with section bookmarks (`#classes`, `#location`, `#apps`) plus `/contact`.

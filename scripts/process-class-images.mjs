@@ -18,7 +18,7 @@ const CURSOR_ASSETS = path.resolve(
 )
 const IMG_CLASSES = path.resolve(ROOT, 'img/classes')
 const PUBLIC_CLASSES = path.resolve(ROOT, 'public/images/classes')
-const SIM_PUBLIC = path.resolve(ROOT, 'sim-demos/public/images/classes')
+const APPS_PUBLIC = path.resolve(ROOT, 'apps/public/images/classes')
 
 const CLASS_IDS = [
   'sweat',
@@ -79,7 +79,7 @@ async function processClass(id) {
   const outDirs = [
     path.join(IMG_CLASSES, id),
     path.join(PUBLIC_CLASSES, id),
-    path.join(SIM_PUBLIC, id),
+    path.join(APPS_PUBLIC, id),
   ]
   outDirs.forEach(ensureDir)
 
@@ -99,7 +99,7 @@ async function processClass(id) {
 async function main() {
   ensureDir(IMG_CLASSES)
   ensureDir(PUBLIC_CLASSES)
-  ensureDir(SIM_PUBLIC)
+  ensureDir(APPS_PUBLIC)
 
   let ok = 0
   for (const id of CLASS_IDS) {

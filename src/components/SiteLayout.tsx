@@ -88,7 +88,7 @@ export function SiteLayout() {
               Facebook
             </a>
             {' · '}
-            <Link to="/#builtbytom">{SITE.hashtag}</Link>
+            <Link to="/#fitforlife">{SITE.hashtag}</Link>
           </p>
         </div>
       </footer>

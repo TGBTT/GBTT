@@ -45,42 +45,81 @@ jobs:
 
       - name: Build marketing site
         env:
-          VITE_BASE: /GBTT/
+          VITE_BASE: /
+          VITE_FIREBASE_API_KEY: ${{ secrets.VITE_FIREBASE_API_KEY }}
+          VITE_FIREBASE_AUTH_DOMAIN: ${{ secrets.VITE_FIREBASE_AUTH_DOMAIN }}
+          VITE_FIREBASE_PROJECT_ID: ${{ secrets.VITE_FIREBASE_PROJECT_ID }}
+          VITE_FIREBASE_APP_ID: ${{ secrets.VITE_FIREBASE_APP_ID }}
+          VITE_FORM_ENDPOINT: ${{ secrets.VITE_FORM_ENDPOINT }}
         run: npm run build
 
-      - name: Install sim-demos deps
-        working-directory: sim-demos
+      - name: Install apps deps
+        working-directory: apps
         run: npm ci
 
-      - name: Build sim-demos
-        working-directory: sim-demos
+      - name: Build apps
+        working-directory: apps
         env:
-          VITE_SIM_BASE: /GBTT/sim/
+          VITE_APP_BASE: /app/
+          VITE_FIREBASE_API_KEY: ${{ secrets.VITE_FIREBASE_API_KEY }}
+          VITE_FIREBASE_AUTH_DOMAIN: ${{ secrets.VITE_FIREBASE_AUTH_DOMAIN }}
+          VITE_FIREBASE_PROJECT_ID: ${{ secrets.VITE_FIREBASE_PROJECT_ID }}
+          VITE_FIREBASE_APP_ID: ${{ secrets.VITE_FIREBASE_APP_ID }}
+          VITE_FORM_ENDPOINT: ${{ secrets.VITE_FORM_ENDPOINT }}
         run: npm run build
 
       - name: Assemble site
         run: |
+          set -euo pipefail
+          rm -rf _site
           mkdir -p _site
-          cp -R dist/* _site/
+
+          # Marketing build (cp -a with . preserves dotfiles such as .nojekyll)
+          cp -a dist/. _site/
+
           if [ ! -f _site/images/classes/sweat/card-480.jpg ]; then
             echo "Class images missing from dist — copying from public/"
             mkdir -p _site/images
             cp -R public/images/classes _site/images/
           fi
-          test -f _site/images/classes/sweat/card-480.jpg
-          mkdir -p _site/sim
-          cp -R sim-demos/dist/* _site/sim/
-          mkdir -p _site/sim/images
-          cp -R sim-demos/public/images/classes _site/sim/images/
-          test -f _site/sim/images/classes/sweat/card-480.jpg
-          mkdir -p _site/sim/fitness/studioflow _site/sim/fitness/classboard
-          cp _site/sim/index.html _site/sim/fitness/studioflow/index.html
-          cp _site/sim/index.html _site/sim/fitness/classboard/index.html
+
+          # Member/trainer apps at /app/
+          mkdir -p _site/app
+          cp -a apps/dist/. _site/app/
+          mkdir -p _site/app/images
+          cp -R apps/public/images/classes _site/app/images/
+
+          # SPA deep links
+          mkdir -p _site/app/fitness/studioflow _site/app/fitness/classboard
+          cp _site/app/index.html _site/app/fitness/studioflow/index.html
+          cp _site/app/index.html _site/app/fitness/classboard/index.html
           for path in contact; do
             mkdir -p "_site/$path"
             cp _site/index.html "_site/$path/index.html"
           done
-          ls -la _site/images/classes/sweat/card-480.jpg
+
+          # Custom domain + bypass Jekyll
+          echo "gbtt.co.nz" > _site/CNAME
+          touch _site/.nojekyll
+
+      - name: Verify assembled site
+        run: |
+          set -euo pipefail
+          echo "--- CNAME ---"
+          cat _site/CNAME
+          echo "--- required files ---"
+          test -f _site/index.html
+          test -f _site/app/index.html
+          test -f _site/images/classes/sweat/card-480.jpg
+          test -f _site/app/images/classes/sweat/card-480.jpg
+          test -f _site/.nojekyll
+          echo "--- built assets (styles/scripts must exist) ---"
+          ls -1 _site/assets/*.css _site/assets/*.js
+          ls -1 _site/app/assets/*.css _site/app/assets/*.js
+          echo "--- asset paths referenced by index.html must be root-absolute ---"
+          grep -o 'href="/assets/[^"]*\.css"' _site/index.html
+          grep -o 'src="/assets/[^"]*\.js"' _site/index.html
+          grep -o 'href="/app/assets/[^"]*\.css"' _site/app/index.html
 
       - name: Setup Pages
         uses: actions/configure-pages@v5

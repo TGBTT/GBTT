@@ -1,17 +1,17 @@
 export const SITE = {
   name: 'Golden Bay Team Training',
   shortName: 'GBTT',
-  tagline: 'Group workouts for every body at Rec Park Centre.',
+  tagline: 'Fit for Life',
   description:
-    'Golden Bay Team Training — Sweat, Strong, Circuits, Mobility, Womens Fit, Youth Fit, Kids Fit, Sculpt & Strength, and Les Mills BodyBalance at Rec Park Centre, Tākaka. #builtbytom',
+    'Golden Bay Team Training — Sweat, Strong, Circuits, Mobility, Womens Fit, Youth Fit, Kids Fit, Sculpt & Strength, and Les Mills BodyBalance at Rec Park Centre, Tākaka. Fit for Life. #FITFORLIFE',
   runBy: 'Tom',
   email: 'Tom.GBTT@gmail.com',
   phone: '021 089 28057',
   phoneHref: 'tel:+642108928057',
   facebook:
     'https://www.facebook.com/people/Golden-Bay-Team-Training/100077092552576/',
-  origin: 'https://agent5479.github.io/GBTT',
-  hashtag: '#builtbytom',
+  origin: 'https://gbtt.co.nz',
+  hashtag: '#FITFORLIFE',
 } as const
 
 /** About Tom — edit here when he supplies a longer bio or photo credit. */
@@ -83,14 +83,14 @@ export const NAV = [
   { to: '/contact', label: 'Contact' },
 ] as const
 
-export function simAppHref(path: string): string {
+export function appHref(path: string): string {
   const base = import.meta.env.BASE_URL.endsWith('/')
     ? import.meta.env.BASE_URL
     : `${import.meta.env.BASE_URL}/`
-  return `${base}sim/${path}`
+  return `${base}app/${path}`
 }
 
 /** Staff-only trainer admin — linked from the discreet navbar badge. */
 export function adminAppHref(): string {
-  return simAppHref('fitness/classboard/')
+  return appHref('fitness/classboard/')
 }

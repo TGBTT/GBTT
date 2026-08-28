@@ -8,7 +8,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const root = path.resolve(__dirname, '..')
 const src = path.join(root, 'public', 'brand', 'gbtt-logo.png')
 const outDir = path.join(root, 'public')
-const simPublic = path.join(root, 'sim-demos', 'public')
+const appsPublic = path.join(root, 'apps', 'public')
 
 if (!fs.existsSync(src)) {
   console.error('Missing source logo at', src)
@@ -105,7 +105,7 @@ const manifest = {
 fs.writeFileSync(path.join(outDir, 'site.webmanifest'), JSON.stringify(manifest, null, 2))
 console.log('wrote site.webmanifest')
 
-if (fs.existsSync(simPublic)) {
+if (fs.existsSync(appsPublic)) {
   for (const file of [
     'favicon.ico',
     'favicon-16x16.png',
@@ -117,10 +117,10 @@ if (fs.existsSync(simPublic)) {
   ]) {
     const from = path.join(outDir, file)
     if (fs.existsSync(from)) {
-      fs.copyFileSync(from, path.join(simPublic, file))
+      fs.copyFileSync(from, path.join(appsPublic, file))
     }
   }
-  console.log('copied icons into sim-demos/public')
+  console.log('copied icons into apps/public')
 }
 
 console.log('done')

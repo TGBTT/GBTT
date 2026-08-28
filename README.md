@@ -1,6 +1,8 @@
 # Golden Bay Team Training (GBTT)
 
-React website for Tom’s group fitness classes at Rec Park Centre, Tākaka — plus interactive **Studio Flow** and **Class Board** demos.
+React website for Tom’s group fitness classes at Rec Park Centre, Tākaka — plus **Member booking** and **Trainer admin** apps.
+
+**Fit for Life** · `#FITFORLIFE`
 
 ## Develop
 
@@ -10,10 +12,10 @@ npm run icons
 npm run dev
 ```
 
-Fitness demos:
+Member & trainer apps:
 
 ```bash
-cd sim-demos
+cd apps
 npm install
 npm run dev
 ```
@@ -24,7 +26,7 @@ npm run dev
 npm run build:all
 ```
 
-For GitHub Pages project URL, build marketing with `VITE_BASE=/GBTT/`.
+Production site: `https://gbtt.co.nz` (custom domain via `public/CNAME`).
 
 ## Contact backend
 
@@ -32,6 +34,6 @@ See [`google-apps-script/README.md`](google-apps-script/README.md). Set `VITE_FO
 
 ## Docs
 
-- [`docs/integrations.md`](docs/integrations.md) — Firebase / Calendar deferred notes
+- [`docs/secrets-setup.md`](docs/secrets-setup.md) — Firebase, GitHub Secrets, Apps Script handoff
+- [`docs/integrations.md`](docs/integrations.md) — Firebase + Calendar integration
 - [`docs/feature-roadmap.md`](docs/feature-roadmap.md)
-- [`sim-demos/DEMO-FEATURES.md`](sim-demos/DEMO-FEATURES.md) — capability catalog

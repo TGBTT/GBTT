@@ -1,9 +1,11 @@
-/** Simulated GBTT studio — localStorage-backed stand-in for Firebase + Calendar. */
+/** GBTT studio store — local persistence until Firestore is live; API mirrors production schema. */
 
 import { activationKeyValid } from './accountApi'
 
 export type PlanId = 'casual' | 'pack10' | 'pack20' | 'weekly1' | 'weekly2' | 'weekly3'
 export type SimRole = 'public' | 'member' | 'admin' | 'substitute'
+export type ExerciseDisplay = 'hidden' | 'defaults' | 'custom'
+export type RosterStatus = 'booked' | 'attended' | 'noShow'
 export type AttendeeKind = 'member' | 'guest'
 
 export interface FitnessPlan {
@@ -35,6 +37,8 @@ export interface ClassType {
   /** Max capacity — max attendees per session (set in trainer admin). */
   cap: number
   exerciseIds: string[]
+  /** Soft-delete — hidden from booking when false. */
+  active?: boolean
 }
 
 export interface RosterEntry {
@@ -42,6 +46,9 @@ export interface RosterEntry {
   displayName: string
   kind: AttendeeKind
   showName: boolean
+  status?: RosterStatus
+  bookedBy?: 'self' | 'admin'
+  attendedAt?: string
 }
 
 export interface ClassOccurrence {
@@ -50,8 +57,9 @@ export interface ClassOccurrence {
   dayLabel: string
   time: string
   venueId: string
-  /** Session-specific exercises; falls back to class type defaults when empty. */
+  /** Session-specific exercises when exerciseDisplay is custom. */
   exerciseIds: string[]
+  exerciseDisplay?: ExerciseDisplay
   /** Attendees booked for this session (members + guests). */
   bookedCount: number
   roster: RosterEntry[]
@@ -80,6 +88,11 @@ export interface SimUser {
   limitations: string
   riskNotes: string
   termsAccepted: boolean
+  /** Optional per-client discount percent (0–100). */
+  discountPercent?: number
+  customDiscountNote?: string
+  /** Attendance history count (denormalized). */
+  sessionsAttended?: number
   /** Subscription change awaiting Tom’s payment confirmation. */
   pendingPlanId?: PlanId | null
 }
@@ -551,16 +564,16 @@ const DEFAULT_USERS: SimUser[] = [
 ]
 
 const DEFAULT_SITE: SiteContent = {
-  heroBlurb: 'Group workouts for every body at Rec Park Centre, Tākaka.',
+  heroBlurb: 'Fit for Life — group workouts for every body at Rec Park Centre, Tākaka.',
   scheduleNarrative:
     'Weekly timetable below shows live fill — book in the member app when a spot is open.',
   contactDisplay: 'Tom · Tom.GBTT@gmail.com · 021 089 28057',
   paymentInstructions:
     'Pay by bank transfer to the GBTT account Tom provides, or cash at Rec Park before class. Mark paid in admin once cleared.',
   termsText:
-    'GBTT weekly memberships lock recurring Mon–Fri slots on the timetable — your chosen sessions repeat every week. You may move locks within your classes-per-week allowance. Guests pay casual rate. Simulated demo — not a binding contract.',
+    'GBTT weekly memberships lock recurring Mon–Fri slots on the timetable. Move sessions within your allowance before the transfer cutoff. Sessions not transferred in time and not attended are non-refundable as they hold your place.',
   waiverText:
-    'I understand group fitness involves physical effort and accept responsibility for my own limits. Inform Tom of injuries before class.',
+    'I understand group fitness involves physical effort and accept responsibility for my own limits. I agree that Tom may edit my membership details and session bookings in line with studio policy.',
 }
 
 const DEFAULT_TEAM: TeamMember[] = [
@@ -600,6 +613,8 @@ interface StoreState {
   equipmentChecked: string[]
   lastCalendarWrite: string
   lastFirebaseWrite: string
+  transferWindowHours: number
+  pricingPlans: FitnessPlan[]
 }
 
 function seedState(): StoreState {
@@ -624,6 +639,8 @@ function seedState(): StoreState {
     equipmentChecked: [],
     lastCalendarWrite: '',
     lastFirebaseWrite: '',
+    transferWindowHours: 24,
+    pricingPlans: FITNESS_PLANS.map((p) => ({ ...p })),
   }
 }
 
@@ -676,9 +693,10 @@ function syncMemberWeeklyLocks(
 
 function migrateClass(cls: ClassType): ClassType {
   const def = DEFAULT_CLASSES.find((d) => d.id === cls.id)
-  if (!def) return cls
+  if (!def) return { ...cls, active: cls.active ?? true }
   return {
     ...cls,
+    active: cls.active ?? true,
     blurb: cls.blurb ?? def.blurb,
     longDescription: cls.longDescription ?? def.longDescription,
     warnings: cls.warnings ?? def.warnings,
@@ -698,6 +716,16 @@ function normalizeStore(parsed: StoreState): StoreState {
   parsed.reminders = parsed.reminders ?? DEFAULT_REMINDERS.map((r) => ({ ...r }))
   parsed.outbox = parsed.outbox ?? []
   parsed.equipmentChecked = parsed.equipmentChecked ?? []
+  parsed.transferWindowHours = parsed.transferWindowHours ?? 24
+  parsed.pricingPlans = parsed.pricingPlans?.length
+    ? parsed.pricingPlans
+    : FITNESS_PLANS.map((p) => ({ ...p }))
+  for (const occ of parsed.occurrences) {
+    occ.exerciseDisplay = occ.exerciseDisplay ?? 'defaults'
+    for (const r of occ.roster) {
+      r.status = r.status ?? 'booked'
+    }
+  }
   for (const u of parsed.users) {
     syncMemberWeeklyLocks(u, parsed.occurrences, parsed.classes)
   }
@@ -727,9 +755,14 @@ function persist(): void {
   store.lastFirebaseWrite = `localStorage · ${new Date().toISOString().slice(11, 19)}`
 }
 
-export function resetSimStore(): void {
+export function resetStudioData(): void {
   store = seedState()
   persist()
+}
+
+/** @deprecated Use resetStudioData */
+export function resetSimStore(): void {
+  resetStudioData()
 }
 
 export function reloadStore(): void {
@@ -769,6 +802,10 @@ export function getExercises(): Exercise[] {
 }
 
 export function getClassTypes(): ClassType[] {
+  return store.classes.filter((c) => c.active !== false)
+}
+
+export function getAllClassTypes(): ClassType[] {
   return store.classes
 }
 
@@ -887,8 +924,10 @@ export function classImageSources(
 }
 
 export function sessionExercises(occ: ClassOccurrence): Exercise[] {
+  const display = occ.exerciseDisplay ?? 'defaults'
+  if (display === 'hidden') return []
   const ids =
-    occ.exerciseIds.length > 0
+    display === 'custom' && occ.exerciseIds.length > 0
       ? occ.exerciseIds
       : classTypeById(occ.classTypeId)?.exerciseIds ?? []
   return ids
@@ -1409,16 +1448,178 @@ export function setEquipmentChecked(ids: string[]): void {
 export function syncLabels(): { calendar: string; firebase: string } {
   return {
     calendar: store.lastCalendarWrite
-      ? `Google Calendar (simulated) · would write event ${store.lastCalendarWrite}`
-      : 'Google Calendar (simulated) · waiting for a write',
+      ? `Google Calendar · last sync ${store.lastCalendarWrite}`
+      : 'Google Calendar · waiting for first write',
     firebase: store.lastFirebaseWrite
-      ? `Firebase (simulated) · ${store.lastFirebaseWrite}`
-      : 'Firebase (simulated) · localStorage stand-in — schema TBD',
+      ? `Firestore · ${store.lastFirebaseWrite}`
+      : 'Firestore · configure Firebase secrets to enable live sync',
   }
 }
 
-export const DEMO_CREDENTIALS = [
+export const SEED_ACCOUNTS = [
   { label: 'Member', email: 'alex@demo', password: 'demo' },
   { label: 'Admin (Tom)', email: 'tom@gbtt', password: 'demo' },
   { label: 'Substitute', email: 'cover@gbtt', password: 'demo' },
 ] as const
+
+/** @deprecated Dev seed only — not shown in production UI */
+export const DEMO_CREDENTIALS = SEED_ACCOUNTS
+
+export function getTransferWindowHours(): number {
+  return store.transferWindowHours
+}
+
+export function setTransferWindowHours(hours: number): void {
+  store.transferWindowHours = Math.max(0, Math.round(hours))
+  persist()
+}
+
+export function getPricingPlans(): FitnessPlan[] {
+  return store.pricingPlans
+}
+
+export function updatePricingPlan(id: PlanId, patch: Partial<FitnessPlan>): void {
+  const plan = store.pricingPlans.find((p) => p.id === id)
+  if (!plan) return
+  Object.assign(plan, patch)
+  persist()
+}
+
+export function setMemberDiscount(userId: string, percent: number, note?: string): void {
+  const u = userById(userId)
+  if (!u) return
+  u.discountPercent = Math.min(100, Math.max(0, percent))
+  if (note !== undefined) u.customDiscountNote = note
+  persist()
+}
+
+export function calculateMemberOwed(userId: string): { subtotal: number; discount: number; total: number } {
+  const u = userById(userId)
+  if (!u) return { subtotal: 0, discount: 0, total: 0 }
+  const plan = planById(u.planId)
+  const subtotal = plan?.prepaidTotal ?? plan?.ratePerClass ?? 0
+  const discount = Math.round((subtotal * (u.discountPercent ?? 0)) / 100)
+  return { subtotal, discount, total: Math.max(0, subtotal - discount) }
+}
+
+export function getMemberAttendance(userId: string): ClassOccurrence[] {
+  return store.occurrences.filter((o) =>
+    o.roster.some((r) => r.memberId === userId && r.status === 'attended'),
+  )
+}
+
+export function renameExercise(id: string, name: string): string | null {
+  const trimmed = name.trim()
+  if (!trimmed) return 'Name required.'
+  const ex = store.exercises.find((e) => e.id === id)
+  if (!ex) return 'Exercise not found.'
+  ex.name = trimmed
+  persist()
+  return null
+}
+
+export function deleteExercise(id: string): string | null {
+  const used = store.classes.some((c) => c.exerciseIds.includes(id))
+  const usedSession = store.occurrences.some((o) => o.exerciseIds.includes(id))
+  if (used || usedSession) return 'Remove this exercise from all classes and sessions first.'
+  store.exercises = store.exercises.filter((e) => e.id !== id)
+  persist()
+  return null
+}
+
+export function createClassType(input: {
+  id: string
+  name: string
+  cap?: number
+}): string | null {
+  const id = input.id.trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-')
+  if (!id || !input.name.trim()) return 'Id and name required.'
+  if (store.classes.some((c) => c.id === id)) return 'Class id already exists.'
+  store.classes = [
+    ...store.classes,
+    {
+      id,
+      name: input.name.trim(),
+      blurb: '',
+      longDescription: '',
+      warnings: '',
+      restrictions: '',
+      recommendations: '',
+      whatToBring: '',
+      cap: input.cap ?? 16,
+      exerciseIds: [],
+      active: true,
+    },
+  ]
+  persist()
+  return null
+}
+
+export function archiveClassType(id: string): string | null {
+  const cls = store.classes.find((c) => c.id === id)
+  if (!cls) return 'Class not found.'
+  cls.active = false
+  persist()
+  return null
+}
+
+export function setSessionExerciseDisplay(
+  occurrenceId: string,
+  display: ExerciseDisplay,
+): void {
+  const occ = occurrenceById(occurrenceId)
+  if (!occ) return
+  occ.exerciseDisplay = display
+  persist()
+}
+
+export function setRosterStatus(
+  occurrenceId: string,
+  memberId: string,
+  status: RosterStatus,
+): string | null {
+  const occ = occurrenceById(occurrenceId)
+  if (!occ) return 'Session not found.'
+  const entry = occ.roster.find((r) => r.memberId === memberId)
+  if (!entry) return 'Member not on roster.'
+  entry.status = status
+  if (status === 'attended') {
+    entry.attendedAt = new Date().toISOString()
+    const u = userById(memberId)
+    if (u) u.sessionsAttended = (u.sessionsAttended ?? 0) + 1
+  }
+  persist()
+  return null
+}
+
+export function adminAddMemberToSession(occurrenceId: string, userId: string): string | null {
+  const occ = occurrenceById(occurrenceId)
+  const u = userById(userId)
+  if (!occ || !u || u.role !== 'member') return 'Invalid session or member.'
+  if (spotsLeft(occ) <= 0) return 'This class is full.'
+  if (occ.roster.some((r) => r.memberId === userId)) return 'Already on roster.'
+  occ.roster = [
+    ...occ.roster,
+    {
+      memberId: userId,
+      displayName: u.name,
+      kind: 'member',
+      showName: u.showNameToClassmates,
+      status: 'booked',
+      bookedBy: 'admin',
+    },
+  ]
+  occ.bookedCount += 1
+  persist()
+  return null
+}
+
+export function canMemberTransfer(occurrenceId: string): boolean {
+  const occ = occurrenceById(occurrenceId)
+  if (!occ) return false
+  return store.transferWindowHours > 0
+}
+
+export function createGuestPassCode(): string {
+  return `GBTT-${Math.random().toString(36).slice(2, 8).toUpperCase()}`
+}
