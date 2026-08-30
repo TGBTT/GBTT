@@ -84,6 +84,172 @@ function guestPassCode(): string {
   return randomBytes(4).toString('hex').toUpperCase()
 }
 
+/* —————————————————————— Seasons ——————————————————————
+ *
+ * A season is an admin-defined stretch of the calendar — a school term, a
+ * short summer block, or a full year — with closure periods carved out of it.
+ * It does two jobs: it decides which sessions exist, and it decides what a
+ * member is billed for.
+ *
+ * The two billing modes exist because the studio has not settled on one:
+ *
+ *   arrears  Invoice at the end for the seats actually held. Holidays need no
+ *            special handling, because a week with no sessions produces no
+ *            seats and so no charge.
+ *   upfront  Quote and invoice the whole season when the member enrols, from
+ *            a count of the sessions their slots will produce.
+ *
+ * Both read the same session data, so a season can be switched between them
+ * without redefining anything.
+ */
+
+const TIME_ZONE = 'Pacific/Auckland'
+
+const SEASON_DAY_INDEX: Record<string, number> = { Mon: 0, Tue: 1, Wed: 2, Thu: 3, Fri: 4 }
+
+interface SeasonBreak {
+  label: string
+  startDate: string
+  endDate: string
+}
+
+interface Season {
+  id: string
+  name: string
+  startDate: string
+  endDate: string
+  billingMode: 'arrears' | 'upfront'
+  breaks: SeasonBreak[]
+}
+
+function pad2(n: number): string {
+  return String(n).padStart(2, '0')
+}
+
+function dateKey(d: Date): string {
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
+}
+
+/** Offset of `timeZone` from UTC, in ms, at the given instant. */
+function zoneOffsetMs(utcMs: number, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hour12: false,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  })
+    .formatToParts(new Date(utcMs))
+    .reduce<Record<string, string>>((acc, p) => ({ ...acc, [p.type]: p.value }), {})
+
+  return (
+    Date.UTC(
+      Number(parts.year),
+      Number(parts.month) - 1,
+      Number(parts.day),
+      Number(parts.hour) % 24,
+      Number(parts.minute),
+      Number(parts.second),
+    ) - utcMs
+  )
+}
+
+/**
+ * Studio wall-clock time to a UTC instant, resolved twice so a session near a
+ * daylight-saving change lands on the right side of the transition. The
+ * transfer window is measured from this, so an hour of drift is a real bug.
+ */
+function zonedToUtc(year: number, month: number, day: number, hour: number, minute: number): Date {
+  const guess = Date.UTC(year, month - 1, day, hour, minute)
+  let instant = guess - zoneOffsetMs(guess, TIME_ZONE)
+  instant = guess - zoneOffsetMs(instant, TIME_ZONE)
+  return new Date(instant)
+}
+
+/** Monday of the week containing `d`. */
+function mondayOf(d: Date): Date {
+  const out = new Date(d.getFullYear(), d.getMonth(), d.getDate())
+  const dow = out.getDay()
+  out.setDate(out.getDate() + (dow === 0 ? -6 : 1 - dow))
+  return out
+}
+
+function parseDateKey(key: string): Date {
+  const [y, m, d] = key.split('-').map(Number)
+  if (!y || !m || !d) {
+    throw new HttpsError('invalid-argument', `Expected a YYYY-MM-DD date, got "${key}".`)
+  }
+  return new Date(y, m - 1, d)
+}
+
+async function loadSeason(seasonId: string): Promise<Season> {
+  const snap = await db.doc(`seasons/${seasonId}`).get()
+  if (!snap.exists) {
+    throw new HttpsError('not-found', 'Season not found.')
+  }
+  const data = snap.data() ?? {}
+  const startDate = String(data.startDate ?? '')
+  const endDate = String(data.endDate ?? '')
+  if (!startDate || !endDate) {
+    throw new HttpsError('failed-precondition', 'This season has no start and end date set.')
+  }
+  if (endDate < startDate) {
+    throw new HttpsError('failed-precondition', 'Season end date falls before its start date.')
+  }
+
+  const breaks = Array.isArray(data.breaks)
+    ? (data.breaks as Record<string, unknown>[]).map((b) => ({
+        label: String(b.label ?? 'Closed'),
+        startDate: String(b.startDate ?? ''),
+        endDate: String(b.endDate ?? ''),
+      }))
+    : []
+
+  return {
+    id: snap.id,
+    name: String(data.name ?? snap.id),
+    startDate,
+    endDate,
+    billingMode: data.billingMode === 'upfront' ? 'upfront' : 'arrears',
+    breaks: breaks.filter((b) => b.startDate && b.endDate),
+  }
+}
+
+/** Whether a date falls inside any closure period. Both ends are inclusive. */
+function isClosed(day: string, breaks: SeasonBreak[]): boolean {
+  return breaks.some((b) => day >= b.startDate && day <= b.endDate)
+}
+
+/**
+ * Every date a season's sessions could fall on, closure periods removed.
+ *
+ * Returned as `{ weekStart, day, dayLabel }` because sessions are filed under
+ * the Monday of their week — the key the timetable subscribes to — while the
+ * closure check has to be made against the session's own date, not its week.
+ * A break covering only part of a week must cancel only the days it covers.
+ */
+function seasonDays(season: Season): { weekStart: string; day: string; dayLabel: string }[] {
+  const out: { weekStart: string; day: string; dayLabel: string }[] = []
+  const start = parseDateKey(season.startDate)
+  const end = parseDateKey(season.endDate)
+
+  for (let week = mondayOf(start); week <= end; week.setDate(week.getDate() + 7)) {
+    const weekStart = dateKey(week)
+    for (const [label, offset] of Object.entries(SEASON_DAY_INDEX)) {
+      const date = new Date(week.getFullYear(), week.getMonth(), week.getDate() + offset)
+      const day = dateKey(date)
+      if (day < season.startDate || day > season.endDate) continue
+      if (isClosed(day, season.breaks)) continue
+      out.push({ weekStart, day, dayLabel: label })
+    }
+  }
+
+  return out
+}
+
 function periodEndFromStart(periodStart: string): string {
   const start = new Date(`${periodStart}T00:00:00.000Z`)
   const end = new Date(start)
@@ -239,7 +405,7 @@ export const onRosterWrite = onDocumentWritten(
     let className = String(session.className ?? '')
     const classTypeId = String(session.classTypeId ?? '')
     if (!className && classTypeId) {
-      const classSnap = await db.doc(`catalog/classTypes/${classTypeId}`).get()
+      const classSnap = await db.doc(`classTypes/${classTypeId}`).get()
       className = String(classSnap.data()?.name ?? classTypeId)
     }
 
@@ -333,11 +499,24 @@ export const calculateBillingPeriod = onCall(async (request) => {
   requireAdmin(request)
 
   const uid = String(request.data?.uid ?? '').trim()
-  const periodStart = String(request.data?.periodStart ?? '').trim()
+  const seasonId = String(request.data?.seasonId ?? '').trim()
+  const requestedStart = String(request.data?.periodStart ?? '').trim()
 
-  if (!uid || !periodStart) {
-    throw new HttpsError('invalid-argument', 'uid and periodStart (YYYY-MM-DD) are required.')
+  if (!uid) {
+    throw new HttpsError('invalid-argument', 'uid is required.')
   }
+  if (!seasonId && !requestedStart) {
+    throw new HttpsError('invalid-argument', 'Pass either a seasonId or a periodStart (YYYY-MM-DD).')
+  }
+
+  /*
+   * A season and a calendar month are the same thing here: a date range to
+   * total seats over. Seasons are the configurable form — a term, a short
+   * summer block or a full year — and a month remains available so billing
+   * can run on a rolling cycle before any season is defined.
+   */
+  const season = seasonId ? await loadSeason(seasonId) : null
+  const periodStart = season ? season.startDate : requestedStart
 
   const userSnap = await db.doc(`users/${uid}`).get()
   if (!userSnap.exists) {
@@ -349,75 +528,112 @@ export const calculateBillingPeriod = onCall(async (request) => {
   const billing = (user.billing as Record<string, unknown>) ?? {}
   const planId = String(membership.planId ?? 'casual')
 
-  const planSnap = await db.doc(`pricing/plans/${planId}`).get()
+  const planSnap = await db.doc(`pricingPlans/${planId}`).get()
   const plan = planSnap.data() ?? {}
+  // The tier's per-class rate is the whole price signal; the seat count comes
+  // from the roster rather than the plan allowance.
   const ratePerClass = Number(plan.ratePerClass ?? 0)
-  const classesPerWeek = Number(plan.classesPerWeek ?? 0)
-  const planName = String(plan.name ?? planId)
 
-  const periodEnd = periodEndFromStart(periodStart)
+  const periodEnd = season ? season.endDate : periodEndFromStart(periodStart)
   const startTs = Timestamp.fromDate(new Date(`${periodStart}T00:00:00.000Z`))
   const endTs = Timestamp.fromDate(new Date(`${periodEnd}T23:59:59.999Z`))
 
-  const rosterQuery = await db
-    .collectionGroup('roster')
-    .where('status', '==', 'attended')
-    .get()
+  /*
+   * Every seat held in the period is charged, not just the ones attended.
+   *
+   * A booked seat holds a place that nobody else could take, so the terms
+   * members accept on join make it non-refundable once the transfer window has
+   * closed — a no-show is still billed. Members who want out cancel or transfer
+   * before the window, which removes the roster entry entirely and so removes
+   * the charge with it.
+   *
+   * There is deliberately no separate subscription line. The tier a member is
+   * on sets their per-class rate ($15 at one a week, $13 at two, and so on),
+   * and that rate is already applied to each seat below. Adding a plan fee on
+   * top billed those same classes twice.
+   */
+  const rosterQuery = await db.collectionGroup('roster').where('memberId', '==', uid).get()
+
+  const chargeable = rosterQuery.docs.filter((d) => {
+    const status = String(d.data()?.status ?? 'booked')
+    return status === 'booked' || status === 'attended' || status === 'noShow'
+  })
+
+  /*
+   * Fetch the sessions in bulk rather than one per roster entry. A member with
+   * a full year of bookings has a few hundred entries, and reading each one
+   * inside the loop meant that many sequential round trips — enough to push the
+   * callable towards its timeout on exactly the members whose invoices matter
+   * most. `getAll` is chunked because it takes a bounded number of refs.
+   */
+  const sessionIds = [
+    ...new Set(chargeable.map((d) => d.ref.parent.parent?.id).filter((id): id is string => !!id)),
+  ]
+
+  const sessions = new Map<string, Record<string, unknown>>()
+  const CHUNK = 300
+  for (let i = 0; i < sessionIds.length; i += CHUNK) {
+    const refs = sessionIds.slice(i, i + CHUNK).map((id) => db.doc(`sessions/${id}`))
+    const snaps = await db.getAll(...refs)
+    for (const snap of snaps) {
+      if (snap.exists) sessions.set(snap.id, snap.data() ?? {})
+    }
+  }
 
   const lineItems: BillingLineItem[] = []
   let attendedCount = 0
+  let chargeableCount = 0
 
-  for (const rosterDoc of rosterQuery.docs) {
-    const rosterUserId = rosterDoc.ref.id
-    if (rosterUserId !== uid) {
-      continue
-    }
+  for (const rosterDoc of chargeable) {
+    const entry = rosterDoc.data() ?? {}
+    const status = String(entry.status ?? 'booked')
 
     const sessionId = rosterDoc.ref.parent.parent?.id
     if (!sessionId) {
       continue
     }
 
-    const sessionSnap = await db.doc(`sessions/${sessionId}`).get()
-    const session = sessionSnap.data() ?? {}
+    const session = sessions.get(sessionId) ?? {}
     const weekStart = String(session.weekStart ?? '')
     if (!weekStart) {
       continue
     }
 
+    // An archived session still bills: the seat was held and the class ran or
+    // the member failed to release it in time.
     const sessionDate = new Date(`${weekStart}T00:00:00.000Z`)
     if (sessionDate < startTs.toDate() || sessionDate > endTs.toDate()) {
       continue
     }
 
-    attendedCount += 1
-    const amountCents = Math.round(ratePerClass * 100)
+    if (status === 'attended') {
+      attendedCount += 1
+    }
+    chargeableCount += 1
+
+    // Drop-ins carry the rate they were quoted at booking time, so a later
+    // change to the price list cannot alter an extra already agreed to.
+    const amountCents =
+      entry.chargeRateCents != null
+        ? Number(entry.chargeRateCents)
+        : Math.round(ratePerClass * 100)
+
+    const suffix = entry.dropIn ? ' · drop-in' : status === 'noShow' ? ' · no-show' : ''
     lineItems.push({
       sessionId,
-      label: `${weekStart} · ${String(session.slotId ?? sessionId)}`,
+      label: `${weekStart} · ${String(session.slotId ?? sessionId)}${suffix}`,
       amountCents,
     })
   }
 
-  let subtotalCents = lineItems.reduce((sum, item) => sum + item.amountCents, 0)
-
-  if (classesPerWeek > 0) {
-    const weeksInPeriod = 4
-    const subscriptionBaseCents = Math.round(ratePerClass * classesPerWeek * weeksInPeriod * 100)
-    subtotalCents += subscriptionBaseCents
-    lineItems.unshift({
-      sessionId: 'subscription',
-      label: `${planName} subscription (${classesPerWeek}/week × ${weeksInPeriod} weeks)`,
-      amountCents: subscriptionBaseCents,
-    })
-  }
+  const subtotalCents = lineItems.reduce((sum, item) => sum + item.amountCents, 0)
 
   const customDiscountPct = Number(billing.customDiscountPct ?? 0)
   const discountId = billing.discountId as string | undefined
   let discountCents = 0
 
   if (discountId) {
-    const discountSnap = await db.doc(`pricing/discounts/${discountId}`).get()
+    const discountSnap = await db.doc(`pricingDiscounts/${discountId}`).get()
     const discount = discountSnap.data() ?? {}
     const discountType = String(discount.type ?? 'percent')
     const discountValue = Number(discount.value ?? 0)
@@ -437,14 +653,20 @@ export const calculateBillingPeriod = onCall(async (request) => {
   }
 
   const totalCents = Math.max(0, subtotalCents - discountCents + adjustmentCents)
-  const periodId = `${periodStart}`
+  // Keyed by season where there is one so re-running replaces that season's
+  // invoice rather than filing a second one under its start date.
+  const periodId = season ? season.id : periodStart
 
   await db.doc(`users/${uid}/billingPeriods/${periodId}`).set({
     periodStart,
     periodEnd,
+    seasonId: season?.id ?? null,
+    seasonName: season?.name ?? null,
+    billingMode: season?.billingMode ?? 'arrears',
     planId,
     lineItems,
     attendedCount,
+    chargeableCount,
     subtotalCents,
     discountCents,
     adjustmentCents,
@@ -461,11 +683,285 @@ export const calculateBillingPeriod = onCall(async (request) => {
     periodEnd,
     lineItems,
     attendedCount,
+    chargeableCount,
     subtotalCents,
     discountCents,
     adjustmentCents,
     totalCents,
   }
+})
+
+/**
+ * Create every session a season implies, from the recurring timetable slots.
+ *
+ * Idempotent: session ids are derived from the slot and the week, so re-running
+ * after shifting a date or adding a closure updates in place rather than
+ * duplicating. `bookedCount` is never written on an existing session — it is
+ * derived from the roster by the booking callables, and overwriting it here
+ * would silently free or lose seats that members are holding.
+ *
+ * Sessions that fall inside a closure are archived rather than deleted, for
+ * the same reason `removeSession` archives: a booked seat carries attendance
+ * and billing history that must survive the class being called off.
+ */
+export const generateSeasonSessions = onCall(async (request) => {
+  const authCtx = requireAdmin(request)
+
+  const seasonId = String(request.data?.seasonId ?? '').trim()
+  const dryRun = request.data?.dryRun === true
+  if (!seasonId) {
+    throw new HttpsError('invalid-argument', 'seasonId is required.')
+  }
+
+  const season = await loadSeason(seasonId)
+
+  const slotsSnap = await db.collection('timetableSlots').get()
+  const slots = slotsSnap.docs
+    .map((d) => ({ id: d.id, fields: d.data() as Record<string, unknown> }))
+    .filter((s) => s.fields.active !== false)
+
+  if (!slots.length) {
+    throw new HttpsError(
+      'failed-precondition',
+      'No active timetable slots to generate from. Seed the timetable first.',
+    )
+  }
+
+  const classTypesSnap = await db.collection('classTypes').get()
+  const classTypes = new Map(classTypesSnap.docs.map((d) => [d.id, d.data()]))
+
+  const days = seasonDays(season)
+  const planned: { id: string; data: Record<string, unknown> }[] = []
+
+  for (const { weekStart, day, dayLabel } of days) {
+    for (const slot of slots) {
+      if (String(slot.fields.dayLabel ?? '') !== dayLabel) continue
+
+      const time = String(slot.fields.time ?? '')
+      const [hour, minute] = time.split(':').map(Number)
+      if (Number.isNaN(hour) || Number.isNaN(minute)) continue
+
+      const classTypeId = String(slot.fields.classTypeId ?? '')
+      const classType = classTypes.get(classTypeId) ?? {}
+      const date = parseDateKey(day)
+
+      planned.push({
+        id: `${slot.id}-${weekStart}`,
+        data: {
+          slotId: slot.id,
+          seasonId: season.id,
+          weekStart,
+          dayLabel,
+          time,
+          classTypeId,
+          className: String(classType.name ?? classTypeId),
+          cap: Number(classType.cap ?? 20),
+          instructorId: String(slot.fields.instructorId ?? 'tom'),
+          venueId: String(slot.fields.venueId ?? 'rec-park-centre'),
+          venue: String(slot.fields.venueId ?? 'rec-park-centre'),
+          durationMinutes: 60,
+          cancelled: false,
+          startsAt: Timestamp.fromDate(
+            zonedToUtc(date.getFullYear(), date.getMonth() + 1, date.getDate(), hour, minute),
+          ),
+        },
+      })
+    }
+  }
+
+  // Anything already filed under this season but no longer planned is now
+  // inside a closure or outside the shifted dates, so it should stop running.
+  const existingSnap = await db.collection('sessions').where('seasonId', '==', season.id).get()
+  const plannedIds = new Set(planned.map((p) => p.id))
+  const toArchive = existingSnap.docs.filter(
+    (d) => !plannedIds.has(d.id) && d.data().cancelled !== true,
+  )
+
+  if (dryRun) {
+    return {
+      ok: true,
+      dryRun: true,
+      seasonId: season.id,
+      planned: planned.length,
+      toArchive: toArchive.length,
+      teachingDays: days.length,
+    }
+  }
+
+  let created = 0
+  let updated = 0
+
+  for (const session of planned) {
+    const ref = db.doc(`sessions/${session.id}`)
+    const existing = await ref.get()
+    if (existing.exists) {
+      await ref.set(session.data, { merge: true })
+      updated += 1
+    } else {
+      await ref.set({ ...session.data, bookedCount: 0 })
+      created += 1
+    }
+  }
+
+  for (const doc of toArchive) {
+    await doc.ref.set(
+      {
+        cancelled: true,
+        cancelledAt: FieldValue.serverTimestamp(),
+        cancelledBy: authCtx.uid,
+        cancelReason: 'Outside season dates or inside a closure period',
+      },
+      { merge: true },
+    )
+  }
+
+  await db.collection('audit').add({
+    type: 'generateSeasonSessions',
+    seasonId: season.id,
+    created,
+    updated,
+    archived: toArchive.length,
+    by: authCtx.uid,
+    at: FieldValue.serverTimestamp(),
+  })
+
+  return {
+    ok: true,
+    seasonId: season.id,
+    created,
+    updated,
+    archived: toArchive.length,
+    teachingDays: days.length,
+  }
+})
+
+/**
+ * What a season will cost a member, before it runs.
+ *
+ * Counts the sessions their locked slots actually produce across the season —
+ * closures already removed, because a closed week generates no session — and
+ * multiplies by their tier rate. This is the number quoted at enrolment on an
+ * upfront season, and it is also what makes a holiday break visible as a lower
+ * total rather than as an unexplained discount later.
+ */
+export const projectSeasonInvoice = onCall(async (request) => {
+  const authCtx = requireAuth(request)
+
+  const seasonId = String(request.data?.seasonId ?? '').trim()
+  const requestedUid = String(request.data?.uid ?? '').trim()
+  if (!seasonId) {
+    throw new HttpsError('invalid-argument', 'seasonId is required.')
+  }
+
+  // Members may only project their own season; staff may project anyone's.
+  const uid = requestedUid && requestedUid !== authCtx.uid ? requestedUid : authCtx.uid
+  if (uid !== authCtx.uid) {
+    requireStaff(request)
+  }
+
+  const season = await loadSeason(seasonId)
+
+  const userSnap = await db.doc(`users/${uid}`).get()
+  if (!userSnap.exists) {
+    throw new HttpsError('not-found', 'Member not found.')
+  }
+  const membership = (userSnap.data()?.membership as Record<string, unknown>) ?? {}
+  const planId = String(membership.planId ?? 'casual')
+
+  const planSnap = await db.doc(`pricingPlans/${planId}`).get()
+  const ratePerClass = Number(planSnap.data()?.ratePerClass ?? 0)
+  const planName = String(planSnap.data()?.name ?? planId)
+
+  const locksSnap = await db.collection(`users/${uid}/weeklyLocks`).get()
+  const lockedSlotIds = locksSnap.docs.map((d) => d.id)
+
+  if (!lockedSlotIds.length) {
+    return {
+      ok: true,
+      seasonId: season.id,
+      seasonName: season.name,
+      billingMode: season.billingMode,
+      planName,
+      lockedSlotIds,
+      sessionCount: 0,
+      ratePerClass,
+      totalCents: 0,
+      note: 'No recurring slots locked yet, so there is nothing to project.',
+    }
+  }
+
+  // Count from the sessions that actually exist for the season rather than
+  // from the season length, so a closure or a cancelled class is reflected.
+  const sessionsSnap = await db.collection('sessions').where('seasonId', '==', season.id).get()
+  const sessionCount = sessionsSnap.docs.filter((d) => {
+    const data = d.data()
+    return data.cancelled !== true && lockedSlotIds.includes(String(data.slotId ?? ''))
+  }).length
+
+  const totalCents = Math.round(ratePerClass * 100) * sessionCount
+
+  return {
+    ok: true,
+    seasonId: season.id,
+    seasonName: season.name,
+    billingMode: season.billingMode,
+    planName,
+    lockedSlotIds,
+    sessionCount,
+    ratePerClass,
+    totalCents,
+  }
+})
+
+/**
+ * Admin sign-off that a billing period has been settled.
+ *
+ * There is no payment gateway: Tom reconciles against the bank himself and
+ * records the outcome here. Rules forbid client writes to `billingPeriods`, so
+ * this callable is the only way the status moves, which keeps an auditable
+ * trail of who cleared what and when.
+ */
+export const markBillingPeriodPaid = onCall(async (request) => {
+  requireAdmin(request)
+
+  const uid = String(request.data?.uid ?? '').trim()
+  const periodId = String(request.data?.periodId ?? '').trim()
+  const paid = request.data?.paid !== false
+  const note = String(request.data?.note ?? '').trim()
+
+  if (!uid || !periodId) {
+    throw new HttpsError('invalid-argument', 'uid and periodId are required.')
+  }
+
+  const ref = db.doc(`users/${uid}/billingPeriods/${periodId}`)
+  const snap = await ref.get()
+  if (!snap.exists) {
+    throw new HttpsError('not-found', 'No billing period to mark. Calculate it first.')
+  }
+
+  await ref.set(
+    {
+      status: paid ? 'paid' : 'owed',
+      paymentNote: note,
+      // Cleared rather than overwritten, so an unmarked period does not keep a
+      // stale settlement date hanging off it.
+      paidAt: paid ? FieldValue.serverTimestamp() : FieldValue.delete(),
+      paidBy: paid ? request.auth!.uid : FieldValue.delete(),
+    },
+    { merge: true },
+  )
+
+  await db.collection('audit').add({
+    type: 'markBillingPeriodPaid',
+    uid,
+    periodId,
+    paid,
+    note,
+    by: request.auth!.uid,
+    at: FieldValue.serverTimestamp(),
+  })
+
+  return { ok: true, uid, periodId, status: paid ? 'paid' : 'owed' }
 })
 
 /** Admin creates a complimentary guest pass and emails the code via Apps Script. */
@@ -560,24 +1056,71 @@ async function requireActiveMember(uid: string) {
   if (!snap.exists) {
     throw new HttpsError('not-found', 'No member profile found for this account.')
   }
-  const profile = (snap.data()?.profile as Record<string, unknown>) ?? {}
+
+  const data = snap.data() ?? {}
+  const profile = (data.profile as Record<string, unknown>) ?? {}
   const status = String(profile.status ?? '')
-  if (status !== 'active') {
+
+  if (status === 'active') {
+    return snap
+  }
+
+  /*
+   * Casual drop-ins self-activate on a verified email rather than waiting for
+   * Tom, since making someone wait for manual approval to pay for a single
+   * class defeats the point of a drop-in. A verified address is the check that
+   * the account is a real person who can be invoiced and contacted.
+   *
+   * Subscriptions still require admin approval: those carry a recurring
+   * commitment and an allowance, so they are not self-serve.
+   */
+  if (status === 'pending') {
+    const requested = (data.requested as Record<string, unknown>) ?? {}
+    const membership = (data.membership as Record<string, unknown>) ?? {}
+    const planId = String(membership.planId ?? requested.planId ?? 'casual')
+
+    const planSnap = await db.doc(`pricingPlans/${planId}`).get()
+    const classesPerWeek = Number(planSnap.data()?.classesPerWeek ?? 0)
+
+    if (classesPerWeek === 0) {
+      const userRecord = await auth.getUser(uid)
+      if (!userRecord.emailVerified) {
+        throw new HttpsError(
+          'failed-precondition',
+          'Confirm your email address to book a casual session — check your inbox for the verification link.',
+        )
+      }
+
+      await auth.setCustomUserClaims(uid, {
+        ...(userRecord.customClaims ?? {}),
+        role: 'member',
+      })
+      await snap.ref.set(
+        {
+          profile: { status: 'active' },
+          membership: { planId, classesPerWeek: 0 },
+          activatedAt: FieldValue.serverTimestamp(),
+          activatedVia: 'email-verification',
+        },
+        { merge: true },
+      )
+      return await snap.ref.get()
+    }
+
     throw new HttpsError(
       'permission-denied',
-      status === 'pending'
-        ? 'Your account is awaiting approval by the studio.'
-        : `Account status "${status}" cannot book classes.`,
+      'Your subscription is awaiting approval by the studio.',
     )
   }
-  return snap
+
+  throw new HttpsError('permission-denied', `Account status "${status}" cannot book classes.`)
 }
 
 const DEFAULT_DROP_IN_RATE = 17
 
 /** Drop-in price. Extras are charged at the casual rate whatever plan the member is on. */
 async function dropInRateCents(): Promise<number> {
-  const snap = await db.doc('pricing/plans/casual').get()
+  const snap = await db.doc('pricingPlans/casual').get()
   const rate = Number(snap.data()?.ratePerClass)
   return Math.round((Number.isFinite(rate) && rate > 0 ? rate : DEFAULT_DROP_IN_RATE) * 100)
 }
@@ -649,7 +1192,7 @@ export const bookSession = onCall(async (request) => {
     if (!cap) {
       const classTypeId = String(session.classTypeId ?? '')
       if (classTypeId) {
-        const classSnap = await tx.get(db.doc(`catalog/classTypes/${classTypeId}`))
+        const classSnap = await tx.get(db.doc(`classTypes/${classTypeId}`))
         cap = Number(classSnap.data()?.cap ?? 0)
       }
     }
@@ -826,7 +1369,7 @@ async function bookMemberIntoSession(
     if (!cap) {
       const classTypeId = String(session.classTypeId ?? '')
       if (classTypeId) {
-        cap = Number((await tx.get(db.doc(`catalog/classTypes/${classTypeId}`))).data()?.cap ?? 0)
+        cap = Number((await tx.get(db.doc(`classTypes/${classTypeId}`))).data()?.cap ?? 0)
       }
     }
     if (!cap) return 'no-capacity'

@@ -1,7 +1,5 @@
 /** GBTT studio store — local persistence until Firestore is live; API mirrors production schema. */
 
-import { activationKeyValid } from './accountApi'
-
 export type PlanId = 'casual' | 'pack10' | 'pack20' | 'weekly1' | 'weekly2' | 'weekly3'
 export type SimRole = 'public' | 'member' | 'admin' | 'substitute'
 export type ExerciseDisplay = 'hidden' | 'defaults' | 'custom'
@@ -1034,47 +1032,52 @@ export function bindStaffSession(
   persist()
 }
 
-export function registerMember(
-  name: string,
-  email: string,
-  planId: PlanId,
-  activationKey: string,
-): string | null {
-  const trimmedEmail = email.trim().toLowerCase()
-  if (!name.trim() || !trimmedEmail) return 'Name and email required.'
-  if (!activationKey.trim()) return 'Enter the activation key from your email.'
-  if (!activationKeyValid(activationKey)) {
-    return 'Invalid activation key — check your confirmation email.'
+/**
+ * Bind a Firebase-authenticated member to the local UI session.
+ *
+ * Same reason as `bindStaffSession`: the member screens still read this store,
+ * so a Firebase sign-in alone would render them logged out. Bookings and
+ * billing already come from Firestore — this only decides what the page shows.
+ * Remove once the member screens read Firestore directly.
+ */
+export function bindMemberSession(input: {
+  uid: string
+  email: string
+  name: string
+  planId: string
+  classesPerWeek: number
+}): void {
+  const lower = input.email.trim().toLowerCase()
+  let user = store.users.find((u) => u.id === input.uid || u.email.toLowerCase() === lower)
+  if (!user) {
+    user = {
+      id: input.uid,
+      email: lower,
+      password: '',
+      name: input.name || lower,
+      role: 'member',
+      planId: (input.planId as PlanId) ?? 'casual',
+      creditsLeft: 0,
+      classesPerWeek: input.classesPerWeek,
+      weeklyLockedOccurrenceIds: [],
+      heldOccurrenceIds: [],
+      activated: true,
+      showNameToClassmates: true,
+      paid: false,
+      paymentNote: '',
+      limitations: '',
+      riskNotes: '',
+      // Accepted during registration, which is where the terms are presented.
+      termsAccepted: true,
+    }
+    store.users.push(user)
   }
-  if (store.users.some((u) => u.email.toLowerCase() === trimmedEmail)) {
-    return 'That email is already registered — log in instead.'
-  }
-  const plan = planById(planId)
-  if (!plan) return 'Pick a plan.'
-  const id = `u-${Date.now()}`
-  const user: SimUser = {
-    id,
-    email: trimmedEmail,
-    password: 'demo',
-    name: name.trim(),
-    role: 'member',
-    planId,
-    creditsLeft: plan.credits,
-    classesPerWeek: plan.classesPerWeek,
-    weeklyLockedOccurrenceIds: [],
-    heldOccurrenceIds: [],
-    activated: true,
-    showNameToClassmates: false,
-    paid: false,
-    paymentNote: 'Awaiting first payment',
-    limitations: '',
-    riskNotes: '',
-    termsAccepted: false,
-  }
-  store.users = [...store.users, user]
-  store.sessionUserId = id
+  user.name = input.name || user.name
+  user.planId = (input.planId as PlanId) ?? user.planId
+  user.classesPerWeek = input.classesPerWeek
+  user.role = 'member'
+  store.sessionUserId = user.id
   persist()
-  return null
 }
 
 export function getWeeklyLockedOccurrenceIds(): string[] {

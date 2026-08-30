@@ -60,8 +60,17 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // Class types are their own top-level collection rather than nested under
+    // /catalog: a document must sit at an even number of path segments, so
+    // `catalog/classTypes/{id}` is a collection path and no document can ever
+    // exist there.
+    match /classTypes/{classTypeId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
     // —— Recurring timetable template ——
-    match /timetable/slots/{slotId} {
+    match /timetableSlots/{slotId} {
       allow read: if true;
       allow write: if isStaff();
     }
@@ -132,6 +141,27 @@ service cloud.firestore {
 
     // —— Pricing plans & discounts (signed-in members read; admin writes) ——
     match /pricing/{document=**} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // Per-class rate for each level of commitment, including the casual
+    // drop-in rate charged on one-off bookings.
+    match /pricingPlans/{planId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    match /pricingDiscounts/{discountId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // —— Seasons: term dates, closure periods and billing mode ——
+    // Members read these to see when a term runs and what it will cost, but
+    // only an admin sets the dates, since they determine both how many
+    // sessions exist and what a member is charged for them.
+    match /seasons/{seasonId} {
       allow read: if isSignedIn();
       allow write: if isAdmin();
     }

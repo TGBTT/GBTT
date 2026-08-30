@@ -63,6 +63,30 @@ before(async () => {
       displayName: 'Someone',
       status: 'booked',
     })
+    await setDoc(doc(db, 'seasons', 'term-1'), {
+      name: 'Term 1',
+      startDate: '2026-02-02',
+      endDate: '2026-04-10',
+      billingMode: 'arrears',
+      breaks: [{ label: 'School holidays', startDate: '2026-03-09', endDate: '2026-03-20' }],
+    })
+    await setDoc(doc(db, 'pricingPlans', 'casual'), {
+      name: 'Guest / casual',
+      ratePerClass: 17,
+      classesPerWeek: 0,
+    })
+    await setDoc(doc(db, `users/${MEMBER}/billingPeriods`, '2026-08-01'), {
+      periodStart: '2026-08-01',
+      periodEnd: '2026-08-31',
+      status: 'owed',
+      totalCents: 5200,
+      chargeableCount: 4,
+    })
+    await setDoc(doc(db, `users/${OTHER}/billingPeriods`, '2026-08-01'), {
+      periodStart: '2026-08-01',
+      status: 'owed',
+      totalCents: 3400,
+    })
   })
 })
 
@@ -235,6 +259,104 @@ describe('cross-member and anonymous access', () => {
 
   it('anonymous cannot write site content', async () => {
     await assertFails(setDoc(doc(anonDb(), 'siteContent', 'home'), { hero: 'hacked' }))
+  })
+})
+
+describe('admin payment workflow', () => {
+  // The payments screen writes the discount straight to Firestore rather than
+  // through a callable, so rules are the only thing standing between a member
+  // and their own discount field.
+  it('admin can set a member discount', async () => {
+    await assertSucceeds(
+      setDoc(
+        doc(adminDb(), 'users', MEMBER),
+        { billing: { customDiscountPct: 10 } },
+        { merge: true },
+      ),
+    )
+  })
+
+  it('member cannot set their own discount through the same path', async () => {
+    await assertFails(
+      setDoc(
+        doc(memberDb(), 'users', MEMBER),
+        { billing: { customDiscountPct: 100 } },
+        { merge: true },
+      ),
+    )
+  })
+
+  it('admin can read a member billing period to display what is owed', async () => {
+    await assertSucceeds(getDoc(doc(adminDb(), `users/${MEMBER}/billingPeriods`, '2026-08-01')))
+  })
+
+  it('a member cannot read another members billing period', async () => {
+    await assertFails(getDoc(doc(memberDb(), `users/${OTHER}/billingPeriods`, '2026-08-01')))
+  })
+
+  // Marking a period paid has to go through markBillingPeriodPaid so the
+  // sign-off is attributed and audited; even an admin cannot set it directly.
+  it('admin cannot mark a period paid by writing the document', async () => {
+    await assertFails(
+      setDoc(
+        doc(adminDb(), `users/${MEMBER}/billingPeriods`, '2026-08-01'),
+        { status: 'paid' },
+        { merge: true },
+      ),
+    )
+  })
+})
+
+describe('seasons and pricing are admin-set', () => {
+  // Seasons decide both which sessions exist and what a member is billed, so a
+  // member who could edit one could extend a term or delete a closure and
+  // change what everybody is charged.
+  it('member cannot create a season', async () => {
+    await assertFails(
+      setDoc(doc(memberDb(), 'seasons', 'forged'), {
+        name: 'Free term',
+        startDate: '2026-01-01',
+        endDate: '2026-12-31',
+      }),
+    )
+  })
+
+  it('member cannot shift an existing season', async () => {
+    await assertFails(updateDoc(doc(memberDb(), 'seasons', 'term-1'), { endDate: '2026-12-31' }))
+  })
+
+  it('member cannot remove a holiday closure', async () => {
+    await assertFails(updateDoc(doc(memberDb(), 'seasons', 'term-1'), { breaks: [] }))
+  })
+
+  it('member can read seasons to see term dates', async () => {
+    await assertSucceeds(getDoc(doc(memberDb(), 'seasons', 'term-1')))
+  })
+
+  it('anonymous cannot read seasons', async () => {
+    await assertFails(getDoc(doc(anonDb(), 'seasons', 'term-1')))
+  })
+
+  it('admin can define a season', async () => {
+    await assertSucceeds(
+      setDoc(doc(adminDb(), 'seasons', 'term-2'), {
+        name: 'Term 2',
+        startDate: '2026-05-04',
+        endDate: '2026-07-03',
+        billingMode: 'arrears',
+        breaks: [],
+      }),
+    )
+  })
+
+  it('member cannot rewrite the price list', async () => {
+    await assertFails(updateDoc(doc(memberDb(), 'pricingPlans', 'casual'), { ratePerClass: 0 }))
+  })
+
+  it('admin can set the drop-in rate', async () => {
+    await assertSucceeds(
+      setDoc(doc(adminDb(), 'pricingPlans', 'casual'), { ratePerClass: 17 }, { merge: true }),
+    )
   })
 })
 

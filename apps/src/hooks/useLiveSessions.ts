@@ -8,12 +8,14 @@
  * production.
  */
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   currentWeekStart,
+  shiftWeekStart,
   subscribeLiveSessions,
   subscribeSessionRoster,
   subscribeWeeklyLocks,
+  weekRangeLabel,
   type LiveRosterState,
   type LiveSessionsState,
 } from '@gbtt/shared/studio/firebase/liveSessions'
@@ -37,6 +39,36 @@ export function useLiveSessions(weekStart: string = currentWeekStart()) {
   }, [state.occurrences])
 
   return { ...state, byDay, weekStart }
+}
+
+/**
+ * The week the timetable is pointed at.
+ *
+ * Admins step back to finish roll call on a class that has already run, and
+ * members step forward to move commitments around before the transfer window
+ * closes, so navigation is deliberately unbounded in both directions. Whether
+ * an action is actually allowed on a given week stays a server decision — the
+ * booking and cancellation callables enforce the transfer window regardless of
+ * which week is on screen.
+ */
+export function useWeekNavigation(initial: string = currentWeekStart()) {
+  const [weekStart, setWeekStart] = useState(initial)
+
+  const goToWeek = useCallback((weeks: number) => {
+    setWeekStart((current) => shiftWeekStart(current, weeks))
+  }, [])
+
+  const thisWeek = currentWeekStart()
+
+  return {
+    weekStart,
+    label: weekRangeLabel(weekStart),
+    isCurrentWeek: weekStart === thisWeek,
+    isPast: weekStart < thisWeek,
+    previousWeek: useCallback(() => goToWeek(-1), [goToWeek]),
+    nextWeek: useCallback(() => goToWeek(1), [goToWeek]),
+    resetWeek: useCallback(() => setWeekStart(thisWeek), [thisWeek]),
+  }
 }
 
 export function useSessionRoster(sessionId: string | null) {

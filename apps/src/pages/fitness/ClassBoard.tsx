@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ClassTypeDescription } from '@gbtt/shared/studio/ClassTypeDescription'
 import {
@@ -8,18 +8,21 @@ import {
   studioStaffLogin,
 } from '@gbtt/shared/studio/studioAuth'
 import { createLiveSession } from '@gbtt/shared/studio/firebase/liveSessions'
+import { savePricingPlan } from '@gbtt/shared/studio/firebase/livePricing'
+import { useLivePricing } from '../../hooks/useLivePricing'
 import { AppOutsideShell } from '../../components/AppChrome'
 import { WeekSessionCalendar } from '../../components/WeekSessionCalendar'
-import { useLiveSessions, useSessionRoster } from '../../hooks/useLiveSessions'
+import { useLiveSessions, useSessionRoster, useWeekNavigation } from '../../hooks/useLiveSessions'
+import { WeekNavigator } from '../../components/WeekNavigator'
+import { SeasonsPanel } from '../../components/SeasonsPanel'
+import { MembersPayments } from '../../components/MembersPayments'
 import {
   WEEKDAYS,
   addExercise,
   addReminder,
   adminAddMemberToSession,
   archiveClassType,
-  calculateMemberOwed,
   classTypeById,
-  confirmSubscriptionChange,
   createClassType,
   deleteExercise,
   deleteOccurrence,
@@ -27,7 +30,6 @@ import {
   getClassTypes,
   getEquipmentChecked,
   getExercises,
-  getMemberAttendance,
   getOutbox,
   getPricingPlans,
   getReminders,
@@ -40,15 +42,12 @@ import {
   logout,
   occurrenceById,
   occurrencesByWeekday,
-  planById,
   renameExercise,
   resetStudioData,
   sendSubscriberEmail,
   sessionIsFull,
   setClassCap,
   setEquipmentChecked,
-  setMemberDiscount,
-  setMemberPaid,
   setMemberRisk,
   setOccurrenceInstructor,
   setRosterStatus,
@@ -66,12 +65,14 @@ import {
   upsertOccurrence,
   type ClassOccurrence,
   type ExerciseDisplay,
+  type PlanId,
   type Weekday,
 } from '../../shared/fitnessStudio'
 
 type Tab =
   | 'schedule'
   | 'sessions'
+  | 'seasons'
   | 'members'
   | 'risk'
   | 'legal'
@@ -90,6 +91,7 @@ const EQUIPMENT_ITEMS = [
 const ALL_TABS: { id: Tab; label: string; adminOnly?: boolean }[] = [
   { id: 'schedule', label: 'Schedule' },
   { id: 'sessions', label: 'Add & remove sessions', adminOnly: true },
+  { id: 'seasons', label: 'Seasons & holidays', adminOnly: true },
   { id: 'members', label: 'Members & payments' },
   { id: 'risk', label: 'Risk & notes' },
   { id: 'legal', label: 'Legal & payments copy', adminOnly: true },
@@ -134,7 +136,8 @@ export default function ClassBoard() {
   // Firestore is the source of truth for the timetable, its counts and the
   // roster. The seeded local store is only a development fallback; in
   // production an empty week renders as empty rather than as seed numbers.
-  const live = useLiveSessions()
+  const week = useWeekNavigation()
+  const live = useLiveSessions(week.weekStart)
   const liveRoster = useSessionRoster(live.status === 'ready' ? selectedOccId : null)
   const usingLive = live.status !== 'unavailable'
   const localByDay = useMemo(() => occurrencesByWeekday(), [tick, selectedOccId, tab])
@@ -143,7 +146,30 @@ export default function ClassBoard() {
   const [actionNote, setActionNote] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
+  // A session belongs to one week, so a selection made before stepping weeks
+  // would leave the detail panel and roll call showing a class that is no
+  // longer on the grid.
+  useEffect(() => {
+    setSelectedOccId(null)
+  }, [week.weekStart])
+
   const sessionList = useMemo(() => WEEKDAYS.flatMap((d) => byDay[d] ?? []), [byDay])
+
+  const pricing = useLivePricing()
+  const usingLivePricing = pricing.status !== 'unavailable'
+  const [pricingError, setPricingError] = useState<string | null>(null)
+
+  const savePlanRate = async (planId: string, ratePerClass: number) => {
+    setPricingError(null)
+    if (!usingLivePricing) {
+      // The seed store types plan ids as a closed union; live plan ids are
+      // whatever Firestore holds, so this narrows only on the fallback path.
+      updatePricingPlan(planId as PlanId, { ratePerClass })
+      refresh()
+      return
+    }
+    setPricingError(await savePricingPlan(planId, { ratePerClass }))
+  }
 
   const addSession = async () => {
     setActionError(null)
@@ -153,7 +179,11 @@ export default function ClassBoard() {
       setActionError('Pick a class type first.')
       return
     }
-    const label = `${type.name} on ${newOccDay} at ${newOccTime}`
+    // Sessions are created into whichever week the navigator is showing, so
+    // the week is named back to avoid silently adding to the wrong one.
+    const label = usingLive
+      ? `${type.name} on ${newOccDay} at ${newOccTime} (${week.label})`
+      : `${type.name} on ${newOccDay} at ${newOccTime}`
 
     if (!usingLive) {
       setSelectedOccId(
@@ -372,8 +402,19 @@ export default function ClassBoard() {
               Same Mon–Fri grid as member booking. Select a session badge to edit time, day, class, or
               instructor{role === 'admin' ? ' — or add a new session below' : ''}.
             </p>
+            {usingLive ? (
+              <WeekNavigator
+                label={week.label}
+                isCurrentWeek={week.isCurrentWeek}
+                isPast={week.isPast}
+                onPrevious={week.previousWeek}
+                onNext={week.nextWeek}
+                onReset={week.resetWeek}
+                disabled={live.status === 'loading'}
+              />
+            ) : null}
             {usingLive && live.status === 'loading' ? (
-              <p className="hint">Loading this week’s sessions…</p>
+              <p className="hint">Loading sessions for {week.label}…</p>
             ) : null}
             {live.status === 'error' ? (
               <p className="form-error">
@@ -382,8 +423,8 @@ export default function ClassBoard() {
             ) : null}
             {live.status === 'ready' && live.occurrences.length === 0 ? (
               <p className="hint">
-                No sessions scheduled for the week starting {live.weekStart}. Add one below and it
-                will appear here for members straight away.
+                No sessions scheduled for {week.label}. Add one from the “Add &amp; remove sessions”
+                tab and it will appear here for members straight away.
               </p>
             ) : (
               <WeekSessionCalendar
@@ -873,17 +914,34 @@ export default function ClassBoard() {
         </div>
       )}
 
+      {tab === 'seasons' && role === 'admin' && <SeasonsPanel />}
+
       {tab === 'sessions' && role === 'admin' && (
         <section className="yacht-panel app-enter app-section">
           <h2>Add &amp; remove sessions</h2>
           {actionError ? <p className="form-error">{actionError}</p> : null}
           {actionNote ? <p className="form-success">{actionNote}</p> : null}
 
+          {/* Shares the schedule tab's week, so stepping forward here builds
+              out future weeks rather than only editing the current one. */}
+          {usingLive ? (
+            <WeekNavigator
+              label={week.label}
+              isCurrentWeek={week.isCurrentWeek}
+              isPast={week.isPast}
+              onPrevious={week.previousWeek}
+              onNext={week.nextWeek}
+              onReset={week.resetWeek}
+              disabled={busy || live.status === 'loading'}
+            />
+          ) : null}
+
           <div className="add-occ-row">
             <h3>Add a session</h3>
             <p className="hint">
-              Added to the week beginning {live.weekStart}. Members can book it as soon as it
-              appears.
+              {usingLive
+                ? `Added to ${week.label}. Members can book it as soon as it appears.`
+                : 'Members can book it as soon as it appears.'}
             </p>
             <label className="field">
               Class
@@ -926,7 +984,7 @@ export default function ClassBoard() {
               keep their record of what they attended and were charged for.
             </p>
             {sessionList.length === 0 ? (
-              <p className="hint">No sessions scheduled this week.</p>
+              <p className="hint">No sessions scheduled for {week.label}.</p>
             ) : (
               <ul className="admin-session-list">
                 {sessionList.map((occ) => {
@@ -954,83 +1012,7 @@ export default function ClassBoard() {
         </section>
       )}
 
-      {tab === 'members' && (
-        <section className="yacht-panel app-enter app-section">
-          <h2>Members &amp; payments</h2>
-          <ul className="admin-member-list">
-            {users.map((u) => (
-              <li key={u.id}>
-                <strong>{u.name}</strong> · {u.email} · {planById(u.planId)?.name ?? u.planId}
-                <br />
-                <label className="exercise-check">
-                  <input
-                    type="checkbox"
-                    checked={u.paid}
-                    disabled={role !== 'admin'}
-                    onChange={(e) => {
-                      setMemberPaid(u.id, e.target.checked, e.target.checked ? 'Marked paid' : 'Unpaid')
-                      refresh()
-                    }}
-                  />
-                  Paid
-                </label>
-                <span className="hint"> {u.paymentNote}</span>
-                <p className="hint">
-                  Attended: {getMemberAttendance(u.id).length} · Owed: $
-                  {calculateMemberOwed(u.id).total} (incl.{' '}
-                  {u.discountPercent ?? 0}% discount)
-                </p>
-                {role === 'admin' ? (
-                  <label className="field">
-                    Discount %
-                    <input
-                      type="number"
-                      min={0}
-                      max={100}
-                      value={u.discountPercent ?? 0}
-                      onChange={(e) => {
-                        setMemberDiscount(u.id, Number(e.target.value))
-                        refresh()
-                      }}
-                    />
-                  </label>
-                ) : null}
-                <p className="hint">
-                  Held: {u.heldOccurrenceIds.length}
-                  {u.classesPerWeek ? ` / ${u.classesPerWeek} per week` : ` · credits ${u.creditsLeft}`}
-                </p>
-                {u.pendingPlanId && role === 'admin' ? (
-                  <div className="btn-row">
-                    <p className="form-success">
-                      Pending change → {planById(u.pendingPlanId)?.name}
-                    </p>
-                    <button
-                      type="button"
-                      className="btn primary"
-                      onClick={() => {
-                        confirmSubscriptionChange(u.id, true)
-                        refresh()
-                      }}
-                    >
-                      Confirm payment &amp; apply
-                    </button>
-                    <button
-                      type="button"
-                      className="btn ghost"
-                      onClick={() => {
-                        confirmSubscriptionChange(u.id, false)
-                        refresh()
-                      }}
-                    >
-                      Decline
-                    </button>
-                  </div>
-                ) : null}
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
+      {tab === 'members' && <MembersPayments role={role} />}
 
       {tab === 'risk' && (
         <section className="yacht-panel app-enter app-section">
@@ -1080,37 +1062,35 @@ export default function ClassBoard() {
               }}
             />
           </label>
-          <h3>Plan pricing</h3>
+          <h3>Session pricing</h3>
+          <p className="hint">
+            Per-class rate for each commitment level. The drop-in rate is what a one-off booking is
+            charged, including extras booked by members already on a subscription.
+          </p>
+          {pricingError ? <p className="form-error">{pricingError}</p> : null}
           <ul className="admin-member-list">
-            {getPricingPlans()
-              .filter((p) => p.classesPerWeek > 0)
-              .map((p) => (
-                <li key={p.id}>
-                  <strong>{p.name}</strong>
-                  <label className="field">
-                    Rate per class ($)
-                    <input
-                      type="number"
-                      value={p.ratePerClass}
-                      onChange={(e) => {
-                        updatePricingPlan(p.id, { ratePerClass: Number(e.target.value) })
-                        refresh()
-                      }}
-                    />
-                  </label>
-                  <label className="field">
-                    Prepaid total ($)
-                    <input
-                      type="number"
-                      value={p.prepaidTotal}
-                      onChange={(e) => {
-                        updatePricingPlan(p.id, { prepaidTotal: Number(e.target.value) })
-                        refresh()
-                      }}
-                    />
-                  </label>
-                </li>
-              ))}
+            {/* The drop-in tier is listed here too: it used to be filtered out,
+                which left the rate most often charged uneditable. */}
+            {(usingLivePricing ? pricing.plans : getPricingPlans()).map((p) => (
+              <li key={p.id}>
+                <strong>{p.name}</strong>
+                {p.classesPerWeek > 0 ? (
+                  <span className="hint"> · {p.classesPerWeek}/week</span>
+                ) : (
+                  <span className="hint"> · drop-in</span>
+                )}
+                <label className="field">
+                  Rate per class ($)
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.50"
+                    defaultValue={p.ratePerClass}
+                    onBlur={(e) => savePlanRate(p.id, Number(e.target.value))}
+                  />
+                </label>
+              </li>
+            ))}
           </ul>
           <label className="field">
             Payment instructions

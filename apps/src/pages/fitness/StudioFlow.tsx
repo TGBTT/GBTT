@@ -1,19 +1,21 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { ClassTypeDescription } from '@gbtt/shared/studio/ClassTypeDescription'
 import { AppChrome } from '../../components/AppChrome'
 import { WeekSessionCalendar } from '../../components/WeekSessionCalendar'
-import { useLiveSessions, useWeeklyLocks } from '../../hooks/useLiveSessions'
+import { useLiveSessions, useWeekNavigation, useWeeklyLocks } from '../../hooks/useLiveSessions'
+import { WeekNavigator } from '../../components/WeekNavigator'
+import { SeasonCost } from '../../components/SeasonCost'
 import {
   studioBookSession,
+  studioEmailVerified,
+  studioHasFirebaseUser,
   studioLockWeeklySlot,
+  studioLogin,
+  studioRegisterMember,
+  studioResendVerification,
   studioUnlockWeeklySlot,
   type DropInPrompt,
 } from '@gbtt/shared/studio/studioAuth'
-import {
-  DEMO_ACTIVATION_KEY,
-  formEndpointConfigured,
-  requestActivationEmail,
-} from '@gbtt/shared/studio/accountApi'
 import {
   FITNESS_PLANS,
   acceptTerms,
@@ -26,12 +28,10 @@ import {
   getOccurrences,
   getSessionUser,
   getSiteContent,
-  login,
   logout,
   occurrenceById,
   occurrencesByWeekday,
   planById,
-  registerMember,
   requestSubscriptionChange,
   reshuffleBooking,
   sessionExercises,
@@ -56,8 +56,9 @@ export default function StudioFlow() {
   const [regName, setRegName] = useState('')
   const [regEmail, setRegEmail] = useState('')
   const [regPlan, setRegPlan] = useState<PlanId>('weekly2')
-  const [regActivationKey, setRegActivationKey] = useState('')
-  const [activationEmailSent, setActivationEmailSent] = useState(false)
+  const [regPassword, setRegPassword] = useState('')
+  const [verified, setVerified] = useState(true)
+  const [verifyNote, setVerifyNote] = useState<string | null>(null)
   const [showRegister, setShowRegister] = useState(false)
   const [guestName, setGuestName] = useState('')
   const [guestEmail, setGuestEmail] = useState('')
@@ -70,7 +71,8 @@ export default function StudioFlow() {
   const site = getSiteContent()
   // Firestore is authoritative for availability; the seeded store is only a
   // development fallback so members are never shown an invented spot count.
-  const live = useLiveSessions()
+  const week = useWeekNavigation()
+  const live = useLiveSessions(week.weekStart)
   const usingLive = live.status !== 'unavailable'
   const lockedSlotIds = useWeeklyLocks(usingLive && !!member)
   const localByDay = useMemo(() => occurrencesByWeekday(), [tick])
@@ -100,6 +102,36 @@ export default function StudioFlow() {
     ? live.occurrences.filter((o) => o.slotId && lockedSlotIds.includes(o.slotId)).map((o) => o.id)
     : (member?.weeklyLockedOccurrenceIds ?? [])
   const selectedIsLocked = selected ? heldIds.includes(selected.id) : false
+
+  // Sessions belong to a single week, so a selection left over from the
+  // previous week would leave the detail panel offering actions on a class
+  // that is no longer on the grid.
+  useEffect(() => {
+    setSelectedId(null)
+    setReshuffleFrom(null)
+    setDropIn(null)
+  }, [week.weekStart])
+
+  /*
+   * A casual account cannot book until its email is confirmed, and the server
+   * rejects the booking rather than the button being disabled, so without this
+   * the member would only discover the problem by failing to book. Checked
+   * against a reloaded user because `emailVerified` is cached from the last
+   * token refresh and would otherwise stay stale after they click the link.
+   */
+  useEffect(() => {
+    if (!member || !studioHasFirebaseUser()) {
+      setVerified(true)
+      return
+    }
+    let active = true
+    studioEmailVerified().then((ok) => {
+      if (active) setVerified(ok)
+    })
+    return () => {
+      active = false
+    }
+  }, [member?.id, tick])
 
   const flash = (ok: string | null, err: string | null) => {
     setMessage(ok)
@@ -191,7 +223,7 @@ export default function StudioFlow() {
   }
 
   /** Release a slot they already hold so this session is covered by the plan instead. */
-  const useAllowanceInstead = async (slotIdToRelease: string) => {
+  const swapToAllowance = async (slotIdToRelease: string) => {
     const target = dropIn?.occ.slotId
     if (!target) return
     setBusy(true)
@@ -242,13 +274,40 @@ export default function StudioFlow() {
           Weekly memberships lock recurring slots on this timetable — the same day and time every
           week. Move or unlock within your plan allowance.
         </p>
-        <WeekSessionCalendar
-          byDay={byDay}
-          selectedId={selectedId}
-          heldIds={heldIds}
-          onSelect={setSelectedId}
-          mode="member"
-        />
+        {usingLive ? (
+          <WeekNavigator
+            label={week.label}
+            isCurrentWeek={week.isCurrentWeek}
+            isPast={week.isPast}
+            onPrevious={week.previousWeek}
+            onNext={week.nextWeek}
+            onReset={week.resetWeek}
+            disabled={busy || live.status === 'loading'}
+          />
+        ) : null}
+        {usingLive && live.status === 'loading' ? (
+          <p className="hint">Loading sessions for {week.label}…</p>
+        ) : null}
+        {live.status === 'error' ? (
+          <p className="form-error">Could not load the timetable: {live.error}</p>
+        ) : null}
+        {week.isPast ? (
+          <p className="hint">
+            {week.label} has already been and gone — shown for your records. Step forward to change
+            an upcoming week.
+          </p>
+        ) : null}
+        {live.status === 'ready' && live.occurrences.length === 0 ? (
+          <p className="hint">No sessions on the timetable for {week.label} yet.</p>
+        ) : (
+          <WeekSessionCalendar
+            byDay={byDay}
+            selectedId={selectedId}
+            heldIds={heldIds}
+            onSelect={setSelectedId}
+            mode="member"
+          />
+        )}
 
         {selected && selectedType ? (
           <div className="occ-detail cal-detail">
@@ -420,7 +479,7 @@ export default function StudioFlow() {
                             type="button"
                             className="btn ghost"
                             disabled={busy}
-                            onClick={() => useAllowanceInstead(id)}
+                            onClick={() => swapToAllowance(id)}
                           >
                             Release &amp; use here
                           </button>
@@ -460,15 +519,18 @@ export default function StudioFlow() {
                   <button
                     type="button"
                     className="btn primary"
-                    onClick={() => {
-                      const err = login(authEmail, authPassword)
+                    disabled={busy}
+                    onClick={async () => {
+                      setBusy(true)
+                      const err = await studioLogin(authEmail, authPassword)
+                      setBusy(false)
                       flash(err ? null : 'Signed in — select a session on the calendar.', err)
                     }}
                   >
                     Log in to book
                   </button>
                   <button type="button" className="btn ghost" onClick={() => setShowRegister(true)}>
-                    New subscription
+                    Create an account
                   </button>
                 </div>
               </>
@@ -482,8 +544,20 @@ export default function StudioFlow() {
                   Email
                   <input value={regEmail} onChange={(e) => setRegEmail(e.target.value)} />
                 </label>
+                <label className="field">
+                  Password
+                  <input
+                    type="password"
+                    value={regPassword}
+                    onChange={(e) => setRegPassword(e.target.value)}
+                    autoComplete="new-password"
+                  />
+                </label>
+                {/* The casual tier is offered here too: a drop-in needs an
+                    account of their own, and theirs is the one that activates
+                    off a verified email instead of waiting for approval. */}
                 <div className="pkg-grid">
-                  {FITNESS_PLANS.filter((p) => p.classesPerWeek > 0).map((p) => (
+                  {FITNESS_PLANS.map((p) => (
                     <button
                       key={p.id}
                       type="button"
@@ -496,60 +570,37 @@ export default function StudioFlow() {
                     </button>
                   ))}
                 </div>
-                <label className="field">
-                  Activation key
-                  <input
-                    value={regActivationKey}
-                    onChange={(e) => setRegActivationKey(e.target.value)}
-                    placeholder="From your confirmation email"
-                    autoComplete="one-time-code"
-                  />
-                </label>
-                {activationEmailSent ? (
-                  <p className="form-success">
-                    {formEndpointConfigured()
-                      ? 'Confirmation email sent — enter the activation key above.'
-                      : `Demo mode: use activation key ${DEMO_ACTIVATION_KEY}`}
-                  </p>
-                ) : null}
+                <p className="hint">
+                  {planById(regPlan)?.classesPerWeek
+                    ? 'Subscriptions are activated by Tom once your first payment is arranged.'
+                    : 'Casual accounts are ready as soon as you confirm your email — no wait for approval.'}
+                </p>
                 <div className="btn-row">
                   <button type="button" className="btn ghost" onClick={() => setShowRegister(false)}>
                     Back to login
                   </button>
                   <button
                     type="button"
-                    className="btn ghost"
-                    onClick={async () => {
-                      const result = await requestActivationEmail(regName, regEmail, regPlan)
-                      if (result.ok) {
-                        setActivationEmailSent(true)
-                        flash(
-                          result.simulated
-                            ? `Demo: no email sent — use key ${DEMO_ACTIVATION_KEY}`
-                            : 'Activation email sent.',
-                          null,
-                        )
-                      } else {
-                        flash(null, result.error ?? 'Could not send email.')
-                      }
-                    }}
-                  >
-                    Send activation email
-                  </button>
-                  <button
-                    type="button"
                     className="btn primary"
-                    onClick={() => {
-                      const err = registerMember(regName, regEmail, regPlan, regActivationKey)
+                    disabled={busy}
+                    onClick={async () => {
+                      setBusy(true)
+                      const err = await studioRegisterMember(
+                        regName,
+                        regEmail,
+                        regPassword,
+                        regPlan,
+                      )
+                      setBusy(false)
                       flash(
                         err
                           ? null
-                          : 'Account created (password: demo). Accept terms, then lock your weekly slots.',
+                          : 'Account created — check your inbox and confirm your email address.',
                         err,
                       )
                     }}
                   >
-                    Activate &amp; create membership
+                    Create account
                   </button>
                 </div>
               </>
@@ -557,6 +608,46 @@ export default function StudioFlow() {
           </>
         ) : (
           <>
+            {!verified ? (
+              <div className="verify-banner">
+                <h3>Confirm your email address</h3>
+                <p>
+                  We sent a link to <strong>{member.email}</strong>. Confirming it is what lets you
+                  book without waiting for Tom to approve the account.
+                </p>
+                {verifyNote ? <p className="form-success">{verifyNote}</p> : null}
+                <div className="btn-row">
+                  <button
+                    type="button"
+                    className="btn primary"
+                    disabled={busy}
+                    onClick={async () => {
+                      setBusy(true)
+                      const err = await studioResendVerification()
+                      setBusy(false)
+                      setVerifyNote(err ? null : 'Sent — check your inbox and spam folder.')
+                      if (err) flash(null, err)
+                    }}
+                  >
+                    Resend the link
+                  </button>
+                  <button
+                    type="button"
+                    className="btn ghost"
+                    disabled={busy}
+                    onClick={async () => {
+                      setBusy(true)
+                      const ok = await studioEmailVerified()
+                      setBusy(false)
+                      setVerified(ok)
+                      if (!ok) setVerifyNote('Still not confirmed — open the link, then check again.')
+                    }}
+                  >
+                    I have confirmed it
+                  </button>
+                </div>
+              </div>
+            ) : null}
             <p>
               Signed in as <strong>{member.name}</strong> ·{' '}
               {planById(member.planId)?.name}
@@ -661,6 +752,8 @@ export default function StudioFlow() {
         <p className="sync-chip">{sync.calendar}</p>
         <p className="sync-chip">{sync.firebase}</p>
       </section>
+
+      {member ? <SeasonCost /> : null}
       </div>
     </div>
   )

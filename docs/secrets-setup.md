@@ -66,22 +66,29 @@ activation and calendar invites.
 
 These are working software decisions still outstanding, not setup chores:
 
-- **`calculateBillingPeriod` double-charges subscription members.** It adds a
-  line item at `ratePerClass` for every attended session *and* the subscription
-  base on top, so a `weekly2` member attending their included sessions for a
-  month is billed roughly twice the plan price. Booking now records `dropIn`
-  and `chargeRateCents` on each roster entry, which is the data a fix needs:
-  charge the subscription base plus only the entries flagged `dropIn`. Until
-  that lands, drop-ins are billed at the member's own plan rate rather than the
-  intended casual rate, because the invoice still prices every attended session
-  the same way. **Do not invoice from this until it is fixed.**
-- **No recurring session generator.** `seed-timetable.mjs` creates a fixed
-  number of weeks; someone must re-run it, or a scheduled function should
-  generate each new week from `timetable/slots`.
+- **Session generation is not scheduled.** Sessions come from either
+  `seed-timetable.mjs` or, preferably, defining a season and pressing
+  **Generate sessions**, which covers the whole term at once. Neither runs by
+  itself, so somebody has to extend the timetable before it runs out. A
+  scheduled function rolling the next week forward is the obvious follow-up.
+- **Member screens still read the local store for display.** Bookings, counts,
+  attendance and money all come from Firestore, but a signed-in member's name,
+  plan and locked-slot list are rendered from the seed store via
+  `bindMemberSession`. That binding exists only so the page renders after a
+  Firebase sign-in; it grants nothing, since rules and callables check the Auth
+  token. It should go once those screens read Firestore directly.
 - **The Firestore path has never run against live data.** It is typechecked,
   built and covered by rules tests, but every browser check to date exercised
   the local development fallback. The first real booking, roll call, weekly lock
   and archive are all worth watching directly.
+
+Recently closed, for reference:
+
+- The subscription double-charge is fixed. The tier's per-class rate is the
+  whole price and every held seat is billed at it, with no plan fee on top.
+- Account activation no longer uses an emailed key. That key was inlined into
+  the published bundle by Vite, so anyone could read it and self-activate;
+  Firebase email verification replaced it.
 
 ### Security model
 
@@ -89,8 +96,14 @@ Members book through the `bookSession` / `cancelBooking` callables, never by wri
 directly. Rules deny client roster writes, so capacity, membership status and the transfer window
 are enforced in one place that cannot be bypassed from the browser console.
 
-Self-registration creates a `pending` profile with no booking rights. An admin calls
-`approveMember`, which sets `profile.status: active` and the `member` custom claim.
+Self-registration creates a `pending` profile with no booking rights. A subscription stays pending
+until an admin calls `approveMember`, which sets `profile.status: active` and the `member` custom
+claim.
+
+Casual drop-in accounts are the exception: they activate on their first booking provided the Auth
+record shows a verified email, checked server-side in `requireActiveMember`. Making someone wait for
+manual approval to pay for a single class defeats the point of a drop-in, and a confirmed address is
+enough to show the account is a real person who can be invoiced.
 
 Members cannot write `billing`, `membership`, `clinical`, `profile.role` or `profile.status` on
 their own document — those drive what they are charged and what they can reach.
@@ -185,8 +198,8 @@ Copy examples and fill values (never commit real secrets):
 
 | File | Variables |
 |------|-----------|
-| `.env` | `VITE_FORM_ENDPOINT`, `VITE_ACTIVATION_KEY` (legacy until invite flow) |
-| `apps/.env` | `VITE_FORM_ENDPOINT`, `VITE_ACTIVATION_KEY`, `VITE_APP_BASE=/app/`, all `VITE_FIREBASE_*` |
+| `.env` | `VITE_FORM_ENDPOINT` |
+| `apps/.env` | `VITE_FORM_ENDPOINT`, `VITE_APP_BASE=/app/`, all `VITE_FIREBASE_*` |
 | `functions/.env` | `FORM_ENDPOINT`, `FUNCTIONS_WEBHOOK_SECRET` (emulator / local only) |
 
 ---
@@ -276,10 +289,46 @@ firebase deploy --only firestore:rules,firestore:indexes
 
 Security model (see `firestore.rules`):
 
-- **Public read**: `catalog/*`, `timetable/slots`, `sessions` (summary), `siteContent`
+- **Public read**: `catalog/*`, `classTypes`, `timetableSlots`, `sessions` (summary), `siteContent`
+- **Signed-in read, admin write**: `pricingPlans`, `pricingDiscounts`, `seasons`
 - **Members**: own `users/{uid}` and subcollections
 - **Staff**: `admin` or `substitute` custom claim on Auth token
 - **Server-only**: `guestPasses` writes, `billingPeriods` writes, audit entries
+
+> **Path shape.** Firestore documents live at an *even* number of path
+> segments, so `pricing/plans/{planId}` and `catalog/classTypes/{id}` are
+> collection paths and no document can exist at either. These were corrected to
+> the top-level `pricingPlans`, `pricingDiscounts` and `classTypes`
+> collections. If you seeded anything under the old paths, it is unreachable.
+
+### Seasons, holidays and charging
+
+A season is an admin-defined date range with closure periods carved out of it,
+edited under **Seasons & holidays** in the admin console. The same screen
+describes an eight-week term, a short summer block or a full year — only the
+dates differ. A season decides two things:
+
+- **Which sessions exist.** *Generate sessions* fans the recurring
+  `timetableSlots` across the season, skipping closures. It is safe to re-run:
+  sessions are keyed by slot and week so they update in place, and any now
+  falling inside a closure are archived rather than deleted, so rosters and
+  attendance survive.
+- **What a member is charged.** Each pricing tier carries a per-class rate
+  (drop-in $17, $15 at one a week, $13 at two, $11 at three by default) and
+  that rate *is* the price — there is no separate plan fee on top.
+
+Two charging modes, set per season:
+
+| Mode | When invoiced | Holidays |
+| --- | --- | --- |
+| `arrears` | After the season, from seats actually held | Handled automatically — a closed week creates no sessions, so no seats and no charge |
+| `upfront` | At enrolment, via `projectSeasonInvoice` | Counted out of the projection, so the quote is already net of closures |
+
+Billing charges for every **seat held**, attended or not: a booked seat holds a
+place nobody else could take, which is what the non-refundable terms cover.
+Cancelling before the transfer window removes the roster entry and the charge
+with it. Drop-ins bill at the rate they were quoted when booked, not the
+current list price.
 
 ### Bootstrap the first admin
 

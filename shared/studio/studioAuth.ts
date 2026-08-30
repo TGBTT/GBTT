@@ -2,6 +2,7 @@ import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   signOut,
+  sendEmailVerification,
   sendPasswordResetEmail,
   type User,
 } from 'firebase/auth'
@@ -10,6 +11,7 @@ import { httpsCallable } from 'firebase/functions'
 import { getFirebaseAuth, getFirebaseFunctions, getFirestoreDb } from './firebase/init'
 import { isFirebaseConfigured } from './firebase/config'
 import {
+  bindMemberSession,
   bindStaffSession,
   login as localLogin,
   logout as localLogout,
@@ -29,9 +31,30 @@ export async function studioLogin(email: string, password: string): Promise<stri
     const cred = await signInWithEmailAndPassword(auth, email.trim(), password)
     const profile = await getDoc(doc(db, 'users', cred.user.uid))
     if (!profile.exists()) return 'No profile found for this account.'
-    if (profile.data()?.profile?.status === 'pending') {
+
+    const data = profile.data() ?? {}
+    const planId = String(data.membership?.planId ?? data.requested?.planId ?? 'casual')
+    const planSnap = await getDoc(doc(db, 'pricingPlans', planId))
+    const classesPerWeek = Number(planSnap.data()?.classesPerWeek ?? 0)
+
+    /*
+     * A casual account stays `pending` until its first booking activates it off
+     * a verified email, so refusing pending sign-ins outright would lock every
+     * drop-in out of the account they just created. They are let in and shown
+     * the verification prompt instead. Subscriptions still wait for approval,
+     * since those carry an allowance an admin has to grant.
+     */
+    if (data.profile?.status === 'pending' && classesPerWeek > 0) {
       return 'Your account is awaiting approval by the studio — you will be emailed once it is active.'
     }
+
+    bindMemberSession({
+      uid: cred.user.uid,
+      email: cred.user.email ?? email,
+      name: String(data.profile?.name ?? ''),
+      planId,
+      classesPerWeek,
+    })
     return null
   } catch {
     return 'Sign-in failed. Check email and password.'
@@ -144,10 +167,59 @@ export async function studioRegisterMember(
       preferences: { showNameToClassmates: true },
       compliance: { termsAcceptedAt: new Date().toISOString(), termsVersion: 1 },
     })
+
+    // Casual drop-in accounts activate off this link rather than admin
+    // approval, so the email has to go out as part of registering.
+    await sendEmailVerification(cred.user)
+
+    const planSnap = await getDoc(doc(db, 'pricingPlans', planId))
+    bindMemberSession({
+      uid: cred.user.uid,
+      email: cred.user.email ?? email,
+      name: name.trim(),
+      planId,
+      classesPerWeek: Number(planSnap.data()?.classesPerWeek ?? 0),
+    })
     return null
   } catch (e) {
     return e instanceof Error ? e.message : 'Registration failed.'
   }
+}
+
+/** Re-send the verification link a casual account needs before it can book. */
+export async function studioResendVerification(): Promise<string | null> {
+  const user = getFirebaseAuth()?.currentUser
+  if (!user) return 'Sign in first.'
+  if (user.emailVerified) return null
+  try {
+    await sendEmailVerification(user)
+    return null
+  } catch {
+    return 'Could not send the verification email. Try again shortly.'
+  }
+}
+
+/**
+ * Whether the signed-in account has confirmed its email address.
+ *
+ * Reloads first: `emailVerified` is cached on the client from the last token
+ * refresh, so someone who clicks the link in another tab would otherwise still
+ * look unverified here and keep being told to check their inbox.
+ */
+export async function studioEmailVerified(): Promise<boolean> {
+  const user = getFirebaseAuth()?.currentUser
+  if (!user) return false
+  try {
+    await user.reload()
+  } catch {
+    return user.emailVerified
+  }
+  return user.emailVerified
+}
+
+/** Whether a Firebase account is signed in at all (vs a local seed session). */
+export function studioHasFirebaseUser(): boolean {
+  return Boolean(getFirebaseAuth()?.currentUser)
 }
 
 export interface DropInPrompt {
@@ -308,6 +380,145 @@ export interface RemoveSessionResult {
   mode: 'deleted' | 'archived' | null
   booked: number
   attended: number
+}
+
+export interface GenerateSeasonResult {
+  error: string | null
+  created: number
+  updated: number
+  archived: number
+  teachingDays: number
+}
+
+/**
+ * Build out every session a season implies from the recurring timetable slots.
+ *
+ * Safe to re-run after shifting dates or adding a closure: sessions are keyed
+ * by slot and week so they update in place, and any that now fall inside a
+ * closure are archived rather than deleted so their rosters survive.
+ */
+export async function studioGenerateSeasonSessions(
+  seasonId: string,
+  dryRun = false,
+): Promise<GenerateSeasonResult> {
+  const functions = getFirebaseFunctions()
+  const empty = { created: 0, updated: 0, archived: 0, teachingDays: 0 }
+  if (!functions) return { error: 'Firebase not configured.', ...empty }
+  try {
+    const res = await httpsCallable(functions, 'generateSeasonSessions')({ seasonId, dryRun })
+    const d = (res.data ?? {}) as Record<string, number>
+    return {
+      error: null,
+      created: Number(d.created ?? d.planned ?? 0),
+      updated: Number(d.updated ?? 0),
+      archived: Number(d.archived ?? d.toArchive ?? 0),
+      teachingDays: Number(d.teachingDays ?? 0),
+    }
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : 'Could not generate sessions.', ...empty }
+  }
+}
+
+export interface BillingRunResult {
+  error: string | null
+  periodId: string
+  totalCents: number
+  chargeableCount: number
+  attendedCount: number
+}
+
+/**
+ * Recalculate what a member owes for a season or a calendar month.
+ *
+ * Pass a `seasonId` for a term, or a `periodStart` (YYYY-MM-DD) to bill a
+ * rolling month. The result is written to `users/{uid}/billingPeriods`, which
+ * clients can only read — this callable is the only way the figure is set.
+ */
+export async function studioCalculateBillingPeriod(
+  uid: string,
+  range: { seasonId?: string; periodStart?: string },
+): Promise<BillingRunResult> {
+  const functions = getFirebaseFunctions()
+  const empty = { periodId: '', totalCents: 0, chargeableCount: 0, attendedCount: 0 }
+  if (!functions) return { error: 'Firebase not configured.', ...empty }
+  try {
+    const res = await httpsCallable(functions, 'calculateBillingPeriod')({ uid, ...range })
+    const d = (res.data ?? {}) as Record<string, unknown>
+    return {
+      error: null,
+      periodId: String(d.periodId ?? ''),
+      totalCents: Number(d.totalCents ?? 0),
+      chargeableCount: Number(d.chargeableCount ?? 0),
+      attendedCount: Number(d.attendedCount ?? 0),
+    }
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : 'Could not calculate this period.', ...empty }
+  }
+}
+
+/**
+ * Record that a billing period has been settled.
+ *
+ * There is no payment gateway — Tom reconciles against the bank and signs off
+ * here — so this is the step that marks money as received, and it writes an
+ * audit entry naming who cleared it.
+ */
+export async function studioMarkBillingPeriodPaid(
+  uid: string,
+  periodId: string,
+  paid: boolean,
+  note = '',
+): Promise<string | null> {
+  const functions = getFirebaseFunctions()
+  if (!functions) return 'Firebase not configured.'
+  try {
+    await httpsCallable(functions, 'markBillingPeriodPaid')({ uid, periodId, paid, note })
+    return null
+  } catch (e) {
+    return e instanceof Error ? e.message : 'Could not update this payment.'
+  }
+}
+
+export interface SeasonProjection {
+  error: string | null
+  seasonName: string
+  planName: string
+  sessionCount: number
+  ratePerClass: number
+  totalCents: number
+  billingMode: 'arrears' | 'upfront'
+}
+
+/** What a season will cost, from the sessions the member's locked slots produce. */
+export async function studioProjectSeasonInvoice(
+  seasonId: string,
+  uid?: string,
+): Promise<SeasonProjection> {
+  const functions = getFirebaseFunctions()
+  const empty = {
+    seasonName: '',
+    planName: '',
+    sessionCount: 0,
+    ratePerClass: 0,
+    totalCents: 0,
+    billingMode: 'arrears' as const,
+  }
+  if (!functions) return { error: 'Firebase not configured.', ...empty }
+  try {
+    const res = await httpsCallable(functions, 'projectSeasonInvoice')({ seasonId, uid })
+    const d = (res.data ?? {}) as Record<string, unknown>
+    return {
+      error: null,
+      seasonName: String(d.seasonName ?? ''),
+      planName: String(d.planName ?? ''),
+      sessionCount: Number(d.sessionCount ?? 0),
+      ratePerClass: Number(d.ratePerClass ?? 0),
+      totalCents: Number(d.totalCents ?? 0),
+      billingMode: d.billingMode === 'upfront' ? 'upfront' : 'arrears',
+    }
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : 'Could not project this season.', ...empty }
+  }
 }
 
 /**

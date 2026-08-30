@@ -101,6 +101,31 @@ export function currentWeekStart(now: Date = new Date()): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 }
 
+/**
+ * Move a week key by whole weeks.
+ *
+ * Built from the date parts rather than by adding 7×24 hours, because a week
+ * spanning a daylight-saving change is not 168 hours long and the arithmetic
+ * would land on the Sunday or Tuesday instead of the Monday.
+ */
+export function shiftWeekStart(weekStart: string, weeks: number): string {
+  const [y, m, d] = weekStart.split('-').map(Number)
+  const date = new Date(y, m - 1, d + weeks * 7)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+}
+
+/** Human label for a week key, e.g. "5 – 9 May". */
+export function weekRangeLabel(weekStart: string): string {
+  const [y, m, d] = weekStart.split('-').map(Number)
+  const mon = new Date(y, m - 1, d)
+  const fri = new Date(y, m - 1, d + 4)
+  const month = (date: Date) => date.toLocaleDateString('en-NZ', { month: 'short' })
+  return mon.getMonth() === fri.getMonth()
+    ? `${mon.getDate()} – ${fri.getDate()} ${month(fri)}`
+    : `${mon.getDate()} ${month(mon)} – ${fri.getDate()} ${month(fri)}`
+}
+
 function mapSession(id: string, data: DocumentData): ClassOccurrence {
   return {
     id,

@@ -410,6 +410,170 @@
   cursor: pointer;
 }
 
+/* —— Billing periods on the payments screen —— */
+.billing-period-list {
+  list-style: none;
+  margin: 0.5rem 0;
+  padding: 0;
+}
+
+.billing-period-list li {
+  padding: 0.3rem 0;
+  border-bottom: 1px dashed rgba(255, 255, 255, 0.1);
+}
+
+.member-admin-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: flex-end;
+  margin-top: 0.6rem;
+}
+
+/* —— Email verification prompt —— */
+.verify-banner {
+  margin-bottom: 1rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid rgba(255, 190, 90, 0.4);
+  border-radius: 0.6rem;
+  background: rgba(255, 190, 90, 0.1);
+}
+
+.verify-banner h3 {
+  margin: 0 0 0.35rem;
+}
+
+.season-cost-total {
+  font-size: 1.15rem;
+}
+
+/* —— Seasons & holiday closures —— */
+.season-list {
+  margin-bottom: 1.5rem;
+}
+
+.season-editor {
+  padding-top: 1.25rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.season-mode {
+  margin: 1rem 0;
+  padding: 0.85rem 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 0.6rem;
+}
+
+.season-mode legend {
+  padding: 0 0.4rem;
+  font-size: 0.85rem;
+  letter-spacing: 0.02em;
+  opacity: 0.85;
+}
+
+.season-mode-option {
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-start;
+  padding: 0.45rem 0;
+  cursor: pointer;
+}
+
+.season-mode-option > span {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+/* The radio would otherwise stretch to the height of the wrapped blurb. */
+.season-mode-option input {
+  margin-top: 0.25rem;
+  flex: 0 0 auto;
+}
+
+.season-breaks {
+  margin: 1.25rem 0;
+}
+
+.season-break-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: flex-end;
+  padding: 0.6rem 0;
+  border-bottom: 1px dashed rgba(255, 255, 255, 0.1);
+}
+
+.season-summary {
+  padding: 0.6rem 0.8rem;
+  border-radius: 0.5rem;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+@media (max-width: 40rem) {
+  .season-break-row .field {
+    flex: 1 1 100%;
+  }
+}
+
+/* —— Week stepper above the timetable —— */
+.week-nav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0 0 0.9rem;
+}
+
+.week-nav-step {
+  white-space: nowrap;
+}
+
+/* Takes the slack so the arrows stay pinned to either end and do not shuffle
+   sideways as the label changes width between weeks. */
+.week-nav-label {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  text-align: center;
+}
+
+.week-nav-tag {
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  letter-spacing: 0.02em;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.week-nav-tag.past {
+  background: rgba(255, 190, 90, 0.18);
+  color: #ffc978;
+}
+
+.week-nav-today {
+  flex: 0 0 100%;
+  text-align: center;
+  opacity: 0.85;
+}
+
+@media (max-width: 32rem) {
+  .week-nav {
+    gap: 0.5rem;
+  }
+
+  .week-nav-label {
+    order: -1;
+    flex-basis: 100%;
+  }
+
+  .week-nav-step {
+    flex: 1 1 0;
+  }
+}
+
 @media (max-width: 32rem) {
   .admin-session-list li {
     align-items: flex-start;

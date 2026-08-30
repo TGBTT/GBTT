@@ -42,6 +42,21 @@ const CLASS_TYPES = [
   { id: 'kids-fit', name: 'Kids Fit', cap: 12 },
 ]
 
+/**
+ * Starting price list. `ratePerClass` is the per-class rate for that level of
+ * commitment, and it is the whole price signal — there is no separate plan fee
+ * on top. `casual` is the drop-in rate charged for one-off bookings, including
+ * extras taken by members already on a subscription.
+ *
+ * Admin edits these in the console; these values only seed the first run.
+ */
+const PRICING_PLANS = [
+  { id: 'casual', name: 'Guest / casual', ratePerClass: 17, classesPerWeek: 0 },
+  { id: 'weekly1', name: 'One a week', ratePerClass: 15, classesPerWeek: 1 },
+  { id: 'weekly2', name: 'Two a week', ratePerClass: 13, classesPerWeek: 2 },
+  { id: 'weekly3', name: 'Three a week', ratePerClass: 11, classesPerWeek: 3 },
+]
+
 /** The recurring Mon–Fri timetable. */
 const SLOTS = [
   { day: 'Mon', time: '06:00', classTypeId: 'sweat', instructorId: 'tom' },
@@ -151,13 +166,19 @@ Seed the class catalog, timetable slots and weekly sessions.
 
   --key <path>   Service account JSON. Falls back to GOOGLE_APPLICATION_CREDENTIALS.
   --weeks <n>    Weeks of sessions to generate from this Monday (default: 8).
+                 Use 0 to seed prices, classes and slots only, leaving the
+                 timetable empty for a season to generate.
   --dry-run      Print what would be written and exit.
 `)
     return
   }
 
-  if (!Number.isInteger(args.weeks) || args.weeks < 1) {
-    throw new Error('--weeks must be a positive whole number.')
+  // `--weeks 0` seeds only the configuration the app cannot run without: the
+  // price list, the class catalog and the recurring slot template. No sessions
+  // are created, so the timetable starts genuinely empty and the first classes
+  // come from an admin defining a season and generating it.
+  if (!Number.isInteger(args.weeks) || args.weeks < 0) {
+    throw new Error('--weeks must be zero or a positive whole number.')
   }
 
   const capById = new Map(CLASS_TYPES.map((c) => [c.id, c.cap]))
@@ -212,14 +233,18 @@ Seed the class catalog, timetable slots and weekly sessions.
 
   if (args.dryRun) {
     const sample = planned[0]
-    console.log(`\nSample session ${sample.id}:`)
-    console.log(
-      JSON.stringify(
-        { ...sample.data, startsAt: sample.data.startsAt.toDate().toISOString() },
-        null,
-        2,
-      ),
-    )
+    if (sample) {
+      console.log(`\nSample session ${sample.id}:`)
+      console.log(
+        JSON.stringify(
+          { ...sample.data, startsAt: sample.data.startsAt.toDate().toISOString() },
+          null,
+          2,
+        ),
+      )
+    } else {
+      console.log('\nNo sessions planned — configuration only.')
+    }
     console.log('\nDry run — nothing written.')
     return
   }
@@ -244,12 +269,18 @@ Seed the class catalog, timetable slots and weekly sessions.
   const db = getFirestore()
 
   for (const classType of CLASS_TYPES) {
-    await db.doc(`catalog/classTypes/${classType.id}`).set(classType, { merge: true })
+    await db.doc(`classTypes/${classType.id}`).set(classType, { merge: true })
   }
   console.log('Wrote class catalog.')
 
+  for (const plan of PRICING_PLANS) {
+    // Merged, so re-running never resets a rate the admin has since changed.
+    await db.doc(`pricingPlans/${plan.id}`).set(plan, { merge: true })
+  }
+  console.log('Wrote pricing plans.')
+
   for (const slot of SLOTS) {
-    await db.doc(`timetable/slots/${slotId(slot)}`).set(
+    await db.doc(`timetableSlots/${slotId(slot)}`).set(
       {
         slotId: slotId(slot),
         dayLabel: slot.day,
