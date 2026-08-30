@@ -31,6 +31,29 @@
   color: #fff;
 }
 
+/* Google sign-in: the same flat, squared shape as the other buttons, marked
+   only by the wordmark letter, so it reads as one of this app's controls
+   rather than a pasted-in third-party badge. */
+.theme-gbtt .btn.google {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  border: 1px solid var(--ink);
+  background: #fff;
+  color: var(--ink);
+}
+
+.theme-gbtt .btn.google:hover:not(:disabled) {
+  background: var(--accent-soft);
+}
+
+.theme-gbtt .btn.google .google-mark {
+  font-family: var(--font-display);
+  font-size: 1.1em;
+  line-height: 1;
+  color: #4285f4;
+}
+
 .theme-gbtt .chip {
   border: 1px solid var(--ink);
   background: #fff;
@@ -329,6 +352,41 @@
 .risk-card {
   padding: 0.85rem 0;
   border-bottom: 1px solid #d4d4d0;
+}
+
+.client-row-list {
+  list-style: none;
+  padding: 0;
+  margin: 1rem 0 0;
+}
+
+.client-row-list > li {
+  padding: 0.65rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.client-row-grid {
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: 1fr;
+  align-items: end;
+}
+
+@media (min-width: 720px) {
+  .client-row-grid {
+    grid-template-columns: 1.2fr 1.6fr 1fr 1fr auto;
+  }
+}
+
+.client-paste {
+  margin-top: 1rem;
+  padding: 0.75rem;
+  border: 1px solid var(--line);
+}
+
+.client-paste summary {
+  cursor: pointer;
+  font-weight: 600;
 }
 
 .add-occ-row {
@@ -1006,6 +1064,12 @@
     border-color: rgba(245, 245, 243, 0.65);
     color: var(--paper);
     background: transparent;
+  }
+
+  .theme-gbtt .app-sections > .app-section:nth-child(even) .btn.google {
+    background: var(--paper);
+    color: var(--ink);
+    border-color: var(--paper);
   }
 
   .theme-gbtt .app-sections > .app-section:nth-child(even) .btn.primary {

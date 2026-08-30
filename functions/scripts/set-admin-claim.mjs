@@ -9,7 +9,7 @@
  *
  * Usage (run from the repo root):
  *   node functions/scripts/set-admin-claim.mjs --key ./sa.json --email tom@example.com
- *   node functions/scripts/set-admin-claim.mjs --key ./sa.json --uid AbC123 --role substitute
+ *   node functions/scripts/set-admin-claim.mjs --key ./sa.json --uid AbC123 --role trainer
  *   node functions/scripts/set-admin-claim.mjs --key ./sa.json --email tom@example.com --show
  *
  * The service-account key is a full-project credential: keep it out of the
@@ -22,7 +22,7 @@ import { initializeApp, cert, applicationDefault } from 'firebase-admin/app'
 import { getAuth } from 'firebase-admin/auth'
 import { FieldValue, getFirestore } from 'firebase-admin/firestore'
 
-const VALID_ROLES = ['admin', 'substitute', 'member']
+const VALID_ROLES = ['admin', 'trainer', 'member']
 
 function parseArgs(argv) {
   const args = { role: 'admin', show: false, create: false }

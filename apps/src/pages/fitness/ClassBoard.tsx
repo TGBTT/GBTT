@@ -6,6 +6,7 @@ import {
   studioMarkAttendance,
   studioRemoveSession,
   studioStaffLogin,
+  studioStaffLoginWithGoogle,
 } from '@gbtt/shared/studio/studioAuth'
 import { createLiveSession } from '@gbtt/shared/studio/firebase/liveSessions'
 import { savePricingPlan } from '@gbtt/shared/studio/firebase/livePricing'
@@ -16,6 +17,7 @@ import { useLiveSessions, useSessionRoster, useWeekNavigation } from '../../hook
 import { WeekNavigator } from '../../components/WeekNavigator'
 import { SeasonsPanel } from '../../components/SeasonsPanel'
 import { MembersPayments } from '../../components/MembersPayments'
+import { ClientAccounts } from '../../components/ClientAccounts'
 import {
   WEEKDAYS,
   addExercise,
@@ -74,6 +76,7 @@ type Tab =
   | 'sessions'
   | 'seasons'
   | 'members'
+  | 'clients'
   | 'risk'
   | 'legal'
   | 'notify'
@@ -93,6 +96,7 @@ const ALL_TABS: { id: Tab; label: string; adminOnly?: boolean }[] = [
   { id: 'sessions', label: 'Add & remove sessions', adminOnly: true },
   { id: 'seasons', label: 'Seasons & holidays', adminOnly: true },
   { id: 'members', label: 'Members & payments' },
+  { id: 'clients', label: 'Add client accounts', adminOnly: true },
   { id: 'risk', label: 'Risk & notes' },
   { id: 'legal', label: 'Legal & payments copy', adminOnly: true },
   { id: 'notify', label: 'Notify', adminOnly: true },
@@ -102,7 +106,7 @@ const ALL_TABS: { id: Tab; label: string; adminOnly?: boolean }[] = [
 ]
 
 /**
- * Admin console —  login; substitute gets restricted tabs.
+ * Admin console —  login; a trainer gets restricted tabs.
  */
 export default function ClassBoard() {
   const [tick, setTick] = useState(0)
@@ -110,7 +114,7 @@ export default function ClassBoard() {
 
   const role = getSessionRole()
   const session = getSessionUser()
-  const staff = role === 'admin' || role === 'substitute'
+  const staff = role === 'admin' || role === 'trainer'
 
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -287,7 +291,7 @@ export default function ClassBoard() {
             <p className="app-badge">Staff admin</p>
             <h1>Staff login</h1>
             <p className="app-sub">
-              Substitutes can run schedule and role-call without legal, notify, or site content tabs.
+              Trainers can run schedule and role-call without legal, notify, or site content tabs.
             </p>
           </div>
         </header>
@@ -325,6 +329,27 @@ export default function ClassBoard() {
             >
               {signingIn ? 'Signing in…' : 'Sign in'}
             </button>
+            <button
+              type="button"
+              className="btn google"
+              disabled={signingIn}
+              onClick={() => {
+                setSigningIn(true)
+                setLoginError(null)
+                studioStaffLoginWithGoogle()
+                  .then(({ error }) => {
+                    if (error) setLoginError(error)
+                    else refresh()
+                  })
+                  .catch(() => setLoginError('Google sign-in failed. Try again.'))
+                  .finally(() => setSigningIn(false))
+              }}
+            >
+              <span className="google-mark" aria-hidden="true">
+                G
+              </span>
+              Continue with Google
+            </button>
             <Link className="btn ghost" to="/fitness/studioflow">
               Member app →
             </Link>
@@ -345,7 +370,7 @@ export default function ClassBoard() {
           <h1>Backend management</h1>
           <p className="app-sub">
             Schedule, role-call, payments, risk notes, legal copy, subscriber email, reminders,
-            substitutes, and public site text.
+            trainers, and public site text.
           </p>
         </div>
         <div className="btn-row">
@@ -1014,6 +1039,8 @@ export default function ClassBoard() {
 
       {tab === 'members' && <MembersPayments role={role} />}
 
+      {tab === 'clients' && role === 'admin' && <ClientAccounts />}
+
       {tab === 'risk' && (
         <section className="yacht-panel app-enter app-section">
           <h2>Personal limitations &amp; risk</h2>
@@ -1209,9 +1236,9 @@ export default function ClassBoard() {
 
       {tab === 'team' && (
         <section className="yacht-panel app-enter app-section">
-          <h2>Team &amp; substitutes</h2>
+          <h2>Team &amp; trainers</h2>
           <p className="hint">
-            Cover logins (substitute account) keep the board running when Tom is away.
+            A trainer login keeps the board running when Tom is away.
           </p>
           <ul className="admin-member-list">
             {team.map((t) => (

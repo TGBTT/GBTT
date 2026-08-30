@@ -1,7 +1,7 @@
 /** GBTT studio store — local persistence until Firestore is live; API mirrors production schema. */
 
 export type PlanId = 'casual' | 'pack10' | 'pack20' | 'weekly1' | 'weekly2' | 'weekly3'
-export type SimRole = 'public' | 'member' | 'admin' | 'substitute'
+export type SimRole = 'public' | 'member' | 'admin' | 'trainer'
 export type ExerciseDisplay = 'hidden' | 'defaults' | 'custom'
 export type RosterStatus = 'booked' | 'attended' | 'noShow'
 export type AttendeeKind = 'member' | 'guest'
@@ -75,7 +75,7 @@ export interface SimUser {
   email: string
   password: string
   name: string
-  role: 'member' | 'admin' | 'substitute'
+  role: 'member' | 'admin' | 'trainer'
   planId: PlanId
   creditsLeft: number
   classesPerWeek: number
@@ -128,12 +128,14 @@ export interface SiteContent {
 export interface TeamMember {
   id: string
   name: string
-  role: 'lead' | 'substitute'
+  role: 'lead' | 'trainer'
   notes: string
 }
 
 export const FITNESS_VENUE = 'Rec Park Centre, Golden Bay'
-export const STORAGE_KEY = 'gbtt-sim-v4'
+// Bumped for the substitute -> trainer rename: a store persisted under the old
+// key holds seed users whose role no longer exists.
+export const STORAGE_KEY = 'gbtt-sim-v5'
 export const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'] as const
 export type Weekday = (typeof WEEKDAYS)[number]
 
@@ -550,7 +552,7 @@ const DEFAULT_USERS: SimUser[] = [
     email: 'cover@gbtt',
     password: 'demo',
     name: 'Cover Trainer',
-    role: 'substitute',
+    role: 'trainer',
     planId: 'casual',
     creditsLeft: 0,
     classesPerWeek: 0,
@@ -581,9 +583,9 @@ const DEFAULT_SITE: SiteContent = {
 
 const DEFAULT_TEAM: TeamMember[] = [
   { id: 'tom', name: 'Tom', role: 'lead', notes: 'Primary coach' },
-  { id: 'jess', name: 'Jess', role: 'substitute', notes: 'BodyBalance cover' },
-  { id: 'priya', name: 'Priya', role: 'substitute', notes: 'Mobility / evenings' },
-  { id: 'cover', name: 'Cover pool', role: 'substitute', notes: 'Weekend float' },
+  { id: 'jess', name: 'Jess', role: 'trainer', notes: 'BodyBalance cover' },
+  { id: 'priya', name: 'Priya', role: 'trainer', notes: 'Mobility / evenings' },
+  { id: 'cover', name: 'Cover pool', role: 'trainer', notes: 'Weekend float' },
 ]
 
 const DEFAULT_REMINDERS: ReminderItem[] = [
@@ -946,7 +948,7 @@ export function sessionExercises(occ: ClassOccurrence): Exercise[] {
 }
 
 export function visibleRosterNames(occ: ClassOccurrence, viewer: SimUser | null): string[] {
-  if (!viewer || viewer.role === 'admin' || viewer.role === 'substitute') {
+  if (!viewer || viewer.role === 'admin' || viewer.role === 'trainer') {
     return occ.roster.map((r) => r.displayName)
   }
   const shares = occ.roster.some((r) => r.memberId === viewer.id)
@@ -973,7 +975,7 @@ export function login(email: string, password: string): string | null {
       ? 'Unknown email or password.'
       : 'Unknown email or password (try seed credentials).'
   }
-  if (import.meta.env.PROD && (user.role === 'admin' || user.role === 'substitute')) {
+  if (import.meta.env.PROD && (user.role === 'admin' || user.role === 'trainer')) {
     return 'Staff sign-in requires a Firebase account. Contact Tom if you cannot get in.'
   }
   if (user.role === 'member' && !user.activated) {
@@ -1001,7 +1003,7 @@ export function logout(): void {
 export function bindStaffSession(
   email: string,
   name: string,
-  role: 'admin' | 'substitute',
+  role: 'admin' | 'trainer',
 ): void {
   const lower = email.trim().toLowerCase()
   let user = store.users.find((u) => u.email.toLowerCase() === lower)
@@ -1533,7 +1535,7 @@ export function syncLabels(): { calendar: string; firebase: string } {
 export const SEED_ACCOUNTS = [
   { label: 'Member', email: 'alex@demo', password: 'demo' },
   { label: 'Admin (Tom)', email: 'tom@gbtt', password: 'demo' },
-  { label: 'Substitute', email: 'cover@gbtt', password: 'demo' },
+  { label: 'Trainer', email: 'cover@gbtt', password: 'demo' },
 ] as const
 
 /** @deprecated Dev seed only — not shown in production UI */

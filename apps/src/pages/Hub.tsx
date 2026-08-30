@@ -30,7 +30,7 @@ export default function Hub() {
           <Link to="/fitness/classboard" className="hub-card hub-card-classboard">
             <AppCardImage id="classboard" alt="" />
             <div className="hub-card-body">
-              <p className="hub-card-kind">For Tom &amp; substitutes</p>
+              <p className="hub-card-kind">For Tom &amp; trainers</p>
               <h3>Trainer admin</h3>
               <p>Schedule, role-call, payments, risk, legal, notify, reminders, site content.</p>
             </div>

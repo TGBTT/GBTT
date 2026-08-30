@@ -23,12 +23,16 @@ service cloud.firestore {
       return role() == 'admin';
     }
 
-    function isSubstitute() {
-      return role() == 'substitute';
+    // `trainer` is a client the admin has elevated so they can run the
+    // schedule in his absence. `substitute` is the old name for the same tier
+    // and is still accepted so a token minted before the rename keeps working;
+    // that fallback can be removed once no legacy claims exist.
+    function isTrainer() {
+      return role() == 'trainer' || role() == 'substitute';
     }
 
     function isStaff() {
-      return isAdmin() || isSubstitute();
+      return isAdmin() || isTrainer();
     }
 
     function isOwner(uid) {
@@ -46,6 +50,10 @@ service cloud.firestore {
     // `billing` and `membership` feed calculateBillingPeriod, so a member who
     // could edit them could set their own discount or plan rate and invoice
     // themselves nothing. `role` and `status` gate access and approval.
+    //
+    // Everything else under `profile` — name, phone, contact details — stays the
+    // member's own to correct. Nothing server-side reads them for money or
+    // access, so a wrong phone number is a wrong phone number, not a privilege.
     function selfEditAllowed() {
       return profileVal(request.resource.data, 'role') == profileVal(resource.data, 'role')
         && profileVal(request.resource.data, 'status') == profileVal(resource.data, 'status')

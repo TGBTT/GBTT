@@ -5,7 +5,7 @@
 - **Marketing site** (`src/`) — homepage, contact form, public timetable
 - **Member & trainer apps** (`apps/`) — booking, admin, role-call, billing
 - **Firestore** — system of record (see `firestore.rules`)
-- **Firebase Auth** — members, admin, substitutes
+- **Firebase Auth** — members, admin, trainers (email/password or Google)
 - **Cloud Functions** (`functions/`) — account creation, billing, calendar webhooks
 - **Apps Script** (`google-apps-script/Code.gs`) — email + Google Calendar on Tom's account
 

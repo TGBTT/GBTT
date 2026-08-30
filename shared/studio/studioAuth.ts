@@ -1,6 +1,8 @@
 import {
+  GoogleAuthProvider,
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
+  signInWithPopup,
   signOut,
   sendEmailVerification,
   sendPasswordResetEmail,
@@ -17,8 +19,91 @@ import {
   logout as localLogout,
 } from './fitnessStudio'
 
-export type StudioRole = 'member' | 'admin' | 'substitute'
+export type StudioRole = 'member' | 'admin' | 'trainer'
 export type StudioStatus = 'pending' | 'active' | 'suspended'
+
+/**
+ * Turn a Firebase sign-in error into something a member can act on.
+ *
+ * The one worth naming is `account-exists-with-different-credential`: with
+ * Firebase's "one account per email address" setting, a Google sign-in for an
+ * address already held by another provider is refused rather than linked, and
+ * the raw message tells the member nothing they can do about it.
+ */
+function signInErrorMessage(err: unknown, fallback: string): string {
+  const code = (err as { code?: string })?.code ?? ''
+  if (code === 'auth/account-exists-with-different-credential') {
+    return 'That email address is already registered with a password. Sign in with your email and password, or ask the studio to link your Google account.'
+  }
+  if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+    return 'Google sign-in was cancelled.'
+  }
+  if (code === 'auth/popup-blocked') {
+    return 'Your browser blocked the Google sign-in window. Allow pop-ups for this site and try again.'
+  }
+  if (code === 'auth/operation-not-allowed') {
+    return 'Google sign-in is not enabled for this studio yet. Use your email and password, or contact the studio.'
+  }
+  return fallback
+}
+
+/**
+ * Apply the member checks a sign-in has to pass, whatever provider was used.
+ *
+ * Both the password and the Google path land here: read the `users/{uid}`
+ * profile, refuse a subscription still waiting on approval, and bind the local
+ * UI session. Nothing here grants anything — Firestore rules and the callables
+ * check the token — it decides what the member app renders.
+ */
+async function completeMemberSignIn(
+  user: User,
+  fallbackEmail: string,
+  /** Whether to drop the Auth session when no profile document exists. */
+  signOutWhenUninvited: boolean,
+): Promise<string | null> {
+  const auth = getFirebaseAuth()
+  const db = getFirestoreDb()
+  if (!db) return 'Firebase not configured.'
+
+  const profile = await getDoc(doc(db, 'users', user.uid))
+  if (!profile.exists()) {
+    // Never create a profile here. A Google sign-in with no profile is someone
+    // who was never invited, and silently enrolling them would hand out an
+    // account the studio never agreed to.
+    if (signOutWhenUninvited && auth) await signOut(auth)
+    return 'No studio account is linked to this sign-in. Ask the studio to send you an invitation.'
+  }
+
+  const data = profile.data() ?? {}
+  const planId = String(data.membership?.planId ?? data.requested?.planId ?? 'casual')
+  const planSnap = await getDoc(doc(db, 'pricingPlans', planId))
+  const classesPerWeek = Number(planSnap.data()?.classesPerWeek ?? 0)
+
+  if (data.profile?.status === 'suspended') {
+    if (auth) await signOut(auth)
+    return 'This account is suspended. Contact the studio.'
+  }
+
+  /*
+   * A casual account stays `pending` until its first booking activates it off
+   * a verified email, so refusing pending sign-ins outright would lock every
+   * drop-in out of the account they just created. They are let in and shown
+   * the verification prompt instead. Subscriptions still wait for approval,
+   * since those carry an allowance an admin has to grant.
+   */
+  if (data.profile?.status === 'pending' && classesPerWeek > 0) {
+    return 'Your account is awaiting approval by the studio — you will be emailed once it is active.'
+  }
+
+  bindMemberSession({
+    uid: user.uid,
+    email: user.email ?? fallbackEmail,
+    name: String(data.profile?.name ?? ''),
+    planId,
+    classesPerWeek,
+  })
+  return null
+}
 
 export async function studioLogin(email: string, password: string): Promise<string | null> {
   if (!isFirebaseConfigured()) {
@@ -27,37 +112,45 @@ export async function studioLogin(email: string, password: string): Promise<stri
   const auth = getFirebaseAuth()
   const db = getFirestoreDb()
   if (!auth || !db) return 'Firebase not configured.'
+  let user: User
   try {
     const cred = await signInWithEmailAndPassword(auth, email.trim(), password)
-    const profile = await getDoc(doc(db, 'users', cred.user.uid))
-    if (!profile.exists()) return 'No profile found for this account.'
-
-    const data = profile.data() ?? {}
-    const planId = String(data.membership?.planId ?? data.requested?.planId ?? 'casual')
-    const planSnap = await getDoc(doc(db, 'pricingPlans', planId))
-    const classesPerWeek = Number(planSnap.data()?.classesPerWeek ?? 0)
-
-    /*
-     * A casual account stays `pending` until its first booking activates it off
-     * a verified email, so refusing pending sign-ins outright would lock every
-     * drop-in out of the account they just created. They are let in and shown
-     * the verification prompt instead. Subscriptions still wait for approval,
-     * since those carry an allowance an admin has to grant.
-     */
-    if (data.profile?.status === 'pending' && classesPerWeek > 0) {
-      return 'Your account is awaiting approval by the studio — you will be emailed once it is active.'
-    }
-
-    bindMemberSession({
-      uid: cred.user.uid,
-      email: cred.user.email ?? email,
-      name: String(data.profile?.name ?? ''),
-      planId,
-      classesPerWeek,
-    })
-    return null
+    user = cred.user
   } catch {
     return 'Sign-in failed. Check email and password.'
+  }
+  try {
+    // The password path keeps the session on a missing profile, as it always
+    // has: the account provably belongs to whoever typed the password.
+    return await completeMemberSignIn(user, email, false)
+  } catch (e) {
+    return signInErrorMessage(e, 'Sign-in failed. Try again.')
+  }
+}
+
+/**
+ * Member sign-in with a Google account.
+ *
+ * Offered alongside email and password rather than instead of it — plenty of
+ * clients have no Google account, and an invited client can only ever have the
+ * password the invite email set.
+ *
+ * An invited client whose Google address matches the one `createMemberAccount`
+ * used keeps the same uid, so their existing `users/{uid}` profile still
+ * matches. Where Firebase refuses to link the two instead, the error is
+ * translated into something the member can act on.
+ */
+export async function studioLoginWithGoogle(): Promise<string | null> {
+  if (!isFirebaseConfigured()) {
+    return 'Google sign-in is unavailable until Firebase is configured.'
+  }
+  const auth = getFirebaseAuth()
+  if (!auth) return 'Firebase not configured.'
+  try {
+    const cred = await signInWithPopup(auth, new GoogleAuthProvider())
+    return await completeMemberSignIn(cred.user, cred.user.email ?? '', true)
+  } catch (e) {
+    return signInErrorMessage(e, 'Google sign-in failed. Try again.')
   }
 }
 
@@ -73,7 +166,10 @@ export async function studioRole(): Promise<StudioRole | null> {
   if (!user) return null
   const token = await user.getIdTokenResult()
   const role = token.claims.role
-  return role === 'admin' || role === 'substitute' || role === 'member' ? role : null
+  // `substitute` was the old name for `trainer`; a token minted before the
+  // rename still carries it. Remove once no legacy claims exist.
+  if (role === 'substitute') return 'trainer'
+  return role === 'admin' || role === 'trainer' || role === 'member' ? role : null
 }
 
 /**
@@ -104,18 +200,70 @@ export async function studioStaffLogin(
     return { error: 'Sign-in failed. Check email and password.', role: null }
   }
 
+  return completeStaffSignIn(email)
+}
+
+/**
+ * Apply the staff checks, whatever provider signed the user in.
+ *
+ * Hiding the admin shell is not the protection — Firestore rules and the
+ * callables reject a token without the claim regardless — but rendering it for
+ * an account that cannot use it is only confusing, so the session is dropped.
+ */
+async function completeStaffSignIn(
+  fallbackEmail: string,
+): Promise<{ error: string | null; role: StudioRole | null }> {
+  const auth = getFirebaseAuth()
+  const db = getFirestoreDb()
+  if (!auth || !db) return { error: 'Firebase not configured.', role: null }
+
   const role = await studioRole()
-  if (role !== 'admin' && role !== 'substitute') {
-    // Signed in, but not staff. Drop the session so the app never renders the
-    // admin shell for an account Firestore would reject anyway.
+  if (role !== 'admin' && role !== 'trainer') {
     await signOut(auth)
     return { error: 'This account does not have staff access.', role: null }
   }
 
   const current = auth.currentUser
-  bindStaffSession(current?.email ?? email, current?.displayName ?? '', role)
+  const profile = current ? await getDoc(doc(db, 'users', current.uid)) : null
+  if (!profile?.exists()) {
+    await signOut(auth)
+    return {
+      error: 'No studio profile exists for this account. Ask the studio to set it up.',
+      role: null,
+    }
+  }
+  if (profile.data()?.profile?.status === 'suspended') {
+    await signOut(auth)
+    return { error: 'This staff account is suspended.', role: null }
+  }
+
+  bindStaffSession(current?.email ?? fallbackEmail, current?.displayName ?? '', role)
 
   return { error: null, role }
+}
+
+/**
+ * Staff sign-in with a Google account — how Tom signs in, since the Google
+ * account that owns Firebase, Gmail and the studio calendar is the same one.
+ *
+ * The role still comes from the custom claim, so a Google account with no
+ * `admin` or `trainer` claim gets no further than a password one would.
+ */
+export async function studioStaffLoginWithGoogle(): Promise<{
+  error: string | null
+  role: StudioRole | null
+}> {
+  if (!isFirebaseConfigured()) {
+    return { error: 'Staff sign-in is unavailable until Firebase is configured.', role: null }
+  }
+  const auth = getFirebaseAuth()
+  if (!auth) return { error: 'Firebase not configured.', role: null }
+  try {
+    const cred = await signInWithPopup(auth, new GoogleAuthProvider())
+    return await completeStaffSignIn(cred.user.email ?? '')
+  } catch (e) {
+    return { error: signInErrorMessage(e, 'Google sign-in failed. Try again.'), role: null }
+  }
 }
 
 export async function studioLogout(): Promise<void> {
@@ -552,6 +700,57 @@ export async function studioRemoveSession(
       mode: null,
       booked: 0,
       attended: 0,
+    }
+  }
+}
+
+export interface CreateMemberInput {
+  name: string
+  email: string
+  phone?: string
+  planId?: string
+  classesPerWeek?: number
+}
+
+export interface CreateMemberResult {
+  error: string | null
+  uid: string
+  /** Whether the Apps Script invite email went out. */
+  inviteEmailSent: boolean
+}
+
+/**
+ * Admin creates a client account.
+ *
+ * The server does the work that cannot be trusted to a browser: the Auth user,
+ * the `member` claim, the active profile, and the password-reset link the
+ * invite email carries. There is no password here — the client sets their own
+ * from that link.
+ */
+export async function studioCreateMemberAccount(
+  input: CreateMemberInput,
+): Promise<CreateMemberResult> {
+  const functions = getFirebaseFunctions()
+  if (!functions) return { error: 'Firebase not configured.', uid: '', inviteEmailSent: false }
+  try {
+    const res = await httpsCallable(functions, 'createMemberAccount')({
+      name: input.name.trim(),
+      email: input.email.trim().toLowerCase(),
+      phone: (input.phone ?? '').trim(),
+      planId: input.planId ?? 'weekly1',
+      classesPerWeek: input.classesPerWeek ?? 1,
+    })
+    const d = (res.data ?? {}) as { uid?: string; inviteEmailSent?: boolean }
+    return {
+      error: null,
+      uid: String(d.uid ?? ''),
+      inviteEmailSent: Boolean(d.inviteEmailSent),
+    }
+  } catch (e) {
+    return {
+      error: e instanceof Error ? e.message : 'Could not create this account.',
+      uid: '',
+      inviteEmailSent: false,
     }
   }
 }

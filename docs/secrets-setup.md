@@ -17,6 +17,7 @@ Firebase project: **`gbtt-c1130`**
 | Timetable seeded into Firestore | **todo** — `functions/scripts/seed-timetable.mjs` |
 | GitHub repository secrets | **todo** — run `scripts/sync-github-secrets.ps1` |
 | Email/Password sign-in enabled | **todo** — console only |
+| Google sign-in enabled | **todo** — console only; required for Tom's own login |
 | First admin custom claim | **todo** — `functions/scripts/set-admin-claim.mjs` |
 | Apps Script deployed → `VITE_FORM_ENDPOINT` | **todo** |
 | DNS for `gbtt.co.nz` → GitHub Pages | **todo** |
@@ -46,8 +47,14 @@ failure, but it is a failure.
 renders an empty week rather than inventing numbers, so the timetable stays
 blank until this runs.
 
-**4. Enable Email/Password sign-in** in the console, then **bootstrap the first
-admin** with `functions/scripts/set-admin-claim.mjs`. The `role` claim cannot be
+**4. Enable Email/Password *and* Google sign-in** in the console, then
+**bootstrap the first admin** with `functions/scripts/set-admin-claim.mjs`.
+
+Both providers are needed. Tom signs in to the admin console with the Google
+account that already owns Firebase, Gmail and the studio calendar
+(`tom.gbtt@gmail.com`), and clients may use Google too — but an invited client
+who has no Google account can only ever use the password they set from their
+invitation email, so Email/Password cannot be turned off. The `role` claim cannot be
 set from the console, and staff sign-in checks it, so the admin console is
 unreachable until this is done.
 
@@ -90,6 +97,57 @@ Recently closed, for reference:
   the published bundle by Vite, so anyone could read it and self-activate;
   Firebase email verification replaced it.
 
+### Roles
+
+Three roles, all carried as a `role` custom claim on the Auth token:
+
+| Role | Who | What it opens |
+|------|-----|---------------|
+| `admin` | Tom | Everything |
+| `trainer` | A client Tom has elevated | Schedule and role-call; not legal, notify, billing settings or site content |
+| `member` | A client | Their own profile and bookings |
+
+`trainer` was previously called `substitute`. The rename is complete across the
+rules, functions, shared logic and UI, and user-visible text reads “Trainer”.
+Nothing needed migrating — Auth held no accounts with the old claim — but
+`requireStaff` in `functions/src/index.ts`, `isTrainer()` in `firestore.rules`
+and `studioRole()` in `shared/studio/studioAuth.ts` each still accept a legacy
+`substitute` claim as equivalent, so a token minted before the rename keeps
+working. Each carries a comment; the fallback can be deleted once no legacy
+claims exist.
+
+### Google sign-in and invited clients
+
+Both the admin console (`studioStaffLoginWithGoogle`) and the member app
+(`studioLoginWithGoogle`) offer Google alongside email and password. A Google
+sign-in is held to exactly the same checks as a password one: the role comes
+from the custom claim, the `users/{uid}` profile must exist, and a suspended
+profile is refused.
+
+Two cases are handled deliberately:
+
+- **Never invited.** A Google sign-in with no `users/{uid}` profile is signed
+  straight back out and told to ask the studio for an invitation. No profile is
+  created, so signing in with Google is not a back door to self-enrolment.
+- **Invited, then signs in with Google.** `createMemberAccount` creates an Auth
+  user with an email and no password, so the account exists before its owner
+  first signs in. Google sign-in on that same address adopts the existing uid,
+  which is what keeps their `users/{uid}` profile matching.
+
+  Checked against the Auth emulator (`accounts:signInWithIdp` with a Google
+  assertion for an address an admin-created user already holds): the uid was
+  preserved, `google.com` was linked to that same account, and no error was
+  raised. The same held for an account that already had a password. One thing to
+  watch in that second case: after the Google sign-in the account listed
+  `google.com` as its *only* provider, so a client who signs in with Google may
+  find their password no longer works and have to use “forgot password”. Worth
+  confirming on the live project before telling clients otherwise.
+
+  Where Firebase refuses to link the two instead —
+  `auth/account-exists-with-different-credential`, which the "one account per
+  email address" setting can produce — the client is told to use their email and
+  password or ask the studio, rather than being shown a raw Firebase error.
+
 ### Security model
 
 Members book through the `bookSession` / `cancelBooking` callables, never by writing Firestore
@@ -124,7 +182,12 @@ Nothing below is destructive; steps can be re-run safely.
 ## 1. Firebase console (Tom’s Google account)
 
 1. Create a Firebase project (Blaze plan required for Cloud Functions).
-2. **Authentication** → Sign-in method → enable **Email/Password**.
+2. **Authentication** → Sign-in method → enable **Email/Password** *and* **Google**.
+   Both are required: Google is how Tom signs in, and Email/Password is the only
+   route for a client who has no Google account. For the Google provider, set the
+   project support email to Tom's address; no client secret is needed for the web
+   SDK. Leave **one account per email address** at its default — see “Google
+   sign-in and invited clients” below for why that matters.
 3. **Firestore** → Create database → **production mode** (rules deploy from `firestore.rules` in this repo).
 4. **Project settings** → Your apps → Add **Web app** → copy the client config:
    - `apiKey`
@@ -215,12 +278,19 @@ Copy examples and fill values (never commit real secrets):
 | `NOTIFY_EMAIL` | Tom’s inbox for admin notifications |
 | `CALENDAR_ID` | Shared studio Google Calendar ID |
 | `FUNCTIONS_WEBHOOK_SECRET` | Must match Firebase `FUNCTIONS_WEBHOOK_SECRET` |
-| `ACTIVATION_KEY` | Legacy signup key (retire after Firebase invite flow) |
+| `ACTIVATION_KEY` | **Vestigial — do not set.** See below |
 
 4. Deploy → **New deployment** → Web app:
    - Execute as: **Me**
    - Who has access: **Anyone**
 5. Copy the deployment URL → `VITE_FORM_ENDPOINT` (GitHub Secret) and `FORM_ENDPOINT` (Functions).
+
+> **`ACTIVATION_KEY` and the `activate` action are vestigial.** The emailed key
+> was replaced by Firebase email verification, and no client sends one any more,
+> so the script property and the `activate` branch in
+> `google-apps-script/Code.gs` are dead code. Leave the property unset; the
+> matching `VITE_ACTIVATION_KEY` must not be set as a GitHub secret or in any
+> `.env` either. Both can be deleted outright next time `Code.gs` is edited.
 
 ### Apps Script actions used by Cloud Functions
 
@@ -292,7 +362,8 @@ Security model (see `firestore.rules`):
 - **Public read**: `catalog/*`, `classTypes`, `timetableSlots`, `sessions` (summary), `siteContent`
 - **Signed-in read, admin write**: `pricingPlans`, `pricingDiscounts`, `seasons`
 - **Members**: own `users/{uid}` and subcollections
-- **Staff**: `admin` or `substitute` custom claim on Auth token
+- **Staff**: `admin` or `trainer` custom claim on Auth token (a legacy
+  `substitute` claim is still accepted as `trainer`)
 - **Server-only**: `guestPasses` writes, `billingPeriods` writes, audit entries
 
 > **Path shape.** Firestore documents live at an *even* number of path
@@ -354,8 +425,8 @@ Bootstrap it once with the Admin SDK:
    # inspect current claims without changing anything
    node functions/scripts/set-admin-claim.mjs --key <key> --email <addr> --show
 
-   # promote a cover instructor
-   node functions/scripts/set-admin-claim.mjs --key <key> --email <addr> --role substitute
+   # promote a client to trainer, so they can run the schedule in Tom's absence
+   node functions/scripts/set-admin-claim.mjs --key <key> --email <addr> --role trainer
 
    # create the Auth user at the same time
    node functions/scripts/set-admin-claim.mjs --key <key> --email <addr> --create --name "Tom"
@@ -422,12 +493,17 @@ Expect a calendar event on the studio calendar.
 ### D. Admin auth
 
 1. Sign in as admin (custom claim `role: admin`).
-2. Callable `createMemberAccount` with `{ email, name, planId }` → new `users/{uid}` doc.
+2. Callable `createMemberAccount` with `{ email, name, phone, planId }` → new `users/{uid}` doc
+   carrying `profile.phone`.
 3. Member receives invite / reset email.
+4. Or do it from the console: **Add client accounts** tab → type rows or paste
+   `name, email, phone` from the client spreadsheet → **Create accounts & email
+   invitations**. Each client is emailed an invitation to set their own password;
+   a row that fails stays on screen with its reason while the rest go through.
 
 ### E. Roster → Calendar
 
-1. Admin or substitute updates `sessions/{id}/roster/{uid}` in Firestore (or via app when wired).
+1. Admin or trainer updates `sessions/{id}/roster/{uid}` in Firestore (or via app when wired).
 2. `onRosterWrite` fires → Apps Script `calendarUpsertSession` → calendar event updated.
 
 ### F. Billing calculator
@@ -447,7 +523,9 @@ Expect a calendar event on the studio calendar.
 When smoke tests pass:
 
 - [ ] Member login and booking against live Firestore
-- [ ] Substitute can role-call but not edit site content / billing settings
+- [ ] Trainer can role-call but not edit site content / billing settings
+- [ ] Tom can sign in to the admin console with Google
+- [ ] An invited client can sign in with Google on the address they were invited at
 - [ ] GitHub Pages production deploy shows live timetable (public read)
 - [ ] De-demo audit: no “simulated” copy in production paths
 

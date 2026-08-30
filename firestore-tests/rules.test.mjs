@@ -103,6 +103,14 @@ function adminDb() {
 function anonDb() {
   return testEnv.unauthenticatedContext().firestore()
 }
+/** A client the admin has elevated to run the schedule in his absence. */
+function trainerDb() {
+  return testEnv.authenticatedContext('trainer-uid', { role: 'trainer' }).firestore()
+}
+/** The pre-rename spelling of the same tier, still honoured by the rules. */
+function legacySubstituteDb() {
+  return testEnv.authenticatedContext('legacy-uid', { role: 'substitute' }).firestore()
+}
 
 describe('billing cannot be self-edited', () => {
   it('member cannot set their own discount to 100%', async () => {
@@ -236,6 +244,92 @@ describe('self-registration is gated', () => {
         profile: { name: 'B', email: 'b@e.com', role: 'member', status: 'pending' },
         billing: { balanceCents: 0, customDiscountPct: 100 },
       }),
+    )
+  })
+})
+
+describe('the trainer role is staff, but not admin', () => {
+  it('trainer can write roster for role-call', async () => {
+    await assertSucceeds(
+      setDoc(doc(trainerDb(), 'sessions/sess-1/roster', MEMBER), {
+        memberId: MEMBER,
+        status: 'attended',
+      }),
+    )
+  })
+
+  it('trainer can read a member profile to run a class', async () => {
+    await assertSucceeds(getDoc(doc(trainerDb(), 'users', MEMBER)))
+  })
+
+  it('trainer cannot edit site content', async () => {
+    await assertFails(setDoc(doc(trainerDb(), 'siteContent', 'home'), { hero: 'changed' }))
+  })
+
+  it('trainer cannot change what a member is billed', async () => {
+    await assertFails(
+      updateDoc(doc(trainerDb(), 'users', MEMBER), { 'billing.customDiscountPct': 50 }),
+    )
+  })
+
+  it('trainer cannot define a season', async () => {
+    await assertFails(
+      setDoc(doc(trainerDb(), 'seasons', 'trainer-term'), {
+        name: 'Trainer term',
+        startDate: '2026-01-01',
+        endDate: '2026-02-01',
+      }),
+    )
+  })
+
+  // Any token minted before the rename still says `substitute`. Dropping this
+  // fallback would lock an existing trainer out mid-session.
+  it('a legacy substitute claim is still treated as a trainer', async () => {
+    await assertSucceeds(
+      setDoc(doc(legacySubstituteDb(), 'sessions/sess-1/roster', MEMBER), {
+        memberId: MEMBER,
+        status: 'booked',
+      }),
+    )
+    await assertFails(
+      setDoc(doc(legacySubstituteDb(), 'siteContent', 'home'), { hero: 'changed' }),
+    )
+  })
+
+  it('a member is not staff by another name', async () => {
+    await assertFails(getDoc(doc(memberDb(), 'users', OTHER)))
+    await assertFails(setDoc(doc(memberDb(), 'timetableSlots', 'forged'), { day: 'Mon' }))
+  })
+})
+
+describe('contact details on a profile', () => {
+  // createMemberAccount writes profile.phone from the admin's client list, and
+  // a wrong number is the member's to fix: nothing server-side reads it for
+  // money or access, so it needs no admin round trip.
+  it('member can correct their own phone number', async () => {
+    await assertSucceeds(
+      updateDoc(doc(memberDb(), 'users', MEMBER), { 'profile.phone': '021 555 0101' }),
+    )
+  })
+
+  it('admin can set a member phone number', async () => {
+    await assertSucceeds(
+      updateDoc(doc(adminDb(), 'users', MEMBER), { 'profile.phone': '021 555 0102' }),
+    )
+  })
+
+  it('a phone edit still cannot smuggle in a role change', async () => {
+    await assertFails(
+      updateDoc(doc(memberDb(), 'users', MEMBER), {
+        'profile.phone': '021 555 0103',
+        'profile.role': 'trainer',
+      }),
+    )
+  })
+
+  it('member cannot edit another members phone number', async () => {
+    await assertFails(
+      updateDoc(doc(memberDb(), 'users', PENDING), { 'profile.phone': '021 555 0104' }),
     )
   })
 })

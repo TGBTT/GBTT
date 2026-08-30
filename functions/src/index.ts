@@ -74,7 +74,10 @@ function requireAdmin(request: { auth?: { uid: string; token: Record<string, unk
 function requireStaff(request: { auth?: { uid: string; token: Record<string, unknown> } }) {
   const authCtx = requireAuth(request)
   const role = authCtx.token.role
-  if (role !== 'admin' && role !== 'substitute') {
+  // `trainer` is canonical; `substitute` was its previous name and is still
+  // honoured so pre-rename tokens keep working. Remove once no legacy claims
+  // exist.
+  if (role !== 'admin' && role !== 'trainer' && role !== 'substitute') {
     throw new HttpsError('permission-denied', 'Staff role required.')
   }
   return authCtx
@@ -274,6 +277,7 @@ export const createMemberAccount = onCall(
       .trim()
       .toLowerCase()
     const name = String(request.data?.name ?? '').trim()
+    const phone = String(request.data?.phone ?? '').trim()
     const planId = String(request.data?.planId ?? 'weekly1').trim()
     const classesPerWeek = Number(request.data?.classesPerWeek ?? 1)
 
@@ -281,6 +285,9 @@ export const createMemberAccount = onCall(
       throw new HttpsError('invalid-argument', 'Name and email are required.')
     }
 
+    // The phone number is kept on the Firestore profile rather than on the Auth
+    // record: Auth requires E.164 and would reject the local formats Tom's
+    // client list is written in, and nothing signs in by phone.
     const userRecord = await auth.createUser({ email, displayName: name })
     await auth.setCustomUserClaims(userRecord.uid, { role: 'member' })
 
@@ -288,6 +295,7 @@ export const createMemberAccount = onCall(
       profile: {
         name,
         email,
+        phone,
         role: 'member',
         status: 'active',
       },
@@ -313,6 +321,7 @@ export const createMemberAccount = onCall(
         action: 'sendInvite',
         email,
         name,
+        phone,
         planId,
         resetLink,
         source: 'cloud-function',

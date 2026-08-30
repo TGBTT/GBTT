@@ -11,6 +11,7 @@ import {
   studioHasFirebaseUser,
   studioLockWeeklySlot,
   studioLogin,
+  studioLoginWithGoogle,
   studioRegisterMember,
   studioResendVerification,
   studioUnlockWeeklySlot,
@@ -533,6 +534,30 @@ export default function StudioFlow() {
                     Create an account
                   </button>
                 </div>
+                {/* Offered as well as a password, not instead of it: an invited
+                    client may have no Google account at all. */}
+                <div className="btn-row">
+                  <button
+                    type="button"
+                    className="btn google"
+                    disabled={busy}
+                    onClick={async () => {
+                      setBusy(true)
+                      const err = await studioLoginWithGoogle()
+                      setBusy(false)
+                      flash(err ? null : 'Signed in — select a session on the calendar.', err)
+                    }}
+                  >
+                    <span className="google-mark" aria-hidden="true">
+                      G
+                    </span>
+                    Continue with Google
+                  </button>
+                </div>
+                <p className="hint">
+                  Use Google if the studio has your Gmail address on file — otherwise sign in with
+                  the password you set from your invitation email.
+                </p>
               </>
             ) : (
               <>
