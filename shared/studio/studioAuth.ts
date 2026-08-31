@@ -10,6 +10,7 @@ import { doc, getDoc, setDoc } from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions'
 import { getFirebaseAuth, getFirebaseFunctions, getFirestoreDb } from './firebase/init'
 import { isFirebaseConfigured } from './firebase/config'
+import { currentWeekStart, listSessionsForSlot } from './firebase/liveSessions'
 import { bindMemberSession, bindStaffSession, logout as localLogout } from './fitnessStudio'
 
 export type StudioRole = 'member' | 'admin' | 'trainer'
@@ -641,6 +642,57 @@ export async function studioRemoveSession(
       attended: 0,
     }
   }
+}
+
+export interface RemoveSlotSessionsResult {
+  error: string | null
+  deleted: number
+  archived: number
+}
+
+/**
+ * Remove the live sessions filed under a standing slot from a week onwards.
+ *
+ * Only the current week and later are touched: a week that has already run
+ * carries attendance and billing history, and undoing a class laid too far
+ * across the calendar must not erase what people already attended. Each
+ * session still goes through `removeSession`, so a week with a roster is
+ * archived rather than deleted.
+ */
+export async function studioRemoveSlotSessions(
+  slotId: string,
+  reason = 'Removed with recurring class',
+  fromWeekStart: string = currentWeekStart(),
+): Promise<RemoveSlotSessionsResult> {
+  let sessions: { id: string }[]
+  try {
+    sessions = await listSessionsForSlot(slotId, fromWeekStart)
+  } catch (e) {
+    return {
+      error: e instanceof Error ? e.message : 'Could not list sessions for this class.',
+      deleted: 0,
+      archived: 0,
+    }
+  }
+
+  let deleted = 0
+  let archived = 0
+  for (const session of sessions) {
+    const result = await studioRemoveSession(session.id, reason)
+    if (result.error) {
+      return {
+        error:
+          deleted + archived
+            ? `Removed ${deleted + archived}, then stopped: ${result.error}`
+            : result.error,
+        deleted,
+        archived,
+      }
+    }
+    if (result.mode === 'archived') archived += 1
+    else deleted += 1
+  }
+  return { error: null, deleted, archived }
 }
 
 export interface CreateMemberInput {

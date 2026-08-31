@@ -6,6 +6,7 @@ import {
   studioMarkAttendance,
   studioLogout,
   studioRemoveSession,
+  studioRemoveSlotSessions,
   studioSendBroadcast,
   studioSetMemberRole,
 } from '@gbtt/shared/studio/studioAuth'
@@ -26,6 +27,7 @@ import { StudioSignIn } from '../../components/StudioSignIn'
 import {
   createSessionSeries,
   deactivateTimetableSlot,
+  listSessionsForSlot,
   populateSlotAcrossWeeks,
   saveRecurringTimetableSlot,
   subscribeTimetableSlots,
@@ -33,6 +35,12 @@ import {
   type LiveTimetableSlot,
   type SessionEdit,
 } from '@gbtt/shared/studio/firebase/liveSessions'
+import {
+  subscribeSeasons,
+  type LiveSeason,
+  type LiveSeasonsState,
+} from '@gbtt/shared/studio/firebase/liveSeasons'
+import { shiftDayKey } from '@gbtt/shared/studio/SeasonCalendar'
 import { savePricingPlan } from '@gbtt/shared/studio/firebase/livePricing'
 import {
   addExercise,
@@ -76,17 +84,19 @@ import {
 } from '../../shared/fitnessStudio'
 
 /** How far forward a newly added class should run. */
-type Recurrence = 'once' | 'weeks' | 'ongoing'
+type Recurrence = 'once' | 'season'
 
-function recurringSpanNote(
-  weeks: number,
-  weekLabel: string,
-  horizon: 'season' | 'fallback',
-): string {
-  const span =
-    weeks === 1 ? `It is on ${weekLabel}` : `It is laid across ${weeks} weeks from ${weekLabel}`
-  const closures = horizon === 'season' && weeks > 1 ? ', skipping holiday closures' : ''
-  return `${span}${closures}`
+function recurringSpanNote(weeks: number, weekLabel: string, seasonName: string): string {
+  return weeks === 1
+    ? `It is on ${weekLabel} in ${seasonName}`
+    : `It is laid across ${seasonName} — ${weeks} weeks from ${weekLabel}, skipping holiday closures`
+}
+
+function seasonOverlapsWeek(season: LiveSeason, weekStart: string): boolean {
+  const weekFri = shiftDayKey(weekStart, 4)
+  return Boolean(
+    season.startDate && season.endDate && season.startDate <= weekFri && season.endDate >= weekStart,
+  )
 }
 
 type Tab =
@@ -187,10 +197,15 @@ export default function ClassBoard() {
   const [remDue, setRemDue] = useState('')
   const [elevateUid, setElevateUid] = useState('')
   const [recurrence, setRecurrence] = useState<Recurrence>('once')
-  const [repeatWeeks, setRepeatWeeks] = useState(10)
   const [copyForwardWeeks, setCopyForwardWeeks] = useState(10)
   const [recurringSlots, setRecurringSlots] = useState<LiveTimetableSlot[]>([])
   useEffect(() => subscribeTimetableSlots(setRecurringSlots), [])
+  const [seasonsState, setSeasonsState] = useState<LiveSeasonsState>({
+    status: 'loading',
+    seasons: [],
+  })
+  useEffect(() => subscribeSeasons(setSeasonsState), [])
+  const [selectedSeasonId, setSelectedSeasonId] = useState('')
   const [remKind, setRemKind] = useState<ReminderKind>('ops')
   const [newOccDay, setNewOccDay] = useState<Weekday>('Mon')
   const [newOccTime, setNewOccTime] = useState('07:00')
@@ -307,6 +322,14 @@ export default function ClassBoard() {
   // roster. An unconfigured build shows an empty week rather than seed numbers.
   const week = useWeekNavigation()
   const live = useLiveSessions(week.weekStart)
+  useEffect(() => {
+    setSelectedSeasonId((current) => {
+      if (current && seasonsState.seasons.some((s) => s.id === current)) return current
+      const covering = seasonsState.seasons.find((s) => seasonOverlapsWeek(s, week.weekStart))
+      return covering?.id ?? seasonsState.seasons[0]?.id ?? ''
+    })
+  }, [seasonsState.seasons, week.weekStart])
+  const selectedSeason = seasonsState.seasons.find((s) => s.id === selectedSeasonId)
   const liveRoster = useSessionRoster(live.status === 'ready' ? selectedOccId : null)
   const [liveMembers, setLiveMembers] = useState<LiveMembersState>({
     status: 'loading',
@@ -362,13 +385,21 @@ export default function ClassBoard() {
 
     setBusy(true)
 
-    if (recurrence === 'ongoing') {
+    if (recurrence === 'season') {
       /*
-       * An ongoing class is a standing slot plus the sessions members book.
-       * Weekly views and allocation read `sessions` by week, so the rest of
-       * the term is laid out here rather than waiting for a separate generate.
+       * A weekly class runs inside one season. Weekly views and allocation
+       * read `sessions` by week, so that season is laid out here rather than
+       * waiting for a separate generate.
        */
-      const { thisWeekId, weeks, horizon, error } = await saveRecurringTimetableSlot(input)
+      if (!selectedSeason) {
+        setBusy(false)
+        setActionError('Pick a season. Weekly classes only run inside a defined term.')
+        return
+      }
+      const { thisWeekId, weeks, seasonName, error } = await saveRecurringTimetableSlot(
+        input,
+        selectedSeason,
+      )
       setBusy(false)
       if (error && !thisWeekId) {
         setActionError(error)
@@ -376,23 +407,18 @@ export default function ClassBoard() {
       }
       setSelectedOccId(thisWeekId)
       setActionNote(
-        `${what} now runs every week. ${recurringSpanNote(weeks, week.label, horizon)}.${error ? ` ${error}` : ''}`,
+        `${what} now runs through ${seasonName}. ${recurringSpanNote(weeks, week.label, seasonName)}.${error ? ` ${error}` : ''}`,
       )
       return
     }
 
-    const weeks = recurrence === 'once' ? 1 : repeatWeeks
-    const { created, error } = await createSessionSeries(input, weeks)
+    const { error } = await createSessionSeries(input, 1)
     setBusy(false)
     if (error) {
       setActionError(error)
       return
     }
-    setActionNote(
-      created === 1
-        ? `Added ${what} to ${week.label}.`
-        : `Added ${what} for ${created} weeks from ${week.label}.`,
-    )
+    setActionNote(`Added ${what} to ${week.label}.`)
   }
 
   const removeSession = async (occ: ClassOccurrence) => {
@@ -506,15 +532,20 @@ export default function ClassBoard() {
 
     setBusy(true)
     const stopped = await deactivateTimetableSlot(slot.id)
+    const seasonForMove =
+      selectedSeason ??
+      seasonsState.seasons.find((s) => seasonOverlapsWeek(s, live.weekStart))
     const moved = stopped
-      ? { error: stopped, weeks: 0 }
-      : await saveRecurringTimetableSlot(sessionInput(occ, edit))
+      ? { error: stopped, weeks: 0, seasonName: '' }
+      : seasonForMove
+        ? await saveRecurringTimetableSlot(sessionInput(occ, edit), seasonForMove)
+        : { error: 'Pick a season to lay the moved class across.', weeks: 0, seasonName: '' }
     setBusy(false)
     setActionError(moved.error ?? null)
     if (!moved.error) {
       setActionNote(
         moved.weeks > 1
-          ? `Session moved, and its weekly repeat moved with it across ${moved.weeks} weeks.`
+          ? `Session moved, and its weekly repeat moved with it across ${moved.weeks} weeks of ${moved.seasonName}.`
           : 'Session moved, and its weekly repeat moved with it.',
       )
     }
@@ -524,8 +555,15 @@ export default function ClassBoard() {
   const makeSessionRepeat = async (occ: ClassOccurrence) => {
     setActionError(null)
     setActionNote(null)
+    if (!selectedSeason) {
+      setActionError('Pick a season under Add a session first.')
+      return
+    }
     setBusy(true)
-    const { weeks, horizon, error } = await saveRecurringTimetableSlot(sessionInput(occ))
+    const { weeks, seasonName, error } = await saveRecurringTimetableSlot(
+      sessionInput(occ),
+      selectedSeason,
+    )
     setBusy(false)
     if (error && weeks === 0) {
       setActionError(error)
@@ -533,49 +571,90 @@ export default function ClassBoard() {
     }
     const name = classTypeById(occ.classTypeId)?.name ?? occ.classTypeId
     setActionNote(
-      `${name} on ${occ.dayLabel} at ${occ.time} now runs every week. ${recurringSpanNote(weeks, week.label, horizon)}.${error ? ` ${error}` : ''}`,
+      `${name} on ${occ.dayLabel} at ${occ.time} now runs through ${seasonName}. ${recurringSpanNote(weeks, week.label, seasonName)}.${error ? ` ${error}` : ''}`,
     )
   }
 
   const stopSessionRepeat = async (occ: ClassOccurrence) => {
     const slot = recurringSlotFor(occ)
     if (!slot) return
-    if (!confirm(`Stop ${occ.dayLabel} ${occ.time} running every week?`)) return
+    await removeRecurringClass(slot)
+  }
+
+  /**
+   * Stop the standing slot and take its coming weeks off the calendar.
+   *
+   * Weeks that have already run are left alone: their rosters are the record of
+   * who attended and what they were charged, and undoing a class that was laid
+   * too far forward is no reason to erase that.
+   */
+  const removeRecurringClass = async (slot: LiveTimetableSlot) => {
+    const typeName = classTypeById(slot.classTypeId)?.name ?? slot.classTypeId
+    const sessions = await listSessionsForSlot(slot.id)
+    const booked = sessions.filter((s) => s.bookedCount > 0).length
+    const empty = sessions.length - booked
+    const confirmed = confirm(
+      `Remove ${typeName} on ${slot.dayLabel} at ${slot.time} from the coming weeks?\n\n` +
+        `${empty} session${empty === 1 ? '' : 's'} with nobody booked will be deleted` +
+        (booked
+          ? `, and ${booked} with bookings will be archived so attendance is kept.`
+          : '.') +
+        `\n\nWeeks that have already run are kept. It will also stop repeating.`,
+    )
+    if (!confirmed) return
+
     setActionError(null)
     setActionNote(null)
     setBusy(true)
-    const err = await deactivateTimetableSlot(slot.id)
-    setBusy(false)
-    if (err) {
-      setActionError(err)
+    const removed = await studioRemoveSlotSessions(slot.id)
+    if (removed.error && removed.deleted + removed.archived === 0) {
+      setBusy(false)
+      setActionError(removed.error)
       return
     }
+    const stopErr = await deactivateTimetableSlot(slot.id)
+    setBusy(false)
+    if (stopErr) {
+      setActionError(stopErr)
+      return
+    }
+    if (selectedOccId && sessions.some((s) => s.id === selectedOccId)) setSelectedOccId(null)
+    const summary = `${removed.deleted} deleted${removed.archived ? `, ${removed.archived} archived` : ''}`
     setActionNote(
-      'Stopped repeating. Sessions already on the calendar still run — remove them individually if they should not.',
+      removed.error
+        ? `Removed ${typeName} on ${slot.dayLabel} ${slot.time} from the coming weeks (${summary}). ${removed.error}`
+        : `Removed ${typeName} on ${slot.dayLabel} ${slot.time} from the coming weeks — ${summary}. Weeks already run were kept.`,
     )
   }
 
-  /** Lay an existing standing slot onto the weeks ahead, the same as a new weekly class. */
+  /** Lay an existing standing slot across the chosen season. */
   const fillRecurringSlot = async (slot: LiveTimetableSlot) => {
+    if (!selectedSeason) {
+      setActionError('Pick a season under Add a session first.')
+      return
+    }
     const type = classTypeById(slot.classTypeId)
     setActionError(null)
     setActionNote(null)
     setBusy(true)
-    const { weeks, horizon, error } = await populateSlotAcrossWeeks({
-      classTypeId: slot.classTypeId,
-      className: type?.name ?? slot.classTypeId,
-      cap: type?.cap ?? 0,
-      dayLabel: slot.dayLabel,
-      time: slot.time,
-      weekStart: live.weekStart,
-    })
+    const { weeks, seasonName, error } = await populateSlotAcrossWeeks(
+      {
+        classTypeId: slot.classTypeId,
+        className: type?.name ?? slot.classTypeId,
+        cap: type?.cap ?? 0,
+        dayLabel: slot.dayLabel,
+        time: slot.time,
+        weekStart: live.weekStart,
+      },
+      selectedSeason,
+    )
     setBusy(false)
     if (error && weeks === 0) {
       setActionError(error)
       return
     }
     setActionNote(
-      `${type?.name ?? slot.classTypeId} on ${slot.dayLabel} at ${slot.time}: ${recurringSpanNote(weeks, week.label, horizon)}.${error ? ` ${error}` : ''}`,
+      `${type?.name ?? slot.classTypeId} on ${slot.dayLabel} at ${slot.time}: ${recurringSpanNote(weeks, week.label, seasonName)}.${error ? ` ${error}` : ''}`,
     )
   }
 
@@ -1347,16 +1426,18 @@ export default function ClassBoard() {
                     disabled={busy}
                     onClick={() => void stopSessionRepeat(selectedOcc)}
                   >
-                    Stop repeating
+                    Stop repeating and clear coming weeks
                   </button>
                 ) : (
                   <button
                     type="button"
                     className="btn primary"
-                    disabled={busy}
+                    disabled={busy || !selectedSeason}
                     onClick={() => void makeSessionRepeat(selectedOcc)}
                   >
-                    Make it repeat every week
+                    {selectedSeason
+                      ? `Repeat weekly through ${selectedSeason.name}`
+                      : 'Repeat weekly (pick a season)'}
                   </button>
                 )}
                 <label className="field">
@@ -1432,40 +1513,49 @@ export default function ClassBoard() {
                 onChange={(e) => setRecurrence(e.target.value as Recurrence)}
               >
                 <option value="once">This week only</option>
-                <option value="weeks">For a set number of weeks</option>
-                <option value="ongoing">Every week, ongoing</option>
+                <option value="season">Every week of a season</option>
               </select>
             </label>
-            {recurrence === 'weeks' ? (
-              <label className="field">
-                Number of weeks
-                <input
-                  type="number"
-                  min={1}
-                  max={52}
-                  value={repeatWeeks}
-                  onChange={(e) => setRepeatWeeks(Number(e.target.value))}
-                />
-              </label>
-            ) : null}
+            {/* Shown whichever way Repeats is set, because the recurring list's
+                fill action and "Make it repeat" both read this season too. */}
+            <label className="field">
+              Season
+              <select
+                value={selectedSeasonId}
+                disabled={!seasonsState.seasons.length}
+                onChange={(e) => setSelectedSeasonId(e.target.value)}
+              >
+                {!seasonsState.seasons.length ? <option value="">No seasons defined</option> : null}
+                {seasonsState.seasons.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name} · {s.startDate} → {s.endDate}
+                  </option>
+                ))}
+              </select>
+            </label>
             <p className="hint">
-              {recurrence === 'ongoing'
-                ? 'Adds it to the recurring weekly timetable and creates sessions for the rest of the term, skipping holiday closures. Future weeks can be opened, searched and allocated immediately.'
-                : recurrence === 'weeks'
-                  ? `Creates ${repeatWeeks} session${repeatWeeks === 1 ? '' : 's'}, one a week from ${week.label}. Holiday closures are not applied to a fixed run — use "ongoing" if the class should follow the term calendar.`
-                  : 'A one-off. Nothing is added to the recurring timetable.'}
+              {recurrence === 'season'
+                ? seasonsState.seasons.length
+                  ? 'Adds it to the recurring weekly timetable and creates every session that season implies, skipping holiday closures. Those weeks can be opened, searched and allocated straight away, and the class stops when the season does.'
+                  : 'A weekly class runs inside a season, so there is nothing to bound it to yet. Define one under Seasons & holidays first.'
+                : 'A one-off. Nothing is added to the recurring timetable.'}
             </p>
-            <button type="button" className="btn primary" disabled={busy} onClick={addSession}>
-              {recurrence === 'ongoing' ? 'Add weekly class' : 'Add to calendar'}
+            <button
+              type="button"
+              className="btn primary"
+              disabled={busy || (recurrence === 'season' && !selectedSeason)}
+              onClick={addSession}
+            >
+              {recurrence === 'season' ? 'Add weekly class' : 'Add to calendar'}
             </button>
           </div>
 
           <div className="remove-occ-list">
             <h3>Recurring weekly classes</h3>
             <p className="hint">
-              The standing timetable. Adding one also creates the sessions for following weeks.
-              Stopping one leaves every session already created alone — remove those individually if
-              they should not run.
+              The standing timetable. Filling lays a class across the season picked above, from the
+              week on screen forward. Removing takes it off the coming weeks and stops it repeating —
+              weeks that have already run are kept, along with their rosters.
             </p>
             {!recurringSlots.length ? (
               <p className="hint">Nothing recurring yet.</p>
@@ -1480,23 +1570,18 @@ export default function ClassBoard() {
                     <button
                       type="button"
                       className="btn ghost"
-                      disabled={busy}
+                      disabled={busy || !selectedSeason}
                       onClick={() => void fillRecurringSlot(slot)}
                     >
-                      Fill coming weeks
+                      {selectedSeason ? `Fill ${selectedSeason.name}` : 'Fill this season'}
                     </button>
                     <button
                       type="button"
                       className="btn ghost"
                       disabled={busy}
-                      onClick={async () => {
-                        if (!confirm(`Stop ${slot.dayLabel} ${slot.time} running every week?`)) {
-                          return
-                        }
-                        setActionError(await deactivateTimetableSlot(slot.id))
-                      }}
+                      onClick={() => void removeRecurringClass(slot)}
                     >
-                      Stop recurring
+                      Remove from coming weeks
                     </button>
                   </li>
                 ))}

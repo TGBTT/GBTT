@@ -18,6 +18,7 @@ import {
   collection,
   doc,
   getDoc,
+  getDocs,
   onSnapshot,
   query,
   setDoc,
@@ -27,7 +28,7 @@ import {
   type DocumentData,
 } from 'firebase/firestore'
 import { getFirestoreDb } from './init'
-import { listSeasons, seasonTeachingDays } from './liveSeasons'
+import { seasonTeachingDays, type LiveSeason } from './liveSeasons'
 import { WEEKDAYS } from '../fitnessStudio'
 import type {
   ClassOccurrence,
@@ -229,9 +230,6 @@ export interface NewSessionInput {
   seasonId?: string
 }
 
-/** How far an ongoing class is laid out when no season covers the weeks ahead. */
-export const ONGOING_HORIZON_WEEKS = 16
-
 /**
  * Add a one-off session to a week.
  *
@@ -403,60 +401,62 @@ export async function createSessionSeries(
 export interface PopulateSlotResult {
   weeks: number
   thisWeekId: string | null
-  /** `season` when teaching days came from a defined term; `fallback` when a horizon was used. */
-  horizon: 'season' | 'fallback'
+  seasonName: string
   error: string | null
 }
 
 /**
- * Materialise a recurring slot into bookable sessions for the weeks ahead.
+ * Materialise a recurring slot into bookable sessions for one season.
  *
  * Weekly views and weekly locks both read `sessions` by week, so a standing
- * slot with no instances is invisible on every following week. Covering
- * seasons are preferred because they already know term dates and closures; if
- * none overlap the weeks ahead, the next `ONGOING_HORIZON_WEEKS` are written
- * so the class can still be searched and allocated.
- *
- * The week the class was added from is always included, even if that day is
- * inside a closure — the admin is looking at that week and asked for it.
+ * slot with no instances is invisible on every following week. Only the
+ * chosen season is written, closures skipped, and weeks before the one being
+ * viewed are left alone.
  */
-export async function populateSlotAcrossWeeks(input: NewSessionInput): Promise<PopulateSlotResult> {
-  const empty: PopulateSlotResult = { weeks: 0, thisWeekId: null, horizon: 'fallback', error: null }
+export async function populateSlotAcrossWeeks(
+  input: NewSessionInput,
+  season: LiveSeason,
+): Promise<PopulateSlotResult> {
+  const empty: PopulateSlotResult = {
+    weeks: 0,
+    thisWeekId: null,
+    seasonName: season.name,
+    error: null,
+  }
+  if (!season.startDate || !season.endDate) {
+    return { ...empty, error: 'This season has no start and end date set.' }
+  }
   const fromDay = sessionDayKey(input.weekStart, input.dayLabel)
   if (!fromDay) return { ...empty, error: `Unsupported day "${input.dayLabel}".` }
 
-  const seasons = await listSeasons()
-  const covering = seasons.filter((s) => s.endDate >= fromDay)
-  const thisSeason = covering.find((s) => s.startDate <= fromDay && s.endDate >= fromDay)
+  const weekStarts = [
+    ...new Set(
+      seasonTeachingDays(season)
+        .filter((day) => day.dayLabel === input.dayLabel && day.day >= fromDay)
+        .map((day) => day.weekStart),
+    ),
+  ].sort((a, b) => a.localeCompare(b))
 
-  const byWeek = new Map<string, string | undefined>()
-  byWeek.set(input.weekStart, thisSeason?.id)
-
-  for (const season of covering) {
-    for (const day of seasonTeachingDays(season)) {
-      if (day.dayLabel !== input.dayLabel) continue
-      if (day.day < fromDay) continue
-      byWeek.set(day.weekStart, season.id)
+  if (!weekStarts.length) {
+    return {
+      ...empty,
+      error: `No ${input.dayLabel} teaching days left in ${season.name}.`,
     }
   }
 
-  const horizon: PopulateSlotResult['horizon'] = covering.length > 0 ? 'season' : 'fallback'
-  if (horizon === 'fallback') {
-    for (let i = 1; i < ONGOING_HORIZON_WEEKS; i += 1) {
-      byWeek.set(shiftWeekStart(input.weekStart, i), undefined)
-    }
-  }
-
-  const weeks = [...byWeek.entries()].sort(([a], [b]) => a.localeCompare(b))
   let written = 0
   let thisWeekId: string | null = null
-  for (const [weekStart, seasonId] of weeks) {
-    const { id, error } = await createLiveSession({ ...input, weekStart, seasonId })
+  for (const weekStart of weekStarts) {
+    const { id, error } = await createLiveSession({
+      ...input,
+      weekStart,
+      seasonId: season.id,
+    })
     if (error) {
       return {
         weeks: written,
         thisWeekId,
-        horizon,
+        seasonName: season.name,
         error: written
           ? `Added ${written} week${written === 1 ? '' : 's'}, then stopped: ${error}`
           : error,
@@ -464,8 +464,9 @@ export async function populateSlotAcrossWeeks(input: NewSessionInput): Promise<P
     }
     written += 1
     if (weekStart === input.weekStart) thisWeekId = id
+    else if (!thisWeekId) thisWeekId = id
   }
-  return { weeks: written, thisWeekId, horizon, error: null }
+  return { weeks: written, thisWeekId, seasonName: season.name, error: null }
 }
 
 /**
@@ -516,19 +517,52 @@ export async function saveTimetableSlot(
  */
 export async function saveRecurringTimetableSlot(
   input: NewSessionInput,
+  season: LiveSeason,
 ): Promise<PopulateSlotResult & { slotId: string | null }> {
   const slot = await saveTimetableSlot(input)
   if (slot.error) {
-    return { slotId: null, thisWeekId: null, weeks: 0, horizon: 'fallback', error: slot.error }
+    return {
+      slotId: null,
+      thisWeekId: null,
+      weeks: 0,
+      seasonName: season.name,
+      error: slot.error,
+    }
   }
-  const populated = await populateSlotAcrossWeeks(input)
-  return {
-    slotId: slot.slotId,
-    thisWeekId: populated.thisWeekId,
-    weeks: populated.weeks,
-    horizon: populated.horizon,
-    error: populated.error,
-  }
+  const populated = await populateSlotAcrossWeeks(input, season)
+  return { slotId: slot.slotId, ...populated }
+}
+
+export interface SlotSessionRef {
+  id: string
+  weekStart: string
+  bookedCount: number
+}
+
+/**
+ * Concrete sessions filed under a standing slot, already-cancelled ones omitted.
+ *
+ * Defaults to the current week onwards. A week that has already run carries
+ * attendance and billing history, so bulk removal must never reach back into
+ * it — pass an earlier `fromWeekStart` only to inspect, never to delete.
+ */
+export async function listSessionsForSlot(
+  slotId: string,
+  fromWeekStart: string = currentWeekStart(),
+): Promise<SlotSessionRef[]> {
+  const db = getFirestoreDb()
+  if (!db) return []
+
+  const snap = await getDocs(query(collection(db, 'sessions'), where('slotId', '==', slotId)))
+  return snap.docs
+    .filter((d) => d.data().cancelled !== true)
+    .map((d) => ({
+      id: d.id,
+      weekStart: String(d.data().weekStart ?? ''),
+      bookedCount: Number(d.data().bookedCount ?? 0),
+    }))
+    .filter((s) => s.weekStart >= fromWeekStart)
+    .sort((a, b) => a.weekStart.localeCompare(b.weekStart))
 }
 
 /** Stop a recurring slot without touching sessions already generated from it. */
