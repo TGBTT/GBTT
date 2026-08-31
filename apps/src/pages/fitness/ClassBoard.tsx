@@ -93,7 +93,7 @@ const EQUIPMENT_ITEMS = [
 
 const ALL_TABS: { id: Tab; label: string; adminOnly?: boolean }[] = [
   { id: 'schedule', label: 'Schedule' },
-  { id: 'sessions', label: 'Add & remove sessions', adminOnly: true },
+  { id: 'sessions', label: 'Add & remove sessions' },
   { id: 'seasons', label: 'Seasons & holidays', adminOnly: true },
   { id: 'members', label: 'Members & payments' },
   { id: 'clients', label: 'Add client accounts', adminOnly: true },
@@ -425,7 +425,7 @@ export default function ClassBoard() {
             <h2>Week calendar</h2>
             <p className="hint">
               Same Mon–Fri grid as member booking. Select a session badge to edit time, day, class, or
-              instructor{role === 'admin' ? ' — or add a new session below' : ''}.
+              instructor{staff ? ' — or add a new session below' : ''}.
             </p>
             {usingLive ? (
               <WeekNavigator
@@ -641,7 +641,7 @@ export default function ClassBoard() {
                     </select>
                   </label>
                 </div>
-                {role === 'admin' ? (
+                {staff ? (
                   <p className="hint">
                     Sessions are added and removed from the{' '}
                     <button
@@ -941,7 +941,7 @@ export default function ClassBoard() {
 
       {tab === 'seasons' && role === 'admin' && <SeasonsPanel />}
 
-      {tab === 'sessions' && role === 'admin' && (
+      {tab === 'sessions' && staff && (
         <section className="yacht-panel app-enter app-section">
           <h2>Add &amp; remove sessions</h2>
           {actionError ? <p className="form-error">{actionError}</p> : null}

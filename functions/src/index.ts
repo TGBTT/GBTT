@@ -1595,7 +1595,11 @@ export const unlockWeeklySlot = onCall(async (request) => {
  * Rules forbid client deletes of sessions so this invariant cannot be bypassed.
  */
 export const removeSession = onCall(async (request) => {
-  const authCtx = requireAdmin(request)
+  // Trainers cover the timetable when Tom is away, which is precisely when a
+  // session needs cancelling, so this is staff rather than admin. Removal is
+  // still not destructive: a session with anyone on the roster is archived,
+  // never deleted, so a trainer cannot lose attendance or billing history.
+  const authCtx = requireStaff(request)
 
   const sessionId = String(request.data?.sessionId ?? '').trim()
   const reason = String(request.data?.reason ?? '').trim()
