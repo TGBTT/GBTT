@@ -77,7 +77,7 @@ const SLOTS = [
 const DAY_INDEX = { Mon: 0, Tue: 1, Wed: 2, Thu: 3, Fri: 4 }
 
 function parseArgs(argv) {
-  const args = { weeks: 8, dryRun: false }
+  const args = { weeks: 8, dryRun: false, skipSlots: false }
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i]
     switch (arg) {
@@ -89,6 +89,9 @@ function parseArgs(argv) {
         break
       case '--dry-run':
         args.dryRun = true
+        break
+      case '--skip-slots':
+        args.skipSlots = true
         break
       case '--help':
       case '-h':
@@ -168,6 +171,8 @@ Seed the class catalog, timetable slots and weekly sessions.
   --weeks <n>    Weeks of sessions to generate from this Monday (default: 8).
                  Use 0 to seed prices, classes and slots only, leaving the
                  timetable empty for a season to generate.
+  --skip-slots   Do not write the recurring timetable template. Use when the
+                 admin will build the week themselves. Implies no sessions.
   --dry-run      Print what would be written and exit.
 `)
     return
@@ -179,6 +184,12 @@ Seed the class catalog, timetable slots and weekly sessions.
   // come from an admin defining a season and generating it.
   if (!Number.isInteger(args.weeks) || args.weeks < 0) {
     throw new Error('--weeks must be zero or a positive whole number.')
+  }
+
+  // Sessions are generated from the slot template, so keeping the slots out
+  // while still asking for weeks of sessions would be contradictory.
+  if (args.skipSlots) {
+    args.weeks = 0
   }
 
   const capById = new Map(CLASS_TYPES.map((c) => [c.id, c.cap]))
@@ -228,7 +239,7 @@ Seed the class catalog, timetable slots and weekly sessions.
   }
 
   console.log(`Class types : ${CLASS_TYPES.length}`)
-  console.log(`Slots       : ${SLOTS.length}`)
+  console.log(`Slots       : ${args.skipSlots ? '0 (skipped)' : SLOTS.length}`)
   console.log(`Sessions    : ${planned.length} (${args.weeks} weeks from ${dateKey(monday)})`)
 
   if (args.dryRun) {
@@ -279,7 +290,7 @@ Seed the class catalog, timetable slots and weekly sessions.
   }
   console.log('Wrote pricing plans.')
 
-  for (const slot of SLOTS) {
+  for (const slot of args.skipSlots ? [] : SLOTS) {
     await db.doc(`timetableSlots/${slotId(slot)}`).set(
       {
         slotId: slotId(slot),
@@ -293,7 +304,7 @@ Seed the class catalog, timetable slots and weekly sessions.
       { merge: true },
     )
   }
-  console.log('Wrote timetable slots.')
+  console.log(args.skipSlots ? 'Skipped timetable slots.' : 'Wrote timetable slots.')
 
   let created = 0
   let updated = 0
