@@ -1052,6 +1052,65 @@ export const markBillingPeriodPaid = onCall(async (request) => {
 })
 
 /** Admin creates a complimentary guest pass and emails the code via Apps Script. */
+/**
+ * Emails every active member.
+ *
+ * The recipient list is built here rather than sent from the browser: the
+ * admin console has no business holding the whole membership's addresses, and
+ * a client-supplied list would make this an open bulk mailer for anyone who
+ * could reach the callable.
+ *
+ * The outbox row is written only after Apps Script confirms the send, so the
+ * history cannot claim a delivery that did not happen.
+ */
+export const sendBroadcast = onCall({ secrets: [webhookSecret] }, async (request) => {
+  requireAdmin(request)
+
+  const subject = String(request.data?.subject ?? '').trim()
+  const body = String(request.data?.body ?? '').trim()
+  const testMode = Boolean(request.data?.testMode)
+
+  if (!subject || !body) {
+    throw new HttpsError('invalid-argument', 'Subject and body are required.')
+  }
+
+  const snap = await db.collection('users').where('profile.status', '==', 'active').get()
+  const recipients = snap.docs
+    .map((d) => String((d.data()?.profile ?? {}).email ?? '').trim())
+    .filter((email) => email.includes('@'))
+
+  if (!testMode && !recipients.length) {
+    throw new HttpsError('failed-precondition', 'No active members with an email address.')
+  }
+
+  const scriptResult = await callAppsScript(
+    { action: 'sendSubscriberBroadcast', subject, body, recipients, testMode },
+    webhookSecret.value(),
+    formEndpoint.value(),
+  )
+
+  if (!scriptResult.ok) {
+    console.error(`sendSubscriberBroadcast failed: ${scriptResult.error}`)
+    throw new HttpsError('internal', scriptResult.error ?? 'The broadcast failed to send.')
+  }
+
+  const recipientCount = Number(
+    (scriptResult.data as { recipientCount?: number } | undefined)?.recipientCount ??
+      recipients.length,
+  )
+
+  await db.collection('outbox').add({
+    subject,
+    body,
+    recipientCount,
+    testMode,
+    sentAt: FieldValue.serverTimestamp(),
+    actorUid: request.auth!.uid,
+  })
+
+  return { ok: true, recipientCount, testMode }
+})
+
 export const createGuestPass = onCall({ secrets: [webhookSecret] }, async (request) => {
   requireAdmin(request)
 

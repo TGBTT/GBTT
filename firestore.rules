@@ -77,6 +77,13 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // Exercises are referenced by class types and shown on the public class
+    // pages, so they read as widely as the classes that list them.
+    match /exercises/{exerciseId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
     // —— Recurring timetable template ——
     match /timetableSlots/{slotId} {
       allow read: if true;
@@ -207,12 +214,11 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Sent broadcasts. Written by the sendBroadcast callable so the record
+    // reflects what Apps Script actually accepted, not what was attempted.
     match /outbox/{messageId} {
-      allow read, write: if isAdmin();
-    }
-
-    match /reminders/{reminderId} {
-      allow read, write: if isStaff();
+      allow read: if isAdmin();
+      allow write: if false;
     }
   }
 }

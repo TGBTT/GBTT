@@ -33,7 +33,25 @@ import {
   type SessionEdit,
 } from '@gbtt/shared/studio/firebase/liveSessions'
 import { savePricingPlan } from '@gbtt/shared/studio/firebase/livePricing'
+import {
+  addExercise,
+  archiveClassType,
+  createClassType,
+  deleteExercise,
+  renameExercise,
+  saveClassType,
+  toggleExercise,
+} from '@gbtt/shared/studio/firebase/liveClassTypes'
+import { saveSiteContent } from '@gbtt/shared/studio/firebase/liveSiteContent'
+import { saveSettings } from '@gbtt/shared/studio/firebase/liveSettings'
+import { subscribeOutbox, type LiveOutboxMessage } from '@gbtt/shared/studio/firebase/liveOutbox'
 import { useLivePricing } from '../../hooks/useLivePricing'
+import {
+  useLiveClassTypes,
+  useLiveExercises,
+  useLiveSettings,
+  useLiveSiteContent,
+} from '../../hooks/useLiveCatalog'
 import { AppOutsideShell } from '../../components/AppChrome'
 import { WeekSessionCalendar } from '../../components/WeekSessionCalendar'
 import { useLiveSessions, useSessionRoster, useWeekNavigation } from '../../hooks/useLiveSessions'
@@ -43,33 +61,13 @@ import { MembersPayments } from '../../components/MembersPayments'
 import { ClientAccounts } from '../../components/ClientAccounts'
 import {
   WEEKDAYS,
-  addExercise,
-  archiveClassType,
-  classTypeById,
-  createClassType,
-  deleteExercise,
   formatSessionAttending,
-  getClassTypes,
-  getEquipmentChecked,
-  getExercises,
-  getOutbox,
   getSessionRole,
   getSessionUser,
-  getSiteContent,
-  getTransferWindowHours,
   logout,
-  renameExercise,
-  sendSubscriberEmail,
   sessionIsFull,
-  setClassCap,
-  setEquipmentChecked,
-  setTransferWindowHours,
   spotsLeft,
   subscribeStore,
-  syncLabels,
-  toggleExercise,
-  updateClassType,
-  updateSiteContent,
   type ClassOccurrence,
   type ExerciseDisplay,
   type Weekday,
@@ -167,7 +165,7 @@ export default function ClassBoard() {
   const staff = role === 'admin' || role === 'trainer'
 
   const [tab, setTab] = useState<Tab>('schedule')
-  const [selectedTypeId, setSelectedTypeId] = useState(getClassTypes()[0]?.id ?? 'sweat')
+  const [selectedTypeId, setSelectedTypeId] = useState('')
   const [selectedOccId, setSelectedOccId] = useState<string | null>(null)
   const [newExercise, setNewExercise] = useState('')
   const [mailSubject, setMailSubject] = useState('GBTT timetable update')
@@ -177,27 +175,89 @@ export default function ClassBoard() {
   const [elevateUid, setElevateUid] = useState('')
   const [recurrence, setRecurrence] = useState<Recurrence>('once')
   const [repeatWeeks, setRepeatWeeks] = useState(10)
+  const [copyForwardWeeks, setCopyForwardWeeks] = useState(10)
   const [recurringSlots, setRecurringSlots] = useState<LiveTimetableSlot[]>([])
   useEffect(() => subscribeTimetableSlots(setRecurringSlots), [])
   const [remKind, setRemKind] = useState<ReminderKind>('ops')
   const [newOccDay, setNewOccDay] = useState<Weekday>('Mon')
   const [newOccTime, setNewOccTime] = useState('07:00')
   const [addMemberId, setAddMemberId] = useState('')
-  const [newClassId, setNewClassId] = useState('')
   const [newClassName, setNewClassName] = useState('')
+  const [newClassCap, setNewClassCap] = useState(16)
   const [renameExerciseId, setRenameExerciseId] = useState<string | null>(null)
   const [renameExerciseName, setRenameExerciseName] = useState('')
 
+  const catalog = useLiveClassTypes()
+  const exerciseState = useLiveExercises()
+  const siteContent = useLiveSiteContent()
+  const settingsState = useLiveSettings()
+  const [outbox, setOutbox] = useState<LiveOutboxMessage[]>([])
+  useEffect(() => subscribeOutbox(setOutbox), [])
+
   /** Ignores a blank name rather than letting an unnamed exercise through. */
-  const commitRename = (exerciseId: string) => {
+  const commitRename = async (exerciseId: string) => {
     const name = renameExerciseName.trim()
     if (!name) return
-    renameExercise(exerciseId, name)
+    setActionError(await renameExercise(exerciseId, name))
     setRenameExerciseId(null)
-    refresh()
   }
 
-  const classes = getClassTypes()
+  // Archived classes stay readable so historic sessions resolve, but they are
+  // not offered for new ones.
+  const classes = catalog.classTypes.filter((c) => c.active)
+  const classTypeById = (id: string) => catalog.classTypes.find((c) => c.id === id)
+
+  // The catalogue arrives after first render, so the detail panel adopts the
+  // first class once it does. Selecting again is left to the admin.
+  useEffect(() => {
+    setSelectedTypeId((current) => current || (classes[0]?.id ?? ''))
+  }, [classes])
+
+  /*
+   * Class-type copy is edited locally and written on blur.
+   *
+   * These were keystroke-by-keystroke writes against localStorage, which cost
+   * nothing. Against Firestore that is a write per character, and each one
+   * echoes back through the snapshot mid-typing and fights the cursor. The
+   * draft holds the in-progress value; blur commits it.
+   */
+  const [classDraft, setClassDraft] = useState<Partial<LiveClassType>>({})
+  useEffect(() => setClassDraft({}), [selectedTypeId])
+
+  /*
+   * Site copy uses uncontrolled inputs keyed on load state rather than a
+   * draft: there is one editor per field and nothing else writes them, so
+   * remounting when the document arrives is enough to show the stored value,
+   * and blur is the only time it needs saving.
+   */
+  const siteField = (key: keyof typeof site) => ({
+    key: `${key}-${siteContent.status}`,
+    defaultValue: site[key],
+    onBlur: async (e: { target: { value: string } }) => {
+      if (e.target.value === site[key]) return
+      setActionError(await saveSiteContent({ [key]: e.target.value }))
+    },
+  })
+
+  type ClassTextField =
+    | 'name'
+    | 'blurb'
+    | 'longDescription'
+    | 'warnings'
+    | 'restrictions'
+    | 'recommendations'
+    | 'whatToBring'
+
+  const classField = (key: ClassTextField) => ({
+    value: String(classDraft[key] ?? selected?.[key] ?? ''),
+    onChange: (e: { target: { value: string } }) =>
+      setClassDraft((draft) => ({ ...draft, [key]: e.target.value })),
+    onBlur: async () => {
+      const next = classDraft[key]
+      if (!selected || next === undefined || next === selected[key]) return
+      setActionError(await saveClassType(selected.id, { [key]: next }))
+    },
+  })
 
   // Firestore is the source of truth for the timetable, its counts and the
   // roster. An unconfigured build shows an empty week rather than seed numbers.
@@ -324,15 +384,13 @@ export default function ClassBoard() {
         : `Deleted ${label}.`,
     )
   }
-  const exercises = getExercises()
+  const exercises = exerciseState.exercises
   // Everyone on the roll, split by the role claim: clients to bill and screen
   // for risk, and the elevated few who can run the board in Tom's absence.
   const users = liveMembers.members.filter((u) => u.role === 'member')
   const team = liveMembers.members.filter((u) => u.role === 'trainer' || u.role === 'admin')
-  const site = getSiteContent()
-  const outbox = getOutbox()
-  const equipment = getEquipmentChecked()
-  const sync = useMemo(() => syncLabels(), [tab, selectedTypeId, tick])
+  const site = siteContent.content
+  const equipment = settingsState.settings.equipmentChecked
   const selected = classTypeById(selectedTypeId)
   const baseSelectedOcc = selectedOccId
     ? live.occurrences.find((o) => o.id === selectedOccId)
@@ -362,6 +420,107 @@ export default function ClassBoard() {
     )
     setBusy(false)
     if (err) setActionError(err)
+    return err
+  }
+
+  /*
+   * The recurring template is keyed by day, time and class rather than by
+   * session, so a slot is matched on those three fields instead of on
+   * `occ.slotId`, which is stale on a session that has since been moved.
+   */
+  const recurringSlotFor = (occ: ClassOccurrence) =>
+    recurringSlots.find(
+      (s) =>
+        s.dayLabel === occ.dayLabel && s.time === occ.time && s.classTypeId === occ.classTypeId,
+    )
+
+  const sessionInput = (occ: ClassOccurrence, edit: SessionEdit = {}) => {
+    const classTypeId = edit.classTypeId ?? occ.classTypeId
+    const type = classTypeById(classTypeId)
+    return {
+      classTypeId,
+      className: type?.name ?? classTypeId,
+      cap: type?.cap ?? occ.cap ?? 0,
+      dayLabel: edit.dayLabel ?? occ.dayLabel,
+      time: edit.time ?? occ.time,
+      weekStart: live.weekStart,
+      instructorId: occ.instructorId,
+    }
+  }
+
+  /**
+   * Edit the selected session, carrying its weekly repeat with it.
+   *
+   * Moving a session that repeats would otherwise leave the standing slot on
+   * the old day and time, so the next Generate sessions would put the class
+   * back where it used to be. The old slot is stopped and a new one written at
+   * the new day, time and class.
+   */
+  const editSelectedSession = async (occ: ClassOccurrence, edit: SessionEdit) => {
+    setActionNote(null)
+    const slot = recurringSlotFor(occ)
+    if (await saveSessionEdit(occ, edit)) return
+
+    const retimed =
+      edit.dayLabel !== undefined || edit.time !== undefined || edit.classTypeId !== undefined
+    if (!slot || !retimed) return
+
+    setBusy(true)
+    const stopped = await deactivateTimetableSlot(slot.id)
+    const moved = stopped ? { error: stopped } : await saveTimetableSlot(sessionInput(occ, edit))
+    setBusy(false)
+    setActionError(moved.error ?? null)
+    if (!moved.error) {
+      setActionNote('Session moved, and its weekly repeat moved with it.')
+    }
+  }
+
+  /** Promote a one-off into the standing weekly timetable. */
+  const makeSessionRepeat = async (occ: ClassOccurrence) => {
+    setActionError(null)
+    setActionNote(null)
+    setBusy(true)
+    const { error } = await saveTimetableSlot(sessionInput(occ))
+    setBusy(false)
+    if (error) {
+      setActionError(error)
+      return
+    }
+    setActionNote(
+      `${classTypeById(occ.classTypeId)?.name ?? occ.classTypeId} on ${occ.dayLabel} at ${occ.time} now runs every week — run Generate sessions in Seasons to lay it across the rest of the term, which skips holiday closures.`,
+    )
+  }
+
+  const stopSessionRepeat = async (occ: ClassOccurrence) => {
+    const slot = recurringSlotFor(occ)
+    if (!slot) return
+    if (!confirm(`Stop ${occ.dayLabel} ${occ.time} running every week?`)) return
+    setActionError(null)
+    setActionNote(null)
+    setBusy(true)
+    const err = await deactivateTimetableSlot(slot.id)
+    setBusy(false)
+    if (err) {
+      setActionError(err)
+      return
+    }
+    setActionNote(
+      'Stopped repeating. Sessions already on the calendar still run — remove them individually if they should not.',
+    )
+  }
+
+  /** Copy the selected session forward a fixed number of weeks. */
+  const repeatSessionForWeeks = async (occ: ClassOccurrence, weeks: number) => {
+    setActionError(null)
+    setActionNote(null)
+    setBusy(true)
+    const { created, error } = await createSessionSeries(sessionInput(occ), weeks)
+    setBusy(false)
+    if (error) {
+      setActionError(error)
+      return
+    }
+    setActionNote(`Copied ${occ.dayLabel} ${occ.time} across ${created} weeks from ${week.label}.`)
   }
 
   const tabs = ALL_TABS.filter((t) => !t.adminOnly || role === 'admin')
@@ -721,82 +880,31 @@ export default function ClassBoard() {
                   <>
                     <label className="field">
                       Name
-                      <input
-                        value={selected.name}
-                        onChange={(e) => {
-                          updateClassType(selected.id, { name: e.target.value })
-                          refresh()
-                        }}
-                      />
+                      <input {...classField('name')} />
                     </label>
                     <label className="field">
                       Short blurb
-                      <input
-                        value={selected.blurb}
-                        onChange={(e) => {
-                          updateClassType(selected.id, { blurb: e.target.value })
-                          refresh()
-                        }}
-                      />
+                      <input {...classField('blurb')} />
                     </label>
                     <label className="field">
                       Public description
-                      <textarea
-                        rows={4}
-                        value={selected.longDescription}
-                        onChange={(e) => {
-                          updateClassType(selected.id, { longDescription: e.target.value })
-                          refresh()
-                        }}
-                      />
+                      <textarea rows={4} {...classField('longDescription')} />
                     </label>
                     <label className="field">
                       Warnings
-                      <textarea
-                        rows={2}
-                        value={selected.warnings}
-                        disabled={role !== 'admin'}
-                        onChange={(e) => {
-                          updateClassType(selected.id, { warnings: e.target.value })
-                          refresh()
-                        }}
-                      />
+                      <textarea rows={2} {...classField('warnings')} />
                     </label>
                     <label className="field">
                       Restrictions
-                      <textarea
-                        rows={2}
-                        value={selected.restrictions}
-                        disabled={role !== 'admin'}
-                        onChange={(e) => {
-                          updateClassType(selected.id, { restrictions: e.target.value })
-                          refresh()
-                        }}
-                      />
+                      <textarea rows={2} {...classField('restrictions')} />
                     </label>
                     <label className="field">
                       Recommendations
-                      <textarea
-                        rows={2}
-                        value={selected.recommendations}
-                        disabled={role !== 'admin'}
-                        onChange={(e) => {
-                          updateClassType(selected.id, { recommendations: e.target.value })
-                          refresh()
-                        }}
-                      />
+                      <textarea rows={2} {...classField('recommendations')} />
                     </label>
                     <label className="field">
                       What to bring
-                      <textarea
-                        rows={2}
-                        value={selected.whatToBring}
-                        disabled={role !== 'admin'}
-                        onChange={(e) => {
-                          updateClassType(selected.id, { whatToBring: e.target.value })
-                          refresh()
-                        }}
-                      />
+                      <textarea rows={2} {...classField('whatToBring')} />
                     </label>
                   </>
                 ) : null}
@@ -806,11 +914,13 @@ export default function ClassBoard() {
                     type="number"
                     min={4}
                     max={27}
-                    value={selected.cap}
+                    defaultValue={selected.cap}
+                    key={`cap-${selected.id}`}
                     disabled={role !== 'admin'}
-                    onChange={(e) => {
-                      setClassCap(selected.id, Number(e.target.value))
-                      refresh()
+                    onBlur={async (e) => {
+                      const cap = Number(e.target.value)
+                      if (cap === selected.cap) return
+                      setActionError(await saveClassType(selected.id, { cap }))
                     }}
                   />
                 </label>
@@ -826,9 +936,8 @@ export default function ClassBoard() {
                           <input
                             type="checkbox"
                             checked={on}
-                            onChange={() => {
-                              toggleExercise(selected.id, ex.id)
-                              refresh()
+                            onChange={async () => {
+                              setActionError(await toggleExercise(selected, ex.id))
                             }}
                           />
                           {renameExerciseId === ex.id ? (
@@ -838,7 +947,7 @@ export default function ClassBoard() {
                               autoFocus
                               onChange={(e) => setRenameExerciseName(e.target.value)}
                               onKeyDown={(e) => {
-                                if (e.key === 'Enter') commitRename(ex.id)
+                                if (e.key === 'Enter') void commitRename(ex.id)
                                 if (e.key === 'Escape') setRenameExerciseId(null)
                               }}
                             />
@@ -855,7 +964,7 @@ export default function ClassBoard() {
                                   className="icon-btn"
                                   title="Save name"
                                   aria-label={`Save name for ${ex.name}`}
-                                  onClick={() => commitRename(ex.id)}
+                                  onClick={() => void commitRename(ex.id)}
                                 >
                                   <TickIcon />
                                 </button>
@@ -888,7 +997,7 @@ export default function ClassBoard() {
                                   className="icon-btn danger"
                                   title="Delete"
                                   aria-label={`Delete ${ex.name}`}
-                                  onClick={() => {
+                                  onClick={async () => {
                                     // Named in the prompt: the icons sit in a
                                     // list of near-identical rows, so "are you
                                     // sure?" alone would not tell an admin
@@ -897,8 +1006,9 @@ export default function ClassBoard() {
                                       `Delete "${ex.name}"? It will be removed from every class type that uses it.`,
                                     )
                                     if (!ok) return
-                                    deleteExercise(ex.id)
-                                    refresh()
+                                    setActionError(
+                                      await deleteExercise(ex.id, catalog.classTypes),
+                                    )
                                   }}
                                 >
                                   <CrossIcon />
@@ -921,13 +1031,13 @@ export default function ClassBoard() {
                     <button
                       type="button"
                       className="btn ghost"
-                      onClick={() => {
-                        const added = addExercise(newExercise)
-                        if (added) {
-                          toggleExercise(selected.id, added.id)
-                          setNewExercise('')
-                          refresh()
-                        }
+                      onClick={async () => {
+                        const added = await addExercise(newExercise)
+                        setActionError(added.error)
+                        if (added.error) return
+                        // Added from within a class, so it joins that class.
+                        setActionError(await toggleExercise(selected, added.id))
+                        setNewExercise('')
                       }}
                     >
                       + Add
@@ -938,25 +1048,39 @@ export default function ClassBoard() {
               {role === 'admin' ? (
                 <section>
                   <h2>Add class type</h2>
+                  {/* The id is derived from the name rather than typed: it is
+                      referenced by every session, so a typo here would be
+                      permanent, and nobody outside this screen ever sees it. */}
                   <div className="add-exercise-row">
                     <input
-                      placeholder="id (e.g. pilates)"
-                      value={newClassId}
-                      onChange={(e) => setNewClassId(e.target.value)}
-                    />
-                    <input
-                      placeholder="Display name"
+                      placeholder="Class name"
                       value={newClassName}
                       onChange={(e) => setNewClassName(e.target.value)}
+                    />
+                    <input
+                      type="number"
+                      min={4}
+                      max={27}
+                      aria-label="Capacity"
+                      value={newClassCap}
+                      onChange={(e) => setNewClassCap(Number(e.target.value))}
                     />
                     <button
                       type="button"
                       className="btn ghost"
-                      onClick={() => {
-                        createClassType({ id: newClassId, name: newClassName })
-                        setNewClassId('')
+                      disabled={busy || !newClassName.trim()}
+                      onClick={async () => {
+                        setBusy(true)
+                        const created = await createClassType({
+                          name: newClassName,
+                          cap: newClassCap,
+                        })
+                        setBusy(false)
+                        setActionError(created.error)
+                        if (created.error) return
+                        setActionNote(`Added ${newClassName.trim()}.`)
                         setNewClassName('')
-                        refresh()
+                        setSelectedTypeId(created.id)
                       }}
                     >
                       Add class
@@ -965,9 +1089,17 @@ export default function ClassBoard() {
                   <button
                     type="button"
                     className="btn ghost"
-                    onClick={() => {
-                      archiveClassType(selected.id)
-                      refresh()
+                    disabled={busy}
+                    onClick={async () => {
+                      const ok = window.confirm(
+                        `Archive "${selected.name}"? It stops being offered for new sessions, and past sessions keep it.`,
+                      )
+                      if (!ok) return
+                      setBusy(true)
+                      const err = await archiveClassType(selected.id)
+                      setBusy(false)
+                      setActionError(err)
+                      if (!err) setActionNote(`Archived ${selected.name}.`)
                     }}
                   >
                     Archive this class
@@ -984,20 +1116,17 @@ export default function ClassBoard() {
                     <input
                       type="checkbox"
                       checked={equipment.includes(item.id)}
-                      onChange={() => {
+                      onChange={async () => {
                         const next = equipment.includes(item.id)
                           ? equipment.filter((x) => x !== item.id)
                           : [...equipment, item.id]
-                        setEquipmentChecked(next)
-                        refresh()
+                        setActionError(await saveSettings({ equipmentChecked: next }))
                       }}
                     />
                     {item.label}
                   </label>
                 ))}
               </section>
-              <p className="sync-chip">{sync.calendar}</p>
-              <p className="sync-chip">{sync.firebase}</p>
             </aside>
           )}
         </div>
@@ -1022,6 +1151,171 @@ export default function ClassBoard() {
             onReset={week.resetWeek}
             disabled={busy || live.status === 'loading'}
           />
+
+          <div className="remove-occ-list">
+            <h3>Week calendar</h3>
+            <p className="hint">
+              What {week.label} looks like right now. Select a badge to load that session&apos;s
+              class, day, and time into the form below.
+            </p>
+            {live.status === 'loading' ? (
+              <p className="hint">Loading sessions for {week.label}…</p>
+            ) : null}
+            {live.status === 'error' ? (
+              <p className="form-error">Could not load the timetable: {live.error}</p>
+            ) : null}
+            {live.status === 'ready' && live.occurrences.length === 0 ? (
+              <p className="hint">Nothing scheduled yet — add the first session below.</p>
+            ) : (
+              <WeekSessionCalendar
+                byDay={byDay}
+                selectedId={selectedOccId}
+                onSelect={(id) => {
+                  setSelectedOccId(id)
+                  const o = live.occurrences.find((x) => x.id === id)
+                  if (!o) return
+                  setSelectedTypeId(o.classTypeId)
+                  setNewOccDay(o.dayLabel as Weekday)
+                  setNewOccTime(o.time)
+                }}
+                mode="admin"
+              />
+            )}
+          </div>
+
+          {selectedOcc ? (
+            <div className="add-occ-row">
+              <h3>
+                Edit {classTypeById(selectedOcc.classTypeId)?.name ?? selectedOcc.classTypeId} ·{' '}
+                {selectedOcc.dayLabel} {selectedOcc.time}
+              </h3>
+              <p className="hint">
+                {formatSessionAttending(selectedOcc)}.{' '}
+                {recurringSlotFor(selectedOcc)
+                  ? 'This slot runs every week — moving it moves the weekly repeat too.'
+                  : 'A one-off in this week only.'}
+              </p>
+              <div className="admin-edit-grid">
+                <label className="field">
+                  Day
+                  <select
+                    value={selectedOcc.dayLabel}
+                    disabled={role !== 'admin' || busy}
+                    onChange={(e) => {
+                      void editSelectedSession(selectedOcc, { dayLabel: e.target.value })
+                    }}
+                  >
+                    {WEEKDAYS.map((d) => (
+                      <option key={d} value={d}>
+                        {d}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field">
+                  Time
+                  <input
+                    type="time"
+                    value={selectedOcc.time}
+                    disabled={role !== 'admin' || busy}
+                    onChange={(e) => {
+                      if (!e.target.value) return
+                      void editSelectedSession(selectedOcc, { time: e.target.value })
+                    }}
+                  />
+                </label>
+                <label className="field">
+                  Class
+                  <select
+                    value={selectedOcc.classTypeId}
+                    disabled={role !== 'admin' || busy}
+                    onChange={(e) => {
+                      const nextType = classTypeById(e.target.value)
+                      setSelectedTypeId(e.target.value)
+                      void editSelectedSession(selectedOcc, {
+                        classTypeId: e.target.value,
+                        className: nextType?.name,
+                        cap: nextType?.cap,
+                      })
+                    }}
+                  >
+                    {classes.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field">
+                  Instructor / cover
+                  <select
+                    value={selectedOcc.instructorId}
+                    disabled={busy}
+                    onChange={(e) => {
+                      void saveSessionEdit(selectedOcc, { instructorId: e.target.value })
+                    }}
+                  >
+                    <option value="">Unassigned</option>
+                    {team.map((i) => (
+                      <option key={i.uid} value={i.uid}>
+                        {i.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              <div className="btn-row">
+                {recurringSlotFor(selectedOcc) ? (
+                  <button
+                    type="button"
+                    className="btn ghost"
+                    disabled={busy}
+                    onClick={() => void stopSessionRepeat(selectedOcc)}
+                  >
+                    Stop repeating
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="btn primary"
+                    disabled={busy}
+                    onClick={() => void makeSessionRepeat(selectedOcc)}
+                  >
+                    Make it repeat every week
+                  </button>
+                )}
+                <label className="field">
+                  Copy forward (weeks)
+                  <input
+                    type="number"
+                    min={1}
+                    max={52}
+                    value={copyForwardWeeks}
+                    onChange={(e) => setCopyForwardWeeks(Number(e.target.value))}
+                  />
+                </label>
+                <button
+                  type="button"
+                  className="btn ghost"
+                  disabled={busy}
+                  onClick={() => void repeatSessionForWeeks(selectedOcc, copyForwardWeeks)}
+                >
+                  Copy forward
+                </button>
+                <button
+                  type="button"
+                  className="btn ghost"
+                  disabled={busy}
+                  onClick={() => removeSession(selectedOcc)}
+                >
+                  {selectedOcc.bookedCount > 0 ? 'Archive this session' : 'Delete this session'}
+                </button>
+                <button type="button" className="btn ghost" onClick={() => setSelectedOccId(null)}>
+                  Done
+                </button>
+              </div>
+            </div>
+          ) : null}
 
           <div className="add-occ-row">
             <h3>Add a session</h3>
@@ -1214,13 +1508,19 @@ export default function ClassBoard() {
             <input
               type="number"
               min={0}
-              value={getTransferWindowHours()}
-              onChange={(e) => {
-                setTransferWindowHours(Number(e.target.value))
-                refresh()
+              key={`window-${settingsState.status}`}
+              defaultValue={settingsState.settings.transferWindowHours}
+              onBlur={async (e) => {
+                const hours = Number(e.target.value)
+                if (hours === settingsState.settings.transferWindowHours) return
+                setActionError(await saveSettings({ transferWindowHours: hours }))
               }}
             />
           </label>
+          <p className="hint">
+            This is the value the booking functions enforce when a member tries to cancel or move a
+            class.
+          </p>
           <h3>Session pricing</h3>
           <p className="hint">
             Per-class rate for each commitment level. The drop-in rate is what a one-off booking is
@@ -1253,37 +1553,20 @@ export default function ClassBoard() {
           </ul>
           <label className="field">
             Payment instructions
-            <textarea
-              rows={3}
-              value={site.paymentInstructions}
-              onChange={(e) => {
-                updateSiteContent({ paymentInstructions: e.target.value })
-                refresh()
-              }}
-            />
+            <textarea rows={3} {...siteField('paymentInstructions')} />
           </label>
           <label className="field">
             Terms
-            <textarea
-              rows={4}
-              value={site.termsText}
-              onChange={(e) => {
-                updateSiteContent({ termsText: e.target.value })
-                refresh()
-              }}
-            />
+            <textarea rows={4} {...siteField('termsText')} />
           </label>
           <label className="field">
             Waiver
-            <textarea
-              rows={4}
-              value={site.waiverText}
-              onChange={(e) => {
-                updateSiteContent({ waiverText: e.target.value })
-                refresh()
-              }}
-            />
+            <textarea rows={4} {...siteField('waiverText')} />
           </label>
+          <p className="hint">
+            Members accept these when they join, and their acceptance is recorded against their
+            account, so keep the wording here current.
+          </p>
         </section>
       )}
 
@@ -1470,35 +1753,15 @@ export default function ClassBoard() {
           <p className="hint">Edits appear in the member app without touching code.</p>
           <label className="field">
             Hero blurb
-            <textarea
-              rows={2}
-              value={site.heroBlurb}
-              onChange={(e) => {
-                updateSiteContent({ heroBlurb: e.target.value })
-                refresh()
-              }}
-            />
+            <textarea rows={2} {...siteField('heroBlurb')} />
           </label>
           <label className="field">
             Schedule narrative
-            <textarea
-              rows={3}
-              value={site.scheduleNarrative}
-              onChange={(e) => {
-                updateSiteContent({ scheduleNarrative: e.target.value })
-                refresh()
-              }}
-            />
+            <textarea rows={3} {...siteField('scheduleNarrative')} />
           </label>
           <label className="field">
             Contact display line
-            <input
-              value={site.contactDisplay}
-              onChange={(e) => {
-                updateSiteContent({ contactDisplay: e.target.value })
-                refresh()
-              }}
-            />
+            <input {...siteField('contactDisplay')} />
           </label>
         </section>
       )}

@@ -772,6 +772,31 @@ export async function studioSetShowName(value: boolean): Promise<string | null> 
   }
 }
 
+/**
+ * Email every active member.
+ *
+ * `testMode` sends only to Tom's own inbox, which is the safe way to check a
+ * message reads correctly before it reaches the whole roll.
+ */
+export async function studioSendBroadcast(
+  subject: string,
+  body: string,
+  testMode: boolean,
+): Promise<{ error: string | null; recipientCount: number }> {
+  const functions = getFirebaseFunctions()
+  if (!functions) return { error: 'Firebase not configured.', recipientCount: 0 }
+  try {
+    const res = await httpsCallable(functions, 'sendBroadcast')({ subject, body, testMode })
+    const data = (res.data ?? {}) as { recipientCount?: number }
+    return { error: null, recipientCount: Number(data.recipientCount ?? 0) }
+  } catch (e) {
+    return {
+      error: e instanceof Error ? e.message : 'Could not send this broadcast.',
+      recipientCount: 0,
+    }
+  }
+}
+
 /** Admin re-sends the set-password invite to a client who never received it. */
 export async function studioResendInvite(email: string): Promise<string | null> {
   const functions = getFirebaseFunctions()

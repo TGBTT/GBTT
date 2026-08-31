@@ -18,6 +18,11 @@ import {
   type SeasonBillingMode,
 } from '@gbtt/shared/studio/firebase/liveSeasons'
 import { studioGenerateSeasonSessions } from '@gbtt/shared/studio/studioAuth'
+import {
+  SeasonCalendar,
+  breakCovering,
+  shiftDayKey,
+} from '@gbtt/shared/studio/SeasonCalendar'
 
 const BLANK: LiveSeason = {
   id: '',
@@ -116,6 +121,45 @@ export function SeasonsPanel() {
     setDraft((d) => ({
       ...d,
       breaks: d.breaks.map((b, i) => (i === index ? { ...b, ...patch } : b)),
+    }))
+  }
+
+  /**
+   * Close or reopen one day from the calendar.
+   *
+   * Reopening a day inside a longer closure splits that closure around it
+   * rather than deleting the whole thing — clicking one day of the school
+   * holidays should not reopen the fortnight.
+   */
+  const toggleClosedDay = (key: string) => {
+    setNote(null)
+    const covering = breakCovering(draft.breaks, key)
+    if (!covering) {
+      setDraft((d) => ({
+        ...d,
+        breaks: [...d.breaks, { label: 'Closed', startDate: key, endDate: key }],
+      }))
+      return
+    }
+
+    setDraft((d) => ({
+      ...d,
+      breaks: d.breaks.flatMap((b) => {
+        if (b !== covering) return [b]
+        const before =
+          b.startDate < key ? [{ ...b, endDate: shiftDayKey(key, -1) }] : []
+        const after = b.endDate > key ? [{ ...b, startDate: shiftDayKey(key, 1) }] : []
+        return [...before, ...after]
+      }),
+    }))
+  }
+
+  /** Close a run of days picked out on the calendar as one closure. */
+  const closeRange = (startKey: string, endKey: string) => {
+    setNote(null)
+    setDraft((d) => ({
+      ...d,
+      breaks: [...d.breaks, { label: 'Closed', startDate: startKey, endDate: endKey }],
     }))
   }
 
@@ -252,7 +296,23 @@ export function SeasonsPanel() {
           <h4>Holiday closures</h4>
           <p className="hint">
             No sessions run on these dates. Both ends are included, and a closure covering part of a
-            week only removes the days it covers.
+            week only removes the days it covers. A closure overrules the recurring timetable: a
+            class set to run every week still produces nothing on a closed day.
+          </p>
+
+          {/* Remounts when a different season is opened so the grid jumps to
+              that season's first month rather than staying where it was. */}
+          <SeasonCalendar
+            key={`${draft.id}-${draft.startDate}`}
+            startDate={draft.startDate}
+            endDate={draft.endDate}
+            breaks={draft.breaks}
+            onToggleDay={toggleClosedDay}
+            onCloseRange={closeRange}
+          />
+          <p className="hint">
+            Closures picked here are named “Closed” — rename them below if it helps, and edit the
+            exact dates there too. Nothing is written until you save the season.
           </p>
           {draft.breaks.map((b, i) => (
             <div key={i} className="season-break-row">

@@ -2,6 +2,7 @@
    top of these, so without the base rules the calendar loses its grid. */
 @import '../../../shared/studio/week-cal.css';
 @import '../../../shared/studio/class-type.css';
+@import '../../../shared/studio/season-cal.css';
 
 :root {
   font-family: "DM Sans", system-ui, sans-serif;

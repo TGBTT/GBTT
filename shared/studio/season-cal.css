@@ -1,0 +1,177 @@
+.season-cal {
+  margin: 0.75rem 0 1.25rem;
+}
+
+.season-cal__bar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.5rem;
+}
+
+.season-cal__month {
+  font-size: 0.95rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.season-cal__modes {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.6rem;
+}
+
+.season-cal__modes .hint {
+  margin: 0;
+}
+
+.season-cal__grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  border: 1px solid var(--line, #d4d4d0);
+  background: #fff;
+}
+
+.season-cal__head {
+  background: #0a0a0a;
+  color: #f5f5f3;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-align: center;
+  padding: 0.5rem 0.25rem;
+  border-right: 1px solid var(--line, #d4d4d0);
+}
+
+.season-cal__head:nth-child(7) {
+  border-right: none;
+}
+
+.season-cal__day {
+  display: grid;
+  align-content: start;
+  gap: 0.15rem;
+  min-height: 3.25rem;
+  padding: 0.35rem 0.3rem;
+  border-right: 1px solid var(--line, #d4d4d0);
+  border-bottom: 1px solid var(--line, #d4d4d0);
+  background: #fafaf8;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.season-cal__day:nth-child(7n) {
+  border-right: none;
+}
+
+.season-cal__day:hover {
+  background: #ecece8;
+}
+
+.season-cal__date {
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.season-cal__tag {
+  font-size: 0.58rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  overflow-wrap: anywhere;
+  line-height: 1.15;
+}
+
+.season-cal__day.is-other-month .season-cal__date {
+  opacity: 0.4;
+}
+
+.season-cal__day.is-weekend {
+  background: #f0f0ec;
+}
+
+.season-cal__day.is-outside {
+  background: repeating-linear-gradient(
+    -45deg,
+    #f4f4f1,
+    #f4f4f1 5px,
+    #e8e8e3 5px,
+    #e8e8e3 10px
+  );
+}
+
+.season-cal__day.is-closed {
+  background: #111;
+  color: #fff;
+}
+
+.season-cal__day.is-closed:hover {
+  background: #333;
+}
+
+.season-cal__day.is-pending {
+  outline: 2px solid #111;
+  outline-offset: -2px;
+}
+
+.season-cal__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.9rem;
+  list-style: none;
+  margin: 0.55rem 0 0;
+  padding: 0;
+  font-size: 0.78rem;
+  color: var(--muted, #5c5c5c);
+}
+
+.season-cal__legend li {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.season-cal__swatch {
+  width: 0.85rem;
+  height: 0.85rem;
+  border: 1px solid var(--line, #d4d4d0);
+  display: inline-block;
+}
+
+.season-cal__swatch.is-closed {
+  background: #111;
+}
+
+.season-cal__swatch.is-weekend {
+  background: #f0f0ec;
+}
+
+.season-cal__swatch.is-outside {
+  background: repeating-linear-gradient(
+    -45deg,
+    #f4f4f1,
+    #f4f4f1 4px,
+    #e8e8e3 4px,
+    #e8e8e3 8px
+  );
+}
+
+@media (min-width: 761px) {
+  .season-cal__day {
+    min-height: 4.25rem;
+    padding: 0.45rem 0.4rem;
+  }
+
+  .season-cal__date {
+    font-size: 0.9rem;
+  }
+
+  .season-cal__tag {
+    font-size: 0.64rem;
+  }
+}
