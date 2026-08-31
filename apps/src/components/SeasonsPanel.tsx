@@ -24,6 +24,12 @@ import {
   shiftDayKey,
 } from '@gbtt/shared/studio/SeasonCalendar'
 import { DateField } from '@gbtt/shared/studio/DateField'
+import {
+  NZ_TERM_SOURCE,
+  NZ_TERM_YEARS,
+  nzSchoolTermSeasons,
+  type NzTermProposal,
+} from '@gbtt/shared/studio/nzSchoolTerms'
 
 const BLANK: LiveSeason = {
   id: '',
@@ -56,6 +62,17 @@ export function SeasonsPanel() {
   const [error, setError] = useState<string | null>(null)
   const [note, setNote] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+
+  // Default to the first published year the studio has not already run out of,
+  // which is the one Tom is most likely to be setting up.
+  const [termYear, setTermYear] = useState(
+    () =>
+      NZ_TERM_YEARS.find((y) => y >= new Date().getFullYear()) ??
+      NZ_TERM_YEARS[NZ_TERM_YEARS.length - 1],
+  )
+  const [termMode, setTermMode] = useState<SeasonBillingMode>('arrears')
+  const [proposal, setProposal] = useState<NzTermProposal[] | null>(null)
+  const [excluded, setExcluded] = useState<string[]>([])
 
   useEffect(() => subscribeSeasons(setState), [])
 
@@ -139,6 +156,62 @@ export function SeasonsPanel() {
   }
 
   /**
+   * Draw up the four school terms for a year, without saving anything.
+   *
+   * Nothing is written until the drafts are confirmed, so Tom can see what the
+   * year would look like — including which public holidays land mid-term — and
+   * change it before any of it becomes real.
+   */
+  const previewSchoolTerms = () => {
+    setError(null)
+    setNote(null)
+    setExcluded([])
+    setProposal(nzSchoolTermSeasons(termYear, termMode))
+  }
+
+  const editProposal = (id: string, patch: Partial<LiveSeason>) => {
+    setProposal((current) =>
+      (current ?? []).map((p) =>
+        p.season.id === id ? { ...p, season: { ...p.season, ...patch } } : p,
+      ),
+    )
+  }
+
+  /**
+   * Save the terms that were kept.
+   *
+   * Saved one at a time rather than in a batch so a term with a problem — a
+   * date that ended up before its start, say — names itself instead of taking
+   * the other three down with it.
+   */
+  const createSchoolTerms = async () => {
+    const wanted = (proposal ?? []).filter((p) => !excluded.includes(p.season.id))
+    if (!wanted.length) {
+      setError('Every term is unticked, so there is nothing to create.')
+      return
+    }
+
+    setBusy(true)
+    setError(null)
+    const failures: string[] = []
+    for (const { season } of wanted) {
+      const err = await saveSeason(season)
+      if (err) failures.push(`${season.name}: ${err}`)
+    }
+    setBusy(false)
+
+    if (failures.length) {
+      setError(failures.join(' · '))
+      return
+    }
+
+    setProposal(null)
+    setNote(
+      `Created ${wanted.length} season${wanted.length === 1 ? '' : 's'} for ${termYear}. Nothing is scheduled yet — press Generate sessions on each one when the timetable for it is right.`,
+    )
+  }
+
+  /**
    * Close or reopen one day from the calendar.
    *
    * Reopening a day inside a longer closure splits that closure around it
@@ -204,6 +277,147 @@ export function SeasonsPanel() {
       {state.status === 'error' ? (
         <p className="form-error">Could not load seasons: {state.error}</p>
       ) : null}
+
+      <div className="season-terms">
+        <h3>Start from the New Zealand school terms</h3>
+        <p className="hint">
+          The studio year follows the school year, so a whole year can be drawn up from the
+          published term dates and then edited. Public holidays that fall mid-term come through as
+          closures; the school holidays between terms need none, since they sit outside every
+          season. Nothing is saved until you confirm.
+        </p>
+
+        <div className="season-terms__controls">
+          <label className="field">
+            Year
+            <select
+              value={termYear}
+              disabled={busy}
+              onChange={(e) => {
+                setTermYear(Number(e.target.value))
+                setProposal(null)
+              }}
+            >
+              {NZ_TERM_YEARS.map((y) => (
+                <option key={y} value={y}>
+                  {y}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            Charge each term
+            <select
+              value={termMode}
+              disabled={busy}
+              onChange={(e) => {
+                const mode = e.target.value as SeasonBillingMode
+                setTermMode(mode)
+                setProposal((current) =>
+                  (current ?? []).map((p) => ({ ...p, season: { ...p.season, billingMode: mode } })),
+                )
+              }}
+            >
+              {BILLING_MODES.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button type="button" className="btn ghost" disabled={busy} onClick={previewSchoolTerms}>
+            {proposal ? 'Start again' : `Draw up ${termYear}`}
+          </button>
+        </div>
+
+        {proposal ? (
+          <>
+            <ul className="season-terms__list">
+              {proposal.map(({ season, note: termNote }) => {
+                const already = state.seasons.some((s) => s.id === season.id)
+                const keep = !excluded.includes(season.id)
+                return (
+                  <li key={season.id} className={`season-term${keep ? '' : ' is-excluded'}`}>
+                    <label className="exercise-check">
+                      <input
+                        type="checkbox"
+                        checked={keep}
+                        disabled={busy}
+                        onChange={(e) =>
+                          setExcluded((current) =>
+                            e.target.checked
+                              ? current.filter((id) => id !== season.id)
+                              : [...current, season.id],
+                          )
+                        }
+                      />
+                      <strong>{season.name}</strong>
+                    </label>
+
+                    <div className="season-term__dates">
+                      <label className="field">
+                        Starts
+                        <DateField
+                          value={season.startDate}
+                          disabled={busy || !keep}
+                          ariaLabel={`${season.name} starts`}
+                          onChange={(startDate) => editProposal(season.id, { startDate })}
+                        />
+                      </label>
+                      <label className="field">
+                        Ends
+                        <DateField
+                          value={season.endDate}
+                          disabled={busy || !keep}
+                          ariaLabel={`${season.name} ends`}
+                          onChange={(endDate) => editProposal(season.id, { endDate })}
+                        />
+                      </label>
+                    </div>
+
+                    <p className="hint">
+                      {countTeachingDays(season)} teaching days
+                      {season.breaks.length
+                        ? ` · closed for ${season.breaks.map((b) => b.label).join(', ')}`
+                        : ' · no public holidays mid-term'}
+                    </p>
+                    {termNote ? <p className="hint">{termNote}</p> : null}
+                    {already ? (
+                      <p className="hint">
+                        A season with this id already exists — confirming will overwrite its dates
+                        and closures.
+                      </p>
+                    ) : null}
+                  </li>
+                )
+              })}
+            </ul>
+
+            <div className="btn-row">
+              <button
+                type="button"
+                className="btn primary"
+                disabled={busy}
+                onClick={createSchoolTerms}
+              >
+                Create these seasons
+              </button>
+              <button
+                type="button"
+                className="btn ghost"
+                disabled={busy}
+                onClick={() => setProposal(null)}
+              >
+                Discard
+              </button>
+            </div>
+            <p className="hint">
+              Each term can be opened below afterwards to add closures of your own — a week away, a
+              hall booking — on the calendar. Source: {NZ_TERM_SOURCE}
+            </p>
+          </>
+        ) : null}
+      </div>
 
       <div className="season-list">
         <h3>Seasons</h3>

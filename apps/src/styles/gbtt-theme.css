@@ -627,6 +627,57 @@
   background: rgba(255, 255, 255, 0.06);
 }
 
+/* —— Drawing a year up from the school terms —— */
+.season-terms {
+  margin-bottom: 1.75rem;
+  padding-bottom: 1.25rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.season-terms__controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: flex-end;
+  margin: 0.85rem 0;
+}
+
+.season-terms__list {
+  display: grid;
+  gap: 0.85rem;
+  list-style: none;
+  margin: 0 0 1rem;
+  padding: 0;
+}
+
+.season-term {
+  padding: 0.85rem 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 0.6rem;
+}
+
+/* An unticked term stays legible — it is still being read and compared. */
+.season-term.is-excluded {
+  opacity: 0.55;
+}
+
+.season-term__dates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin: 0.6rem 0 0.4rem;
+}
+
+.season-term .hint {
+  margin: 0.25rem 0 0;
+}
+
+@media (max-width: 40rem) {
+  .season-term__dates .field {
+    flex: 1 1 100%;
+  }
+}
+
 @media (max-width: 40rem) {
   .season-break-row .field {
     flex: 1 1 100%;
