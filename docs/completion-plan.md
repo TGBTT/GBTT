@@ -14,13 +14,13 @@ write Firestore. What remains below is the tail.
 
 Both are configuration, and no amount of code lands them.
 
-**`VITE_FORM_ENDPOINT` is stale.** The 31 Aug redeploy created a new deployment
-id, so the `/exec` URL changed. Cloud Functions were repointed and redeployed,
-but the marketing contact form calls Apps Script straight from the browser
-using this GitHub secret. Until it is updated to
-`https://script.google.com/macros/s/AKfycbyD3jkpz2SQ_Z380zygdDy7n0HR7BAOXVVPhUnwjr5KkUTH7VpckltFFR4j6aOUsMKO/exec`
-and the Pages workflow is re-run, the public contact form posts to a retired
-deployment.
+**`VITE_FORM_ENDPOINT` goes stale on every redeploy.** Each Apps Script
+redeploy mints a new deployment id, so the `/exec` URL changes. Cloud Functions
+read theirs from the `FORM_ENDPOINT` param, but the marketing contact form
+calls Apps Script straight from the browser using this GitHub secret, so it has
+to be reset and the Pages workflow re-run, or the public contact form posts to
+a retired deployment. The current URL lives in the `FORM_ENDPOINT` secret, not
+here — writing it into this file is what let it drift last time.
 
 **`CALENDAR_ID` has never been set.** Verified against the live endpoint:
 

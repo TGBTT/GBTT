@@ -80,6 +80,9 @@ These are working software decisions still outstanding, not setup chores:
   **Generate sessions**, which covers the whole term at once. Neither runs by
   itself, so somebody has to extend the timetable before it runs out. A
   scheduled function rolling the next week forward is the obvious follow-up.
+  Generating does now carry members' weekly slots into the new weeks — seats,
+  billing and their calendar invites all follow — so the outstanding piece is
+  only that nobody presses the button for you.
 - **Member screens still read the local store for display.** Bookings, counts,
   attendance and money all come from Firestore, but a signed-in member's name,
   plan and locked-slot list are rendered from the seed store via
@@ -300,7 +303,11 @@ Copy examples and fill values (never commit real secrets):
 | `action` | Trigger |
 |----------|---------|
 | `sendInvite` | `createMemberAccount` |
-| `calendarUpsertSession` | `onRosterWrite` (roster subcollection changes) |
+| `calendarUpsertSession` | `onSessionWrite` (a schedule field changed) |
+| `calendarUpsertSessions` | `generateSeasonSessions` (new sessions, batched) |
+| `calendarDeleteSession` | `onSessionWrite` (session deleted or cancelled) |
+| `sendBookingInvite` / `sendBookingCancellation` | `onRosterWrite` (a seat taken or given up) |
+| `sendSlotInvite` / `sendSlotCancellation` | `lockWeeklySlot`, `unlockWeeklySlot`, `generateSeasonSessions` |
 | `sendGuestPass` | `createGuestPass` |
 
 Each Function → Script POST includes `webhookSecret` in the JSON body; Apps Script must reject unsigned calls.
@@ -348,7 +355,8 @@ Functions in this repo:
 |----------|------|------|
 | `createMemberAccount` | Callable | Admin — Auth user + Firestore profile + invite |
 | `adminResetPassword` | Callable | Admin — password reset link |
-| `onRosterWrite` | Firestore trigger | Roster write → `calendarUpsertSession` |
+| `onRosterWrite` | Firestore trigger | Seat taken or given up → the member's own calendar invite |
+| `onSessionWrite` | Firestore trigger | Schedule change → the shared class calendar |
 | `calculateBillingPeriod` | Callable | Admin — billing period calculator |
 | `createGuestPass` | Callable | Admin — guest pass + email |
 
@@ -387,9 +395,10 @@ dates differ. A season decides two things:
   sessions are keyed by slot and week so they update in place, and any now
   falling inside a closure are archived rather than deleted, so rosters and
   attendance survive.
-- **What a member is charged.** Each pricing tier carries a per-class rate
-  (drop-in $17, $15 at one a week, $13 at two, $11 at three by default) and
-  that rate *is* the price — there is no separate plan fee on top.
+- **What a member is charged.** Each pricing tier carries a per-class rate, set
+  under **Pricing** in the admin console, and that rate *is* the price — there
+  is no separate plan fee on top. The rates are not repeated here, or anywhere
+  else in the code, so that the console stays the only place they are edited.
 
 Two charging modes, set per season:
 
@@ -507,7 +516,9 @@ Expect a calendar event on the studio calendar.
 ### E. Roster → Calendar
 
 1. Admin or trainer updates `sessions/{id}/roster/{uid}` in Firestore (or via app when wired).
-2. `onRosterWrite` fires → Apps Script `calendarUpsertSession` → calendar event updated.
+2. `onRosterWrite` fires → Apps Script `sendBookingInvite` → the member is emailed an
+   `.ics` for that one class. The shared calendar is not touched: attendance counts
+   change all day, and it is `onSessionWrite` that keeps the timetable in step.
 
 ### F. Billing calculator
 
