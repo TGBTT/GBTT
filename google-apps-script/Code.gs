@@ -413,12 +413,6 @@ function handleSendInvite_(data) {
       '\n\nOnce you are in, book your weekly classes at gbtt.co.nz.\n\nSee you at Rec Park Centre!\n\n— Tom · Golden Bay Team Training',
   })
 
-  MailApp.sendEmail({
-    to: notifyEmail_(),
-    subject: 'GBTT invite sent — ' + name,
-    body: 'Invite email sent to ' + name + ' (' + email + ')',
-  })
-
   auditLog_(SHEET_INVITES, ['Timestamp', 'Name', 'Email', 'Plan', 'InviteLink'], [
     stamp_(),
     name,
@@ -680,7 +674,19 @@ function icsFold_(line) {
  * the REQUEST created rather than adding a duplicate.
  */
 function bookingUid_(sessionId, memberEmail) {
-  const key = String(sessionId) + '|' + String(memberEmail || '').toLowerCase()
+  return uidFromKey_(String(sessionId) + '|' + String(memberEmail || '').toLowerCase())
+}
+
+/**
+ * A weekly lock is one recurring event, not one event per week, so it needs a
+ * UID of its own: keyed on the slot rather than any single session, the CANCEL
+ * sent when the lock is released clears the whole series.
+ */
+function slotUid_(slotId, memberEmail) {
+  return uidFromKey_('slot|' + String(slotId) + '|' + String(memberEmail || '').toLowerCase())
+}
+
+function uidFromKey_(key) {
   const digest = Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, key)
   const hex = digest
     .map(function (byte) {
@@ -704,6 +710,18 @@ function buildBookingIcs_(opts) {
     'DTSTAMP:' + icsStamp_(new Date()),
     'DTSTART:' + icsStamp_(opts.start),
     'DTEND:' + icsStamp_(opts.end),
+  ]
+
+  /*
+   * A weekly lock is one recurring event. Sending it as a series is what keeps
+   * a season-long lock to a single email instead of one per week.
+   */
+  const weeklyCount = Number(opts.weeklyCount || 0)
+  if (weeklyCount > 1) {
+    lines.push('RRULE:FREQ=WEEKLY;COUNT=' + weeklyCount)
+  }
+
+  lines.push(
     'SUMMARY:' + icsEscape_(opts.summary),
     'DESCRIPTION:' + icsEscape_(opts.description),
     'LOCATION:' + icsEscape_(opts.location),
@@ -715,21 +733,32 @@ function buildBookingIcs_(opts) {
       opts.attendeeEmail,
     'END:VEVENT',
     'END:VCALENDAR',
-  ]
+  )
+
   return lines.map(icsFold_).join('\r\n')
 }
 
+const MANAGE_BOOKINGS_URL = 'https://gbtt.co.nz/app/fitness/studioflow/'
+
+/**
+ * The .ics and the few strings the covering email needs.
+ *
+ * `slotId` switches this from a single class to the recurring series a weekly
+ * lock creates; `weeklyCount` is how many of those weeks were taken.
+ */
 function bookingIcsPayload_(data, method) {
   const memberEmail = String(data.memberEmail || '').trim()
   const memberName = String(data.memberName || '').trim()
   const sessionId = String(data.sessionId || '').trim()
+  const slotId = String(data.slotId || '').trim()
   const weekStart = String(data.weekStart || '').trim()
   const dayLabel = String(data.dayLabel || '').trim()
   const time = String(data.time || '').trim()
+  const weeklyCount = Number(data.weeklyCount || 0)
 
-  if (!memberEmail || !sessionId || !weekStart || !dayLabel || !time) {
+  if (!memberEmail || (!sessionId && !slotId) || !weekStart || !dayLabel || !time) {
     return {
-      error: 'memberEmail, sessionId, weekStart, dayLabel and time are required.',
+      error: 'memberEmail, sessionId or slotId, weekStart, dayLabel and time are required.',
     }
   }
 
@@ -743,13 +772,14 @@ function bookingIcsPayload_(data, method) {
 
   const ics = buildBookingIcs_({
     method: method,
-    uid: bookingUid_(sessionId, memberEmail),
+    uid: slotId ? slotUid_(slotId, memberEmail) : bookingUid_(sessionId, memberEmail),
     sequence: Number(data.sequence || (method === 'CANCEL' ? 1 : 0)),
     start: start,
     end: end,
+    weeklyCount: slotId ? weeklyCount : 0,
     summary: className + ' · GBTT',
     description:
-      'Instructor: ' + instructor + '\nVenue: ' + venue + '\nManage your booking at https://gbtt.co.nz/app/fitness/studioflow/',
+      'Instructor: ' + instructor + '\nVenue: ' + venue + '\nManage your booking at ' + MANAGE_BOOKINGS_URL,
     location: venue,
     organizerEmail: notifyEmail_(),
     attendeeEmail: memberEmail,
@@ -760,36 +790,47 @@ function bookingIcsPayload_(data, method) {
     ics: ics,
     memberEmail: memberEmail,
     memberName: memberName,
-    sessionId: sessionId,
+    sessionId: sessionId || slotId,
     className: className,
     venue: venue,
     start: start,
-    when: dayLabel + ' ' + time,
+    when: dayLabel + ' ' + time + (slotId && weeklyCount > 1 ? ', weekly' : ''),
   }
 }
 
-/** Member booked a class — email them a calendar invite for their own diary. */
-function handleSendBookingInvite_(data) {
-  const payload = bookingIcsPayload_(data, 'REQUEST')
+/**
+ * One class, one calendar invite.
+ *
+ * The body stays to the single event the member's booking actually changed —
+ * they get their own class, not the studio's whole timetable.
+ */
+function sendBookingEmail_(data, method, auditAction) {
+  const payload = bookingIcsPayload_(data, method)
   if (payload.error) return jsonResponse({ ok: false, error: payload.error })
+
+  const cancelling = method === 'CANCEL'
+  const summary = payload.className + ' — ' + payload.when + ' at ' + payload.venue
 
   MailApp.sendEmail({
     to: payload.memberEmail,
-    subject: 'Booked: ' + payload.className + ' — ' + payload.when,
+    subject: (cancelling ? 'Cancelled: ' : 'Booked: ') + payload.className + ' — ' + payload.when,
     body:
       'Hi ' +
       (payload.memberName || 'there') +
-      ",\n\nYou're booked into " +
-      payload.className +
-      ' on ' +
-      payload.when +
-      ' at ' +
-      payload.venue +
-      '.\n\nThe attached invite adds it to your calendar.\n\nNeed to change it? Manage your bookings at https://gbtt.co.nz/app/fitness/studioflow/\n\n— Tom · Golden Bay Team Training',
+      ',\n\n' +
+      (cancelling ? 'Cancelled: ' : 'Booked: ') +
+      summary +
+      '.\n\n' +
+      (cancelling
+        ? 'The attached update removes it from your calendar.'
+        : 'The attached invite adds it to your calendar.') +
+      '\n\n' +
+      MANAGE_BOOKINGS_URL +
+      '\n\n— Tom · Golden Bay Team Training',
     attachments: [
       {
-        fileName: 'gbtt-booking.ics',
-        mimeType: 'text/calendar; method=REQUEST',
+        fileName: cancelling ? 'gbtt-cancellation.ics' : 'gbtt-booking.ics',
+        mimeType: 'text/calendar; method=' + method,
         content: payload.ics,
       },
     ],
@@ -798,44 +839,35 @@ function handleSendBookingInvite_(data) {
   auditLog_(
     SHEET_BOOKING_INVITES,
     ['Timestamp', 'Action', 'MemberEmail', 'SessionId', 'Class', 'When'],
-    [stamp_(), 'invite', payload.memberEmail, payload.sessionId, payload.className, payload.when],
+    [stamp_(), auditAction, payload.memberEmail, payload.sessionId, payload.className, payload.when],
   )
 
   return jsonResponse({ ok: true, sessionId: payload.sessionId })
 }
 
-/** Member cancelled — send a CANCEL so the event disappears from their diary. */
+/** Member booked a single class — email them a calendar invite for their own diary. */
+function handleSendBookingInvite_(data) {
+  return sendBookingEmail_(data, 'REQUEST', 'invite')
+}
+
+/** Member cancelled a single class — send a CANCEL so it leaves their diary. */
 function handleSendBookingCancellation_(data) {
-  const payload = bookingIcsPayload_(data, 'CANCEL')
-  if (payload.error) return jsonResponse({ ok: false, error: payload.error })
+  return sendBookingEmail_(data, 'CANCEL', 'cancel')
+}
 
-  MailApp.sendEmail({
-    to: payload.memberEmail,
-    subject: 'Cancelled: ' + payload.className + ' — ' + payload.when,
-    body:
-      'Hi ' +
-      (payload.memberName || 'there') +
-      ',\n\nYour booking for ' +
-      payload.className +
-      ' on ' +
-      payload.when +
-      ' has been cancelled and removed from your calendar.\n\nBook another session at https://gbtt.co.nz/app/fitness/studioflow/\n\n— Tom · Golden Bay Team Training',
-    attachments: [
-      {
-        fileName: 'gbtt-cancellation.ics',
-        mimeType: 'text/calendar; method=CANCEL',
-        content: payload.ics,
-      },
-    ],
-  })
+/**
+ * Member locked a recurring weekly slot.
+ *
+ * One email carrying one repeating event, rather than the one-per-week the
+ * roster trigger would otherwise send for the same single action.
+ */
+function handleSendSlotInvite_(data) {
+  return sendBookingEmail_(data, 'REQUEST', 'slot-invite')
+}
 
-  auditLog_(
-    SHEET_BOOKING_INVITES,
-    ['Timestamp', 'Action', 'MemberEmail', 'SessionId', 'Class', 'When'],
-    [stamp_(), 'cancel', payload.memberEmail, payload.sessionId, payload.className, payload.when],
-  )
-
-  return jsonResponse({ ok: true, sessionId: payload.sessionId })
+/** Member released a weekly slot — one CANCEL clears the whole series. */
+function handleSendSlotCancellation_(data) {
+  return sendBookingEmail_(data, 'CANCEL', 'slot-cancel')
 }
 
 function handleCalendarUpsertSession_(data) {
@@ -1020,6 +1052,8 @@ function doPost(e) {
     if (action === 'sendGuestPass') return handleSendGuestPass_(data)
     if (action === 'sendBookingInvite') return handleSendBookingInvite_(data)
     if (action === 'sendBookingCancellation') return handleSendBookingCancellation_(data)
+    if (action === 'sendSlotInvite') return handleSendSlotInvite_(data)
+    if (action === 'sendSlotCancellation') return handleSendSlotCancellation_(data)
     if (action === 'calendarUpsertSession') return handleCalendarUpsertSession_(data)
     if (action === 'calendarDeleteSession') return handleCalendarDeleteSession_(data)
     if (action === 'calendarGetSubscribeUrl') return handleCalendarGetSubscribeUrl_(data)

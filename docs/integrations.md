@@ -23,9 +23,13 @@ repeatedly. Calendar carries two things only, each on its own trigger:
 
 ```mermaid
 flowchart LR
-  Booking["Member books or cancels"] --> Roster["onRosterWrite"]
+  Booking["Member books or cancels one class"] --> Roster["onRosterWrite"]
   Roster --> Invite["sendBookingInvite / sendBookingCancellation"]
   Invite --> Inbox["ICS emailed to that member only"]
+
+  Lock["Member locks or releases a weekly slot"] --> Slot["sendSlotInvite / sendSlotCancellation"]
+  Slot --> Inbox
+  Lock -.->|"inviteSuppressed"| Roster
 
   Edit["Tom moves a class"] --> Session["onSessionWrite"]
   Session --> Upsert["calendarUpsertSession"]
@@ -45,6 +49,13 @@ emails that member a `text/calendar` attachment: `METHOD:REQUEST` on booking, `M
 cancellation. The UID is an MD5 of `sessionId|memberEmail`, so the cancellation updates the same
 event the invite created instead of leaving a duplicate. Role-call edits (`booked` to `attended`)
 change an existing document, so they send nothing.
+
+**Weekly slots are one email, not one per week.** Locking a slot books the member into every
+remaining session of the season, and releasing it deletes them all, so mailing per roster document
+turned a single click into a dozen near-identical invites. Those entries carry `inviteSuppressed`,
+which `onRosterWrite` skips, and `lockWeeklySlot` / `unlockWeeklySlot` send one `sendSlotInvite` or
+`sendSlotCancellation` instead: a single `RRULE:FREQ=WEEKLY` event keyed on `slot|slotId|email`, so
+the release cancels exactly the series the lock created.
 
 Members are deliberately **not** added as guests on the shared event. Guest lists are visible to
 every other guest, which would leak the roster and override each member's

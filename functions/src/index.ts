@@ -1,7 +1,12 @@
 import { randomBytes } from 'node:crypto'
 import { initializeApp } from 'firebase-admin/app'
 import { getAuth } from 'firebase-admin/auth'
-import { FieldValue, getFirestore, Timestamp } from 'firebase-admin/firestore'
+import {
+  FieldValue,
+  getFirestore,
+  Timestamp,
+  type QueryDocumentSnapshot,
+} from 'firebase-admin/firestore'
 import { defineSecret, defineString } from 'firebase-functions/params'
 import { onDocumentWritten } from 'firebase-functions/v2/firestore'
 import { onCall, HttpsError } from 'firebase-functions/v2/https'
@@ -453,6 +458,17 @@ export const onRosterWrite = onDocumentWritten(
 
     // Status edits (booked -> attended during role-call) must not re-send.
     if (existedBefore === existsAfter) {
+      return
+    }
+
+    /*
+     * Locking a weekly slot writes one roster entry per remaining week of the
+     * season, and releasing it deletes them all. Mailing per document turned a
+     * single member action into a dozen near-identical emails, so those
+     * entries are marked and the caller sends one recurring invite instead.
+     */
+    const entry = (existsAfter ? event.data?.after : event.data?.before)?.data() ?? {}
+    if (entry.inviteSuppressed === true) {
       return
     }
 
@@ -1648,6 +1664,9 @@ async function bookMemberIntoSession(
   // extra, so admin-added seats are chargeable too and Tom waives them with a
   // billing exception rather than by them being silently free.
   charge: { dropIn: boolean; chargeRateCents: number },
+  // Set by the weekly-lock fan-out, which covers all its seats with a single
+  // recurring invite of its own. See onRosterWrite.
+  suppressInvite = false,
 ): Promise<SeatResult> {
   const sessionRef = db.doc(`sessions/${sessionId}`)
   const rosterRef = sessionRef.collection('roster')
@@ -1682,6 +1701,7 @@ async function bookMemberIntoSession(
       dropIn: charge.dropIn,
       chargeRateCents: charge.dropIn ? charge.chargeRateCents : 0,
       bookedAt: FieldValue.serverTimestamp(),
+      inviteSuppressed: suppressInvite,
     })
     tx.update(sessionRef, { bookedCount: rosterSnap.size + 1 })
     return 'booked'
@@ -1745,6 +1765,57 @@ export const addMemberToSession = onCall(async (request) => {
 })
 
 /**
+ * Cover a whole weekly slot with one calendar email.
+ *
+ * The roster trigger is deliberately silent for these seats, so this is the
+ * only notice the member gets for locking or releasing a slot: a single
+ * repeating event for their own class, keyed on the slot so the release
+ * cancels exactly what the lock created.
+ */
+async function sendSlotCalendarEmail(
+  action: 'sendSlotInvite' | 'sendSlotCancellation',
+  opts: {
+    slotId: string
+    profile: Record<string, unknown>
+    session: Record<string, unknown>
+    weeklyCount: number
+  },
+): Promise<void> {
+  const memberEmail = String(opts.profile.email ?? '')
+  if (!memberEmail) return
+
+  const session = opts.session
+  let className = String(session.className ?? '')
+  const classTypeId = String(session.classTypeId ?? '')
+  if (!className && classTypeId) {
+    className = String((await db.doc(`classTypes/${classTypeId}`).get()).data()?.name ?? classTypeId)
+  }
+
+  const result = await callAppsScript(
+    {
+      action,
+      memberEmail,
+      memberName: String(opts.profile.name ?? ''),
+      slotId: opts.slotId,
+      weeklyCount: opts.weeklyCount,
+      weekStart: String(session.weekStart ?? ''),
+      dayLabel: String(session.dayLabel ?? ''),
+      time: String(session.time ?? ''),
+      className,
+      venue: String(session.venue ?? ''),
+      durationMinutes: Number(session.durationMinutes ?? 60),
+      source: action,
+    },
+    webhookSecret.value(),
+    formEndpoint.value(),
+  )
+
+  if (!result.ok) {
+    console.error('slot calendar email failed', action, opts.slotId, result.error)
+  }
+}
+
+/**
  * Lock a recurring weekly slot: book the member into every upcoming session
  * filed under that timetable slot.
  *
@@ -1754,7 +1825,7 @@ export const addMemberToSession = onCall(async (request) => {
  * reported back rather than failing the whole lock, since the remaining weeks
  * are still worth holding.
  */
-export const lockWeeklySlot = onCall(async (request) => {
+export const lockWeeklySlot = onCall({ secrets: [webhookSecret] }, async (request) => {
   const authCtx = requireAuth(request)
   const slotId = String(request.data?.slotId ?? '').trim()
   if (!slotId) {
@@ -1795,6 +1866,9 @@ export const lockWeeklySlot = onCall(async (request) => {
   const booked: string[] = []
   const full: string[] = []
   const skipped: string[] = []
+  // The series has to start somewhere: the earliest seat actually taken is the
+  // DTSTART the recurring invite repeats from.
+  let firstBooked: QueryDocumentSnapshot | null = null
   for (const doc of sessionsSnap.docs) {
     /*
      * A session already past its transfer cutoff is not claimable: the seat
@@ -1821,15 +1895,29 @@ export const lockWeeklySlot = onCall(async (request) => {
       'self',
       // Included: this seat is what the weekly allowance pays for.
       { dropIn: false, chargeRateCents: 0 },
+      true,
     )
-    if (result === 'booked') booked.push(doc.id)
-    else if (result === 'full') full.push(doc.id)
+    if (result === 'booked') {
+      booked.push(doc.id)
+      if (!firstBooked) firstBooked = doc
+    } else if (result === 'full') {
+      full.push(doc.id)
+    }
   }
 
   await locksRef.doc(slotId).set(
     { slotId, lockedAt: FieldValue.serverTimestamp(), classesPerWeek: allowance },
     { merge: true },
   )
+
+  if (firstBooked) {
+    await sendSlotCalendarEmail('sendSlotInvite', {
+      slotId,
+      profile,
+      session: firstBooked.data() ?? {},
+      weeklyCount: booked.length,
+    })
+  }
 
   return {
     ok: true,
@@ -1854,14 +1942,15 @@ export const lockWeeklySlot = onCall(async (request) => {
  * the member would attend twice on one included session. The slot can be
  * changed once the week rolls over.
  */
-export const unlockWeeklySlot = onCall(async (request) => {
+export const unlockWeeklySlot = onCall({ secrets: [webhookSecret] }, async (request) => {
   const authCtx = requireAuth(request)
   const slotId = String(request.data?.slotId ?? '').trim()
   if (!slotId) {
     throw new HttpsError('invalid-argument', 'slotId is required.')
   }
 
-  await requireActiveMember(authCtx.uid)
+  const userSnap = await requireActiveMember(authCtx.uid)
+  const profile = (userSnap.data()?.profile as Record<string, unknown>) ?? {}
 
   const windowHours = await transferWindowHours()
   const now = new Date()
@@ -1888,6 +1977,7 @@ export const unlockWeeklySlot = onCall(async (request) => {
 
   let released = 0
   let kept = 0
+  let firstReleased: QueryDocumentSnapshot | null = null
 
   for (const doc of sessionsSnap.docs) {
     let startsAt: Date
@@ -1911,7 +2001,10 @@ export const unlockWeeklySlot = onCall(async (request) => {
       tx.update(sessionRef, { bookedCount: Math.max(0, rosterSnap.size - 1) })
       return true
     })
-    if (removed) released += 1
+    if (removed) {
+      released += 1
+      if (!firstReleased) firstReleased = doc
+    }
   }
 
   /*
@@ -1922,6 +2015,15 @@ export const unlockWeeklySlot = onCall(async (request) => {
    */
   if (kept === 0) {
     await db.doc(`users/${authCtx.uid}/weeklyLocks/${slotId}`).delete()
+  }
+
+  if (firstReleased) {
+    await sendSlotCalendarEmail('sendSlotCancellation', {
+      slotId,
+      profile,
+      session: firstReleased.data() ?? {},
+      weeklyCount: released,
+    })
   }
 
   return { ok: true, slotId, released, kept, lockReleased: kept === 0 }
