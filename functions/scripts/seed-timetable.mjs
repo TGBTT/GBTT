@@ -65,11 +65,11 @@ const SLOTS = [
   { day: 'Mon', time: '18:45', classTypeId: 'circuits', instructorId: 'tom' },
   { day: 'Tue', time: '06:00', classTypeId: 'strong', instructorId: 'tom' },
   { day: 'Tue', time: '09:30', classTypeId: 'womens-fit', instructorId: 'tom' },
-  { day: 'Wed', time: '06:00', classTypeId: 'mobility', instructorId: 'priya' },
+  { day: 'Wed', time: '06:00', classTypeId: 'mobility', instructorId: 'tom' },
   { day: 'Wed', time: '15:30', classTypeId: 'kids-fit', instructorId: 'tom' },
   { day: 'Wed', time: '17:15', classTypeId: 'strong', instructorId: 'tom' },
   { day: 'Thu', time: '06:00', classTypeId: 'sweat', instructorId: 'tom' },
-  { day: 'Thu', time: '09:30', classTypeId: 'bodybalance', instructorId: 'jess' },
+  { day: 'Thu', time: '09:30', classTypeId: 'bodybalance', instructorId: 'tom' },
   { day: 'Thu', time: '17:15', classTypeId: 'sculpt-strength', instructorId: 'tom' },
   { day: 'Fri', time: '06:00', classTypeId: 'strong', instructorId: 'tom' },
 ]

@@ -99,6 +99,9 @@ export function MembersPayments({ role }: { role: string }) {
     else setNote(paid ? `Marked ${periodId} paid.` : `Reopened ${periodId} as owed.`)
   }
 
+  // Staff hold accounts on the same roll but are not billed for classes.
+  const billableMembers = members.members.filter((m) => m.role === 'member')
+
   const changeDiscount = async (uid: string, pct: number) => {
     setError(null)
     setError(await saveMemberDiscount(uid, pct))
@@ -175,12 +178,12 @@ export function MembersPayments({ role }: { role: string }) {
       </label>
 
       {members.status === 'loading' ? <p className="hint">Loading members…</p> : null}
-      {members.status === 'ready' && !members.members.length ? (
+      {members.status === 'ready' && !billableMembers.length ? (
         <p className="hint">No members yet. Accounts appear here once people register.</p>
       ) : null}
 
       <ul className="admin-member-list">
-        {members.members.map((m) => {
+        {billableMembers.map((m) => {
           const periods = billing.byMember[m.uid] ?? []
           const owed = outstandingCents(periods)
           return (

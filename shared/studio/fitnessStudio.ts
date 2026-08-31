@@ -506,66 +506,7 @@ const DEFAULT_OCCURRENCES: ClassOccurrence[] = [
   },
 ]
 
-const DEFAULT_USERS: SimUser[] = [
-  {
-    id: 'u-alex',
-    email: 'alex@demo',
-    password: 'demo',
-    name: 'Alex Demo',
-    role: 'member',
-    planId: 'weekly2',
-    creditsLeft: 0,
-    classesPerWeek: 2,
-    weeklyLockedOccurrenceIds: ['occ-mon-strong', 'occ-wed-strong'],
-    heldOccurrenceIds: ['occ-mon-strong', 'occ-wed-strong'],
-    activated: true,
-    showNameToClassmates: true,
-    paid: true,
-    paymentNote: '',
-    limitations: 'Sensitive left knee — avoid deep lunges if sore.',
-    riskNotes: '',
-    termsAccepted: true,
-    pendingPlanId: null,
-  },
-  {
-    id: 'u-tom',
-    email: 'tom@gbtt',
-    password: 'demo',
-    name: 'Tom',
-    role: 'admin',
-    planId: 'casual',
-    creditsLeft: 0,
-    classesPerWeek: 0,
-    weeklyLockedOccurrenceIds: [],
-    heldOccurrenceIds: [],
-    activated: true,
-    showNameToClassmates: false,
-    paid: true,
-    paymentNote: '',
-    limitations: '',
-    riskNotes: '',
-    termsAccepted: true,
-  },
-  {
-    id: 'u-cover',
-    email: 'cover@gbtt',
-    password: 'demo',
-    name: 'Cover Trainer',
-    role: 'trainer',
-    planId: 'casual',
-    creditsLeft: 0,
-    classesPerWeek: 0,
-    weeklyLockedOccurrenceIds: [],
-    heldOccurrenceIds: [],
-    activated: true,
-    showNameToClassmates: false,
-    paid: true,
-    paymentNote: '',
-    limitations: '',
-    riskNotes: '',
-    termsAccepted: true,
-  },
-]
+const DEFAULT_USERS: SimUser[] = []
 
 const DEFAULT_SITE: SiteContent = {
   heroBlurb: 'Fit for Life — group workouts for every body at Rec Park Centre, Tākaka.',
@@ -580,29 +521,15 @@ const DEFAULT_SITE: SiteContent = {
     'I understand group fitness involves physical effort and accept responsibility for my own limits. I agree that Tom may edit my membership details and session bookings in line with studio policy.',
 }
 
-const DEFAULT_TEAM: TeamMember[] = [
-  { id: 'tom', name: 'Tom', role: 'lead', notes: 'Primary coach' },
-  { id: 'jess', name: 'Jess', role: 'trainer', notes: 'BodyBalance cover' },
-  { id: 'priya', name: 'Priya', role: 'trainer', notes: 'Mobility / evenings' },
-  { id: 'cover', name: 'Cover pool', role: 'trainer', notes: 'Weekend float' },
-]
+/*
+ * The team and the reminder list are read from Firestore, and the only users
+ * in this store are the ones a real Firebase sign-in binds into it. Seeding any
+ * of the three put invented trainers, a fictional client and demo to-dos in
+ * front of Tom, so all three start empty.
+ */
+const DEFAULT_TEAM: TeamMember[] = []
 
-const DEFAULT_REMINDERS: ReminderItem[] = [
-  {
-    id: 'rem-1',
-    title: 'Post Saturday Sweat teaser on Facebook',
-    dueLabel: 'Fri',
-    done: false,
-    kind: 'marketing',
-  },
-  {
-    id: 'rem-2',
-    title: 'Reorder mats / check first-aid kit',
-    dueLabel: 'Mon',
-    done: false,
-    kind: 'ops',
-  },
-]
+const DEFAULT_REMINDERS: ReminderItem[] = []
 
 interface StoreState {
   exercises: Exercise[]
@@ -821,20 +748,8 @@ export function getOccurrences(): ClassOccurrence[] {
   return store.occurrences
 }
 
-export function getUsers(): SimUser[] {
-  return store.users
-}
-
 export function getSiteContent(): SiteContent {
   return store.site
-}
-
-export function getTeam(): TeamMember[] {
-  return store.team
-}
-
-export function getReminders(): ReminderItem[] {
-  return store.reminders
 }
 
 export function getOutbox(): OutboxMessage[] {
@@ -940,37 +855,6 @@ export function visibleRosterNames(occ: ClassOccurrence, viewer: SimUser | null)
   const shares = occ.roster.some((r) => r.memberId === viewer.id)
   if (!shares) return []
   return occ.roster.filter((r) => r.showName).map((r) => r.displayName)
-}
-
-/**
- * Local seed login for development only.
- *
- * Seed passwords are compiled into the public bundle, so in a production build
- * they must never open the staff portal — real staff sign-in goes through
- * Firebase Auth and is authorised by the `role` custom claim. Note that hiding
- * the admin UI is not itself security: anyone can force it to render from the
- * browser console. What actually protects data is that Firestore rules reject
- * a token without the claim, so every read and write fails.
- */
-export function login(email: string, password: string): string | null {
-  const user = store.users.find(
-    (u) => u.email.toLowerCase() === email.trim().toLowerCase() && u.password === password,
-  )
-  if (!user) {
-    return import.meta.env.PROD
-      ? 'Unknown email or password.'
-      : 'Unknown email or password (try seed credentials).'
-  }
-  if (import.meta.env.PROD && (user.role === 'admin' || user.role === 'trainer')) {
-    return 'Staff sign-in requires a Firebase account. Contact Tom if you cannot get in.'
-  }
-  if (user.role === 'member' && !user.activated) {
-    return 'Account not activated — enter the key from your confirmation email.'
-  }
-  store.sessionUserId = user.id
-  if (user.role === 'member') syncMemberWeeklyLocks(user)
-  persist()
-  return null
 }
 
 export function logout(): void {
@@ -1332,14 +1216,6 @@ export function setMemberPaid(userId: string, paid: boolean, note?: string): voi
   persist()
 }
 
-export function setMemberRisk(userId: string, limitations: string, riskNotes: string): void {
-  const u = userById(userId)
-  if (!u) return
-  u.limitations = limitations
-  u.riskNotes = riskNotes
-  persist()
-}
-
 export function updateSiteContent(patch: Partial<SiteContent>): void {
   store.site = { ...store.site, ...patch }
   persist()
@@ -1357,28 +1233,6 @@ export function sendSubscriberEmail(subject: string, body: string): void {
     },
     ...store.outbox,
   ]
-  persist()
-}
-
-export function toggleReminder(id: string): void {
-  const r = store.reminders.find((x) => x.id === id)
-  if (!r) return
-  r.done = !r.done
-  persist()
-}
-
-export function addReminder(title: string, dueLabel: string, kind: 'marketing' | 'ops'): void {
-  store.reminders = [
-    ...store.reminders,
-    { id: `rem-${Date.now()}`, title, dueLabel, done: false, kind },
-  ]
-  persist()
-}
-
-export function updateTeamMember(id: string, notes: string): void {
-  const t = store.team.find((x) => x.id === id)
-  if (!t) return
-  t.notes = notes
   persist()
 }
 

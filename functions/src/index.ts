@@ -1751,6 +1751,52 @@ export const approveMember = onCall(async (request) => {
 })
 
 /**
+ * Admin promotes a client to trainer, or returns them to member.
+ *
+ * The custom claim is the thing rules actually check, and only the Admin SDK
+ * can set it, so this cannot be a client write. The Firestore role is written
+ * in the same call to stop the two drifting apart — a profile that says
+ * "trainer" while the token says "member" would show staff screens that every
+ * read behind them then denies.
+ */
+export const setMemberRole = onCall(async (request) => {
+  requireAdmin(request)
+
+  const uid = String(request.data?.uid ?? '').trim()
+  const role = String(request.data?.role ?? '').trim()
+  if (!uid) {
+    throw new HttpsError('invalid-argument', 'uid is required.')
+  }
+  if (role !== 'member' && role !== 'trainer') {
+    throw new HttpsError('invalid-argument', 'Role must be member or trainer.')
+  }
+  if (uid === request.auth!.uid) {
+    throw new HttpsError('failed-precondition', 'You cannot change your own role.')
+  }
+
+  const userRef = db.doc(`users/${uid}`)
+  if (!(await userRef.get()).exists) {
+    throw new HttpsError('not-found', 'Member not found.')
+  }
+
+  const userRecord = await auth.getUser(uid)
+  await auth.setCustomUserClaims(uid, { ...(userRecord.customClaims ?? {}), role })
+  await userRef.set({ profile: { role } }, { merge: true })
+
+  await db.collection('audit').add({
+    type: 'setMemberRole',
+    uid,
+    role,
+    actorUid: request.auth!.uid,
+    at: FieldValue.serverTimestamp(),
+  })
+
+  // The claim rides on the ID token, so it only takes effect on the next
+  // refresh. The caller should tell them to sign out and back in.
+  return { ok: true, uid, role }
+})
+
+/**
  * A member asks to move plan. This cannot be a client write: `membership` is
  * priced, so Firestore rules keep members out of it. The request is recorded
  * for Tom to action and the member's current plan keeps running until he does.

@@ -75,6 +75,12 @@ before(async () => {
       ratePerClass: 17,
       classesPerWeek: 0,
     })
+    await setDoc(doc(db, 'reminders', 'rem-1'), {
+      title: 'Reorder mats',
+      dueLabel: 'Mon',
+      kind: 'ops',
+      done: false,
+    })
     await setDoc(doc(db, 'planChangeRequests', MEMBER), {
       uid: MEMBER,
       memberName: 'Member',
@@ -458,6 +464,32 @@ describe('seasons and pricing are admin-set', () => {
     await assertSucceeds(
       setDoc(doc(adminDb(), 'pricingPlans', 'casual'), { ratePerClass: 17 }, { merge: true }),
     )
+  })
+})
+
+describe('staff reminders', () => {
+  it('member cannot read staff reminders', async () => {
+    await assertFails(getDoc(doc(memberDb(), 'reminders', 'rem-1')))
+  })
+
+  it('member cannot add a reminder', async () => {
+    await assertFails(
+      setDoc(doc(memberDb(), 'reminders', 'forged'), { title: 'x', kind: 'ops', done: false }),
+    )
+  })
+
+  it('trainer can add a reminder', async () => {
+    await assertSucceeds(
+      setDoc(doc(trainerDb(), 'reminders', 'rem-trainer'), {
+        title: 'Restock mats',
+        kind: 'ops',
+        done: false,
+      }),
+    )
+  })
+
+  it('trainer can delete a reminder', async () => {
+    await assertSucceeds(deleteDoc(doc(trainerDb(), 'reminders', 'rem-1')))
   })
 })
 

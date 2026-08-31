@@ -15,9 +15,7 @@ import {
   collectionGroup,
   doc,
   onSnapshot,
-  query,
   setDoc,
-  where,
   type DocumentData,
 } from 'firebase/firestore'
 import { getFirestoreDb } from './init'
@@ -42,6 +40,10 @@ export interface LiveMember {
   name: string
   email: string
   status: string
+  /** 'member', or 'trainer'/'admin' for a client Tom has elevated. */
+  role: string
+  limitations: string
+  riskNotes: string
   planId: string
   classesPerWeek: number
   discountPct: number
@@ -87,12 +89,16 @@ function mapMember(uid: string, data: DocumentData): LiveMember {
   const membership = (data.membership ?? {}) as DocumentData
   const billing = (data.billing ?? {}) as DocumentData
   const attendance = (data.attendanceSummary ?? {}) as DocumentData
+  const clinical = (data.clinical ?? {}) as DocumentData
 
   return {
     uid,
     name: String(profile.name ?? uid),
     email: String(profile.email ?? ''),
     status: String(profile.status ?? 'pending'),
+    role: String(profile.role ?? 'member'),
+    limitations: String(clinical.limitations ?? ''),
+    riskNotes: String(clinical.riskNotes ?? ''),
     planId: String(membership.planId ?? 'casual'),
     classesPerWeek: Number(membership.classesPerWeek ?? 0),
     discountPct: Number(billing.customDiscountPct ?? 0),
@@ -214,7 +220,13 @@ export function subscribePlanChangeRequests(
   )
 }
 
-/** Every member profile. Staff only — rules deny this to members. */
+/**
+ * Every account. Staff only — rules deny this to members.
+ *
+ * Deliberately unfiltered by role: the team list is just the elevated end of
+ * the same roll, so filtering here would mean a second listener over the same
+ * documents. Callers narrow by `role`.
+ */
 export function subscribeMembers(onChange: (state: LiveMembersState) => void): () => void {
   const db = getFirestoreDb()
   if (!db) {
@@ -225,7 +237,7 @@ export function subscribeMembers(onChange: (state: LiveMembersState) => void): (
   onChange({ status: 'loading', members: [] })
 
   return onSnapshot(
-    query(collection(db, 'users'), where('profile.role', '==', 'member')),
+    collection(db, 'users'),
     (snap) => {
       const members = snap.docs
         .map((d) => mapMember(d.id, d.data()))
@@ -269,6 +281,26 @@ export function subscribeBillingPeriods(onChange: (state: LiveBillingState) => v
     },
     (err) => onChange({ status: 'error', byMember: {}, error: err.message }),
   )
+}
+
+/**
+ * Save a member's limitations and risk notes.
+ *
+ * Admin-only by rules: `clinical` is one of the fields a member may not change
+ * on their own document, so what a trainer reads at the door is what Tom wrote.
+ */
+export async function saveMemberClinical(
+  uid: string,
+  clinical: { limitations?: string; riskNotes?: string },
+): Promise<string | null> {
+  const db = getFirestoreDb()
+  if (!db) return 'Firebase not configured.'
+  try {
+    await setDoc(doc(db, 'users', uid), { clinical }, { merge: true })
+    return null
+  } catch (e) {
+    return e instanceof Error ? e.message : 'Could not save these notes.'
+  }
 }
 
 /** Total still owed across a member's unpaid periods, in cents. */

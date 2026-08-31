@@ -6,7 +6,21 @@ import {
   studioMarkAttendance,
   studioLogout,
   studioRemoveSession,
+  studioSetMemberRole,
 } from '@gbtt/shared/studio/studioAuth'
+import {
+  saveMemberClinical,
+  subscribeMembers,
+  type LiveMembersState,
+} from '@gbtt/shared/studio/firebase/liveMembers'
+import {
+  addReminder,
+  removeReminder,
+  setReminderDone,
+  subscribeReminders,
+  type LiveRemindersState,
+  type ReminderKind,
+} from '@gbtt/shared/studio/firebase/liveReminders'
 import { StudioSignIn } from '../../components/StudioSignIn'
 import {
   createLiveSession,
@@ -25,7 +39,6 @@ import { ClientAccounts } from '../../components/ClientAccounts'
 import {
   WEEKDAYS,
   addExercise,
-  addReminder,
   archiveClassType,
   classTypeById,
   createClassType,
@@ -35,29 +48,23 @@ import {
   getEquipmentChecked,
   getExercises,
   getOutbox,
-  getReminders,
   getSessionRole,
   getSessionUser,
   getSiteContent,
-  getTeam,
   getTransferWindowHours,
-  getUsers,
   logout,
   renameExercise,
   sendSubscriberEmail,
   sessionIsFull,
   setClassCap,
   setEquipmentChecked,
-  setMemberRisk,
   setTransferWindowHours,
   spotsLeft,
   subscribeStore,
   syncLabels,
   toggleExercise,
-  toggleReminder,
   updateClassType,
   updateSiteContent,
-  updateTeamMember,
   type ClassOccurrence,
   type ExerciseDisplay,
   type Weekday,
@@ -158,6 +165,9 @@ export default function ClassBoard() {
   const [mailSubject, setMailSubject] = useState('GBTT timetable update')
   const [mailBody, setMailBody] = useState('Hi team — here’s this week’s schedule.')
   const [remTitle, setRemTitle] = useState('')
+  const [remDue, setRemDue] = useState('')
+  const [elevateUid, setElevateUid] = useState('')
+  const [remKind, setRemKind] = useState<ReminderKind>('ops')
   const [newOccDay, setNewOccDay] = useState<Weekday>('Mon')
   const [newOccTime, setNewOccTime] = useState('07:00')
   const [addMemberId, setAddMemberId] = useState('')
@@ -182,6 +192,16 @@ export default function ClassBoard() {
   const week = useWeekNavigation()
   const live = useLiveSessions(week.weekStart)
   const liveRoster = useSessionRoster(live.status === 'ready' ? selectedOccId : null)
+  const [liveMembers, setLiveMembers] = useState<LiveMembersState>({
+    status: 'loading',
+    members: [],
+  })
+  const [reminders, setReminders] = useState<LiveRemindersState>({
+    status: 'loading',
+    reminders: [],
+  })
+  useEffect(() => subscribeMembers(setLiveMembers), [])
+  useEffect(() => subscribeReminders(setReminders), [])
   const byDay = live.byDay
   const [actionError, setActionError] = useState<string | null>(null)
   const [actionNote, setActionNote] = useState<string | null>(null)
@@ -263,10 +283,11 @@ export default function ClassBoard() {
     )
   }
   const exercises = getExercises()
-  const users = getUsers().filter((u) => u.role === 'member')
+  // Everyone on the roll, split by the role claim: clients to bill and screen
+  // for risk, and the elevated few who can run the board in Tom's absence.
+  const users = liveMembers.members.filter((u) => u.role === 'member')
+  const team = liveMembers.members.filter((u) => u.role === 'trainer' || u.role === 'admin')
   const site = getSiteContent()
-  const team = getTeam()
-  const reminders = getReminders()
   const outbox = getOutbox()
   const equipment = getEquipmentChecked()
   const sync = useMemo(() => syncLabels(), [tab, selectedTypeId, tick])
@@ -503,9 +524,9 @@ export default function ClassBoard() {
                     >
                       <option value="">Add client to session…</option>
                       {users
-                        .filter((u) => !selectedOcc.roster.some((r) => r.memberId === u.id))
+                        .filter((u) => !selectedOcc.roster.some((r) => r.memberId === u.uid))
                         .map((u) => (
-                          <option key={u.id} value={u.id}>
+                          <option key={u.uid} value={u.uid}>
                             {u.name}
                           </option>
                         ))}
@@ -602,8 +623,11 @@ export default function ClassBoard() {
                         void saveSessionEdit(selectedOcc, { instructorId: e.target.value })
                       }}
                     >
+                      {/* An unassigned session is a real state while the team
+                          list is still being built up. */}
+                      <option value="">Unassigned</option>
                       {team.map((i) => (
-                        <option key={i.id} value={i.id}>
+                        <option key={i.uid} value={i.uid}>
                           {i.name}
                         </option>
                       ))}
@@ -1038,17 +1062,24 @@ export default function ClassBoard() {
       {tab === 'risk' && (
         <section className="yacht-panel app-enter app-section">
           <h2>Personal limitations &amp; risk</h2>
+          {liveMembers.status === 'loading' ? <p className="hint">Loading clients…</p> : null}
+          {liveMembers.status === 'error' ? (
+            <p className="form-error">Could not load clients: {liveMembers.error}</p>
+          ) : null}
+          {liveMembers.status === 'ready' && !users.length ? (
+            <p className="hint">No clients yet. Notes appear here once accounts exist.</p>
+          ) : null}
           {users.map((u) => (
-            <article key={u.id} className="risk-card">
+            <article key={u.uid} className="risk-card">
               <h3>{u.name}</h3>
               <label className="field">
                 Limitations (member-reported)
                 <textarea
                   rows={2}
-                  value={u.limitations}
-                  onChange={(e) => {
-                    setMemberRisk(u.id, e.target.value, u.riskNotes)
-                    refresh()
+                  defaultValue={u.limitations}
+                  onBlur={(e) => {
+                    if (e.target.value === u.limitations) return
+                    void saveMemberClinical(u.uid, { limitations: e.target.value })
                   }}
                 />
               </label>
@@ -1056,10 +1087,10 @@ export default function ClassBoard() {
                 Observed risk notes (staff)
                 <textarea
                   rows={2}
-                  value={u.riskNotes}
-                  onChange={(e) => {
-                    setMemberRisk(u.id, u.limitations, e.target.value)
-                    refresh()
+                  defaultValue={u.riskNotes}
+                  onBlur={(e) => {
+                    if (e.target.value === u.riskNotes) return
+                    void saveMemberClinical(u.uid, { riskNotes: e.target.value })
                   }}
                 />
               </label>
@@ -1186,22 +1217,38 @@ export default function ClassBoard() {
       {tab === 'reminders' && (
         <section className="yacht-panel app-enter app-section">
           <h2>Marketing &amp; ops reminders</h2>
+          {reminders.status === 'loading' ? <p className="hint">Loading reminders…</p> : null}
+          {reminders.status === 'error' ? (
+            <p className="form-error">Could not load reminders: {reminders.error}</p>
+          ) : null}
+          {reminders.status === 'ready' && !reminders.reminders.length ? (
+            <p className="hint">Nothing on the list. Add the first reminder below.</p>
+          ) : null}
           <ul className="reminder-list">
-            {reminders.map((r) => (
-              <li key={r.id}>
+            {reminders.reminders.map((r) => (
+              <li key={r.id} className="reminder-row">
                 <label className={`exercise-check${r.done ? ' on' : ''}`}>
                   <input
                     type="checkbox"
                     checked={r.done}
-                    onChange={() => {
-                      toggleReminder(r.id)
-                      refresh()
-                    }}
+                    onChange={() => void setReminderDone(r.id, !r.done)}
                   />
                   <span>
                     [{r.kind}] {r.title} · due {r.dueLabel}
                   </span>
                 </label>
+                <button
+                  type="button"
+                  className="icon-btn danger"
+                  aria-label={`Remove reminder: ${r.title}`}
+                  title="Remove"
+                  onClick={() => {
+                    if (!confirm(`Remove reminder "${r.title}"?`)) return
+                    void removeReminder(r.id)
+                  }}
+                >
+                  ×
+                </button>
               </li>
             ))}
           </ul>
@@ -1211,14 +1258,27 @@ export default function ClassBoard() {
               onChange={(e) => setRemTitle(e.target.value)}
               placeholder="New reminder"
             />
+            <input
+              value={remDue}
+              onChange={(e) => setRemDue(e.target.value)}
+              placeholder="Due (e.g. Fri)"
+            />
+            <select value={remKind} onChange={(e) => setRemKind(e.target.value as ReminderKind)}>
+              <option value="ops">ops</option>
+              <option value="marketing">marketing</option>
+            </select>
             <button
               type="button"
               className="btn ghost"
-              onClick={() => {
+              onClick={async () => {
                 if (!remTitle.trim()) return
-                addReminder(remTitle.trim(), 'Soon', 'ops')
+                const err = await addReminder(remTitle, remDue, remKind)
+                if (err) {
+                  setActionError(err)
+                  return
+                }
                 setRemTitle('')
-                refresh()
+                setRemDue('')
               }}
             >
               Add
@@ -1231,26 +1291,69 @@ export default function ClassBoard() {
         <section className="yacht-panel app-enter app-section">
           <h2>Team &amp; trainers</h2>
           <p className="hint">
-            A trainer login keeps the board running when Tom is away.
+            A trainer login keeps the board running when Tom is away. Trainers are client accounts
+            that have been elevated — there is no separate trainer account to create. A role change
+            takes effect when they next sign out and back in.
           </p>
+          {liveMembers.status === 'error' ? (
+            <p className="form-error">Could not load accounts: {liveMembers.error}</p>
+          ) : null}
           <ul className="admin-member-list">
             {team.map((t) => (
-              <li key={t.id}>
+              <li key={t.uid}>
                 <strong>{t.name}</strong> · {t.role}
-                <label className="field">
-                  Notes
-                  <input
-                    value={t.notes}
-                    disabled={role !== 'admin'}
-                    onChange={(e) => {
-                      updateTeamMember(t.id, e.target.value)
-                      refresh()
+                {role === 'admin' && t.role === 'trainer' ? (
+                  <button
+                    type="button"
+                    className="btn ghost"
+                    disabled={busy}
+                    onClick={async () => {
+                      if (!confirm(`Return ${t.name} to a standard client account?`)) return
+                      setActionError(await studioSetMemberRole(t.uid, 'member'))
                     }}
-                  />
-                </label>
+                  >
+                    Remove trainer access
+                  </button>
+                ) : null}
               </li>
             ))}
           </ul>
+
+          {role === 'admin' ? (
+            <>
+              <h3>Elevate a client</h3>
+              {!users.length ? (
+                <p className="hint">No client accounts to elevate yet.</p>
+              ) : (
+                <div className="add-exercise-row">
+                  <select
+                    value={elevateUid}
+                    onChange={(e) => setElevateUid(e.target.value)}
+                    aria-label="Client to make a trainer"
+                  >
+                    <option value="">Choose a client…</option>
+                    {users.map((u) => (
+                      <option key={u.uid} value={u.uid}>
+                        {u.name} ({u.email})
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    className="btn ghost"
+                    disabled={!elevateUid || busy}
+                    onClick={async () => {
+                      const err = await studioSetMemberRole(elevateUid, 'trainer')
+                      setActionError(err)
+                      if (!err) setElevateUid('')
+                    }}
+                  >
+                    Make trainer
+                  </button>
+                </div>
+              )}
+            </>
+          ) : null}
         </section>
       )}
 

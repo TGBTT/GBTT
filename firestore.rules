@@ -147,6 +147,13 @@ service cloud.firestore {
       }
     }
 
+    // Staff working notes. Not member data, and nothing is priced off them, so
+    // any staff account may keep the list current.
+    match /reminders/{reminderId} {
+      allow read: if isStaff();
+      allow write: if isStaff();
+    }
+
     // A member's open request to move plan. Written only by the callable, which
     // holds the price list the request is validated against; a direct write
     // would let a member name a plan and a price that do not match.

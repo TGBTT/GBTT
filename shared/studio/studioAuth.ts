@@ -683,6 +683,26 @@ export async function studioRequestPlanChange(
   }
 }
 
+/**
+ * Admin promotes a client to trainer, or returns them to member.
+ *
+ * The new claim only reaches them when their ID token next refreshes, so tell
+ * them to sign out and back in before expecting the admin console to open.
+ */
+export async function studioSetMemberRole(
+  uid: string,
+  role: 'member' | 'trainer',
+): Promise<string | null> {
+  const functions = getFirebaseFunctions()
+  if (!functions) return 'Firebase not configured.'
+  try {
+    await httpsCallable(functions, 'setMemberRole')({ uid, role })
+    return null
+  } catch (e) {
+    return e instanceof Error ? e.message : 'Could not change this role.'
+  }
+}
+
 /** Admin approves or declines a member's open plan change. */
 export async function studioResolvePlanChange(
   uid: string,
