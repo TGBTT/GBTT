@@ -792,9 +792,10 @@ export const calculateBillingPeriod = onCall(async (request) => {
    * the charge with it.
    *
    * There is deliberately no separate subscription line. The tier a member is
-   * on sets their per-class rate ($15 at one a week, $13 at two, and so on),
+   * on sets their per-class rate — the more classes a week, the lower the rate —
    * and that rate is already applied to each seat below. Adding a plan fee on
-   * top billed those same classes twice.
+   * top billed those same classes twice. The rates themselves live in
+   * `pricingPlans`, set from Pricing in the admin console.
    */
   const rosterQuery = await db.collectionGroup('roster').where('memberId', '==', uid).get()
 
@@ -1653,13 +1654,26 @@ async function requireActiveMember(uid: string) {
   throw new HttpsError('permission-denied', `Account status "${status}" cannot book classes.`)
 }
 
-const DEFAULT_DROP_IN_RATE = 17
-
-/** Drop-in price. Extras are charged at the casual rate whatever plan the member is on. */
+/**
+ * Drop-in price. Extras are charged at the casual rate whatever plan the member
+ * is on.
+ *
+ * Refuses rather than falling back to a figure written here. Pricing is set in
+ * one place — the Pricing section of the admin console — and a hardcoded
+ * default is a second, invisible one: if the casual plan were ever missing, it
+ * would quietly bill everybody a price nobody had chosen. Being told the price
+ * is not set is recoverable in a minute; a month of wrong invoices is not.
+ */
 async function dropInRateCents(): Promise<number> {
   const snap = await db.doc('pricingPlans/casual').get()
   const rate = Number(snap.data()?.ratePerClass)
-  return Math.round((Number.isFinite(rate) && rate > 0 ? rate : DEFAULT_DROP_IN_RATE) * 100)
+  if (!Number.isFinite(rate) || rate <= 0) {
+    throw new HttpsError(
+      'failed-precondition',
+      'The drop-in rate has not been set. Add it under Pricing in the admin console before taking casual bookings.',
+    )
+  }
+  return Math.round(rate * 100)
 }
 
 /**

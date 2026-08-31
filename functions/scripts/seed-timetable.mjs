@@ -48,7 +48,9 @@ const CLASS_TYPES = [
  * on top. `casual` is the drop-in rate charged for one-off bookings, including
  * extras taken by members already on a subscription.
  *
- * Admin edits these in the console; these values only seed the first run.
+ * Prices are set in Pricing in the admin console, and that is the only place
+ * they are edited. These figures exist so a brand-new project has a plan list
+ * at all; once a plan document exists, its rate is left alone here.
  */
 const PRICING_PLANS = [
   { id: 'casual', name: 'Guest / casual', ratePerClass: 17, classesPerWeek: 0 },
@@ -285,8 +287,17 @@ Seed the class catalog, timetable slots and weekly sessions.
   console.log('Wrote class catalog.')
 
   for (const plan of PRICING_PLANS) {
-    // Merged, so re-running never resets a rate the admin has since changed.
-    await db.doc(`pricingPlans/${plan.id}`).set(plan, { merge: true })
+    /*
+     * The rate is seeded once and never again. Merging the whole plan looked
+     * safe but was not: `ratePerClass` is in the payload, so every re-run of
+     * the seeder silently put the price list back to what is written here,
+     * undoing whatever Tom had set in Pricing. The name and the weekly
+     * allowance are structural and still merged.
+     */
+    const ref = db.doc(`pricingPlans/${plan.id}`)
+    const exists = (await ref.get()).exists
+    const { ratePerClass, ...structure } = plan
+    await ref.set(exists ? structure : { ...structure, ratePerClass }, { merge: true })
   }
   console.log('Wrote pricing plans.')
 
