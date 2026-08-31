@@ -1,42 +1,52 @@
 import { Link } from 'react-router-dom'
 import { AppCardImage } from '../components/AppHeroImage'
+import { SiteFooter } from '../components/SiteFooter'
 import { SiteNav } from '../components/SiteNav'
 
 export default function Hub() {
   return (
     <div className="hub-page theme-gbtt">
+      <a className="skip-link" href="#main">
+        Skip to content
+      </a>
       <SiteNav />
-      <header className="hub-hero">
-        <p className="hub-kicker">Golden Bay Team Training</p>
-        <h1>Member &amp; trainer apps</h1>
-        <p className="hub-lead">
-          Fit for Life — book classes, manage your weekly membership, and run the studio from one
-          place. Sticky nav matches the main GBTT site.
-        </p>
-        <p className="hub-lead">
-          <a href="../#apps">← Back to GBTT homepage</a>
-        </p>
-      </header>
-      <section className="hub-group">
-        <div className="hub-grid">
-          <Link to="/fitness/studioflow" className="hub-card hub-card-studioflow">
-            <AppCardImage id="studioflow" alt="" />
-            <div className="hub-card-body">
-              <p className="hub-card-kind">For members &amp; guests</p>
-              <h3>Member booking</h3>
-              <p>Weekly timetable, subscriptions, reshuffle, planned exercises, name privacy.</p>
+      <main id="main" className="hub-main">
+        <section className="section">
+          <div className="section__inner">
+            <p className="eyebrow">Member app</p>
+            <h1>Book a class</h1>
+            <p className="lede">
+              Sign in to reserve your slot, manage your weekly membership, or open trainer admin.
+              Live fill stays in sync with the homepage timetable.
+            </p>
+            <div className="hub-grid">
+              <Link to="/fitness/studioflow" className="hub-card">
+                <AppCardImage id="studioflow" />
+                <div className="hub-card-body">
+                  <p className="hub-card-kind">For members &amp; guests</p>
+                  <h2>Member booking</h2>
+                  <p>
+                    Weekly timetable, subscriptions, reshuffle, planned exercises, and name privacy.
+                  </p>
+                  <span className="hub-card-go">Open member booking →</span>
+                </div>
+              </Link>
+              <Link to="/fitness/classboard" className="hub-card">
+                <AppCardImage id="classboard" />
+                <div className="hub-card-body">
+                  <p className="hub-card-kind">For Tom &amp; trainers</p>
+                  <h2>Trainer admin</h2>
+                  <p>
+                    Schedule, roll-call, payments, risk, legal, notify, reminders, and site content.
+                  </p>
+                  <span className="hub-card-go">Open trainer admin →</span>
+                </div>
+              </Link>
             </div>
-          </Link>
-          <Link to="/fitness/classboard" className="hub-card hub-card-classboard">
-            <AppCardImage id="classboard" alt="" />
-            <div className="hub-card-body">
-              <p className="hub-card-kind">For Tom &amp; trainers</p>
-              <h3>Trainer admin</h3>
-              <p>Schedule, role-call, payments, risk, legal, notify, reminders, site content.</p>
-            </div>
-          </Link>
-        </div>
-      </section>
+          </div>
+        </section>
+      </main>
+      <SiteFooter />
     </div>
   )
 }

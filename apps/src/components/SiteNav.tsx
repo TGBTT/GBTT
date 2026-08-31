@@ -5,11 +5,46 @@ import { useAppPresentation } from '../context/AppPresentation'
 import { getSessionRole, getSessionUser, subscribeStore } from '../shared/fitnessStudio'
 import { SIGN_IN_PATH, homePathForRole } from './studioRoutes'
 
-function marketingHref(path: string): string {
+export function marketingHref(path: string): string {
   const base = import.meta.env.BASE_URL
   const root = base.replace(/\/?app\/?$/, '/') || '/'
   const clean = path.startsWith('/') ? path.slice(1) : path
   return `${root}${clean}`
+}
+
+/** Public GBTT site — `/` when apps are served under `/app/`. */
+export function marketingHomeHref(): string {
+  return marketingHref('')
+}
+
+async function leaveToMarketingSite(): Promise<void> {
+  try {
+    await studioLogout()
+  } finally {
+    window.location.assign(marketingHomeHref())
+  }
+}
+
+export function InAppLogoutButton({ className = 'admin-nav-signout' }: { className?: string }) {
+  return (
+    <button type="button" className={className} onClick={() => void leaveToMarketingSite()}>
+      Log out
+    </button>
+  )
+}
+
+/** Sticky bar used inside member/admin apps instead of the marketing nav. */
+export function InAppExitBar() {
+  return (
+    <header className="site-header site-header--in-app">
+      <div className="site-header__inner">
+        <a className="app-back" href={marketingHomeHref()}>
+          ← GBTT apps
+        </a>
+        <InAppLogoutButton />
+      </div>
+    </header>
+  )
 }
 
 const NAV = [
@@ -43,7 +78,7 @@ export function SiteNav() {
           <img src={logoSrc} alt="" width={48} height={48} />
           <span className="brand-mark__text">
             <span className="brand-mark__name">GBTT</span>
-            <span className="brand-mark__sub">Golden Bay Team Training · Fit for Life</span>
+            <span className="brand-mark__sub">Golden Bay Team Training</span>
           </span>
         </a>
         <div className="site-header__end">

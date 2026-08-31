@@ -11,7 +11,7 @@ import { TabletFrame } from './TabletFrame'
 
 const ChromeHostContext = createContext<HTMLElement | null>(null)
 
-/** Desk stage + chrome host above the tablet; simulation stays inside the bezel. */
+/** Renders marketing / nav chrome above the app when showcase mode is on. */
 export function ShowcaseShell({ children }: { children: ReactNode }) {
   const { showShowcaseChrome } = useAppPresentation()
   const [host, setHost] = useState<HTMLElement | null>(null)
@@ -33,7 +33,7 @@ export function ShowcaseShell({ children }: { children: ReactNode }) {
   )
 }
 
-/** Renders marketing / nav chrome above the tablet when showcase mode is on. */
+/** Renders marketing / nav chrome above the app when showcase mode is on. */
 export function ShowcaseChrome({ children }: { children: ReactNode }) {
   const host = useContext(ChromeHostContext)
   const { showShowcaseChrome } = useAppPresentation()

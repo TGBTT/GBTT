@@ -599,7 +599,8 @@ export default function ClassBoard() {
         (booked
           ? `, and ${booked} with bookings will be archived so attendance is kept.`
           : '.') +
-        `\n\nWeeks that have already run are kept. It will also stop repeating.`,
+        `\n\nEither way they come off the shared Google Calendar, so anyone subscribed to it stops ` +
+        `seeing them.\n\nWeeks that have already run are kept. It will also stop repeating.`,
     )
     if (!confirmed) return
 
@@ -684,7 +685,7 @@ export default function ClassBoard() {
     const isMember = role === 'member'
     return (
       <div className="classboard-page theme-gbtt">
-        <AppOutsideShell imageId="classboard" showBackLink={false} />
+        <AppOutsideShell imageId="classboard" />
         <div className="app-sections">
         <header className="classboard-top app-section">
           <div>
@@ -731,7 +732,7 @@ export default function ClassBoard() {
 
   return (
     <div className="classboard-page theme-gbtt">
-      <AppOutsideShell imageId="classboard" showBackLink={false} />
+      <AppOutsideShell imageId="classboard" />
       <div className="app-sections">
       <header className="classboard-top app-section">
         <div>
@@ -1594,7 +1595,8 @@ export default function ClassBoard() {
             <p className="hint">
               A session nobody has booked is deleted outright. Once anyone has booked or attended,
               it is archived instead — hidden from the timetable, with the roster kept so members
-              keep their record of what they attended and were charged for.
+              keep their record of what they attended and were charged for. Both remove it from the
+              shared Google Calendar that members subscribe to.
             </p>
             {sessionList.length === 0 ? (
               <p className="hint">No sessions scheduled for {week.label}.</p>

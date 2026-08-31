@@ -5677,6 +5677,11 @@ table.hall-time-grid {
   font-size: 0.65rem;
 }
 
+.app-app-bar .admin-nav-signout {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
 .app-quote-minimal {
   margin: 1rem 0 0;
   font-size: 0.85rem;
@@ -6539,7 +6544,6 @@ table.hall-time-grid {
 }
 
 @media (min-width: 1200px) {
-  .showcase-chrome,
   .tablet-device {
     width: min(1180px, calc(100vw - 4rem));
   }

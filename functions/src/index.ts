@@ -514,6 +514,36 @@ const SCHEDULE_FIELDS = [
 ] as const
 
 /**
+ * Take a session's event off the shared calendar.
+ *
+ * Matched on the stored `calendarEventId` first, falling back to a search for
+ * `sessionId` within the week: sessions written before the id was kept have
+ * nothing else to match on, and the fallback is what stops those being
+ * stranded on subscribers' calendars.
+ */
+async function deleteSharedCalendarEvent(
+  sessionId: string,
+  fields: Record<string, unknown>,
+  source: string,
+): Promise<void> {
+  const result = await callAppsScript(
+    {
+      action: 'calendarDeleteSession',
+      sessionId,
+      calendarEventId: String(fields.calendarEventId ?? ''),
+      weekStart: String(fields.weekStart ?? ''),
+      source,
+    },
+    webhookSecret.value(),
+    formEndpoint.value(),
+  )
+
+  if (!result.ok) {
+    console.error('calendarDeleteSession failed', sessionId, result.error)
+  }
+}
+
+/**
  * Keep the shared class calendar in step with the timetable.
  *
  * Guarded on the schedule fields so the bookedCount churn written by every
@@ -525,7 +555,26 @@ export const onSessionWrite = onDocumentWritten(
   async (event) => {
     const before = event.data?.before.data()
     const after = event.data?.after.data()
+    const sessionId = event.params.sessionId
+
+    /*
+     * A class that has stopped running has to come off the shared calendar, or
+     * everyone subscribed to it keeps an entry for a session nobody can
+     * attend. Both ways of removing one arrive here: `removeSession` deletes
+     * the document when nobody had booked, and flags it `cancelled` when a
+     * roster had to be kept for attendance and billing.
+     */
     if (!after) {
+      if (before) await deleteSharedCalendarEvent(sessionId, before, 'onSessionWrite:deleted')
+      return
+    }
+
+    if (after.cancelled === true) {
+      // Only on the transition, so re-saving an already-cancelled session does
+      // not spend a call trying to delete an event that is already gone.
+      if (before?.cancelled !== true) {
+        await deleteSharedCalendarEvent(sessionId, after, 'onSessionWrite:cancelled')
+      }
       return
     }
 
@@ -541,7 +590,7 @@ export const onSessionWrite = onDocumentWritten(
     const result = await callAppsScript(
       {
         action: 'calendarUpsertSession',
-        sessionId: event.params.sessionId,
+        sessionId,
         calendarEventId: String(after.calendarEventId ?? ''),
         weekStart: String(after.weekStart ?? ''),
         dayLabel: String(after.dayLabel ?? ''),
@@ -556,10 +605,92 @@ export const onSessionWrite = onDocumentWritten(
     )
 
     if (!result.ok) {
-      console.error('calendarUpsertSession failed', event.params.sessionId, result.error)
+      console.error('calendarUpsertSession failed', sessionId, result.error)
+      return
+    }
+
+    /*
+     * Keep the event id so a later move or removal targets that event exactly
+     * rather than searching the week for it. `calendarEventId` is not a
+     * schedule field, so writing it back does not re-trigger this sync.
+     */
+    const eventId = String(
+      (result.data as { calendarEventId?: string } | undefined)?.calendarEventId ?? '',
+    )
+    if (eventId && eventId !== String(after.calendarEventId ?? '')) {
+      await event.data?.after.ref.set({ calendarEventId: eventId }, { merge: true })
     }
   },
 )
+
+/**
+ * A day. The subscribe links only change when the calendar itself is replaced,
+ * and every member app load would otherwise spend an Apps Script call on them.
+ */
+const CALENDAR_LINKS_CACHE_MS = 24 * 60 * 60 * 1000
+
+interface CalendarSubscribeLinks {
+  calendarId: string
+  publicUrl: string
+  icsUrl: string
+  htmlLink: string
+}
+
+function readCalendarLinks(data: Record<string, unknown> | undefined): CalendarSubscribeLinks {
+  return {
+    calendarId: String(data?.calendarId ?? ''),
+    publicUrl: String(data?.publicUrl ?? ''),
+    icsUrl: String(data?.icsUrl ?? ''),
+    htmlLink: String(data?.htmlLink ?? ''),
+  }
+}
+
+/**
+ * Where to subscribe to the shared class timetable.
+ *
+ * Open to any signed-in account rather than staff: adding the timetable to a
+ * personal diary is exactly what a member wants it for. The links are Google's
+ * public calendar URLs, so they only resolve once the calendar itself has been
+ * shared publicly in Google Calendar's settings.
+ *
+ * A stale cache is served in preference to an error, because a link that was
+ * right yesterday is still more use than a failure message.
+ */
+export const getCalendarSubscribeUrl = onCall({ secrets: [webhookSecret] }, async (request) => {
+  requireAuth(request)
+
+  const cacheRef = db.doc('meta/calendarSubscribe')
+  const cached = (await cacheRef.get()).data()
+  const cachedLinks = readCalendarLinks(cached)
+  const fetchedAt = cached?.fetchedAt instanceof Timestamp ? cached.fetchedAt.toMillis() : 0
+
+  if (cachedLinks.icsUrl && Date.now() - fetchedAt < CALENDAR_LINKS_CACHE_MS) {
+    return { ok: true, ...cachedLinks }
+  }
+
+  const result = await callAppsScript(
+    { action: 'calendarGetSubscribeUrl', source: 'getCalendarSubscribeUrl' },
+    webhookSecret.value(),
+    formEndpoint.value(),
+  )
+
+  if (!result.ok) {
+    if (cachedLinks.icsUrl) return { ok: true, ...cachedLinks }
+    throw new HttpsError(
+      'unavailable',
+      result.error ?? 'The shared calendar is not configured yet.',
+    )
+  }
+
+  const links = readCalendarLinks(result.data as Record<string, unknown> | undefined)
+  if (!links.icsUrl) {
+    throw new HttpsError('unavailable', 'The shared calendar returned no subscribe address.')
+  }
+
+  await cacheRef.set({ ...links, fetchedAt: FieldValue.serverTimestamp() }, { merge: true })
+
+  return { ok: true, ...links }
+})
 
 /** Admin callable — compute owed amount for a billing period from attended roster entries. */
 export const calculateBillingPeriod = onCall(async (request) => {

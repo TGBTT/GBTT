@@ -136,6 +136,19 @@
   margin-left: auto;
 }
 
+.site-header--in-app .site-header__inner {
+  min-height: 3.25rem;
+}
+
+.site-header--in-app .app-back {
+  color: var(--ink, #0a0a0a);
+  white-space: nowrap;
+}
+
+.site-header--in-app .admin-nav-signout {
+  margin-left: auto;
+}
+
 .admin-nav-badge {
   flex-shrink: 0;
   font-size: 0.68rem;
@@ -196,6 +209,7 @@
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+  max-width: 28rem;
 }
 
 .nav-toggle {
@@ -480,6 +494,57 @@
   gap: 0.75rem;
   align-items: flex-end;
   margin-top: 0.6rem;
+}
+
+/* —— Finding one member on the roll —— */
+.member-search {
+  max-width: 22rem;
+}
+
+.alpha-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin: 0.6rem 0;
+}
+
+/* The roll can run to every letter, so these stay compact rather than
+   inheriting the 48px tap target the tab chips use. */
+.alpha-filter .chip {
+  min-height: 34px;
+  min-width: 2rem;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.8rem;
+}
+
+/* —— One member, collapsed to a line —— */
+.member-card__summary {
+  cursor: pointer;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.15rem 0;
+}
+
+.member-card__name {
+  font-weight: 600;
+}
+
+.member-card__panel {
+  padding: 0.5rem 0 0.2rem 1rem;
+  border-left: 2px solid #d4d4d0;
+  margin-top: 0.5rem;
+}
+
+.archive-panel {
+  margin-top: 1.25rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid #d4d4d0;
+}
+
+.archive-panel > summary {
+  cursor: pointer;
 }
 
 /* —— Email verification prompt —— */
@@ -1265,4 +1330,271 @@
   padding: 0.75rem 1rem;
   text-align: center;
   font-size: 0.9rem;
+}
+
+/* Hub picker — same column, type, and cards as the marketing site. */
+.hub-page {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.hub-page .skip-link {
+  position: absolute;
+  left: -999px;
+  top: 0.75rem;
+  background: var(--ink);
+  color: #fff;
+  padding: 0.5rem 0.75rem;
+  z-index: 100;
+}
+
+.hub-page .skip-link:focus {
+  left: 0.75rem;
+}
+
+.hub-page .hub-main {
+  flex: 1;
+}
+
+.hub-page .section {
+  padding: clamp(2.5rem, 6vw, 4.5rem) var(--space);
+}
+
+.hub-page .section__inner {
+  max-width: var(--max);
+  margin: 0 auto;
+}
+
+.hub-page .eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin: 0 0 0.5rem;
+}
+
+.hub-page h1,
+.hub-page h2 {
+  font-family: var(--font-display);
+  letter-spacing: 0.04em;
+  font-weight: 400;
+  line-height: 1.05;
+  margin: 0 0 0.75rem;
+}
+
+.hub-page h1 {
+  font-size: clamp(2.6rem, 7vw, 4rem);
+}
+
+.hub-page h2 {
+  font-size: clamp(1.4rem, 3vw, 1.85rem);
+}
+
+.hub-page .lede {
+  font-size: 1.12rem;
+  max-width: 40rem;
+  color: var(--muted);
+  margin: 0;
+}
+
+.hub-page .hub-grid {
+  display: grid;
+  gap: 1.5rem;
+  margin-top: 2rem;
+}
+
+@media (min-width: 720px) {
+  .hub-page .hub-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.hub-page .hub-card,
+.hub-page .hub-card:nth-child(n) {
+  display: flex;
+  flex-direction: column;
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid var(--line);
+  border-radius: 0;
+  box-shadow: none;
+  color: var(--ink);
+  animation: none;
+}
+
+.hub-page .hub-card:hover {
+  transform: none;
+  box-shadow: inset 3px 0 0 var(--ink);
+  border-color: var(--ink);
+}
+
+.hub-page .hub-card-image {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 10;
+  object-fit: cover;
+  object-position: center;
+  border-bottom: 1px solid var(--line);
+}
+
+.hub-page .hub-card-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  padding: 1.15rem 1.15rem 1.25rem;
+}
+
+.hub-page .hub-card h2,
+.hub-page .hub-card p,
+.hub-page .hub-card .hub-card-kind,
+.hub-page .hub-card .hub-card-go {
+  margin-left: 0;
+  margin-right: 0;
+}
+
+.hub-page .hub-card-kind {
+  margin: 0 0 0.35rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.hub-page .hub-card h2 {
+  margin: 0 0 0.5rem;
+}
+
+.hub-page .hub-card-body > p:not(.hub-card-kind) {
+  margin: 0 0 1rem;
+  line-height: 1.45;
+  color: var(--ink);
+  flex: 1;
+}
+
+.hub-page .hub-card-go {
+  font-weight: 600;
+  text-underline-offset: 0.2em;
+}
+
+.hub-page .hub-card:hover .hub-card-go {
+  text-decoration: underline;
+}
+
+.hub-page .site-footer {
+  border-top: 1px solid var(--line);
+  padding: 2rem var(--space);
+  color: var(--muted);
+  font-size: 0.95rem;
+  margin-top: auto;
+}
+
+.hub-page .site-footer__inner {
+  max-width: var(--max);
+  margin: 0 auto;
+}
+
+.hub-page .site-footer__brand {
+  font-family: var(--font-display);
+  letter-spacing: 0.06em;
+  color: var(--ink);
+  font-size: 1.4rem;
+  margin: 0 0 0.5rem;
+}
+
+.hub-page .site-footer a {
+  text-underline-offset: 0.2em;
+}
+
+/* App pages — same paper, column, and type as the marketing site. */
+.showcase-shell {
+  min-height: 100vh;
+  background:
+    radial-gradient(900px 400px at 10% -10%, rgba(0, 0, 0, 0.05), transparent 55%),
+    linear-gradient(180deg, #fafaf8 0%, var(--paper) 50%, #ecece8 100%);
+}
+
+.showcase-chrome .app-outside-bar,
+.app-outside-bar {
+  max-width: var(--max);
+  width: 100%;
+  margin: 0 auto;
+  padding: 0.65rem var(--space);
+  box-sizing: border-box;
+}
+
+.theme-gbtt.fitness-page .app-hero-photo,
+.theme-gbtt.classboard-page .app-hero-photo,
+.theme-gbtt.fitness-page .app-chrome--in-app {
+  max-width: var(--max);
+  width: 100%;
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: var(--space);
+  padding-right: var(--space);
+  box-sizing: border-box;
+}
+
+.theme-gbtt .app-hero-photo {
+  border-bottom: none;
+  padding-top: 0.75rem;
+  padding-bottom: 0.25rem;
+}
+
+.theme-gbtt .app-hero-photo__img {
+  max-height: min(22vh, 12rem);
+  border-radius: 0;
+  border: 1px solid var(--line);
+}
+
+.theme-gbtt .app-chrome h1 {
+  font-family: var(--font-display);
+  letter-spacing: 0.04em;
+  font-weight: 400;
+  font-size: clamp(1.7rem, 4vw, 2.3rem);
+  line-height: 1.05;
+}
+
+.theme-gbtt .app-theme-tag {
+  border-radius: 0;
+  background: var(--ink);
+  color: #fff;
+  font-size: 0.68rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 0.35rem 0.55rem;
+}
+
+.theme-gbtt .yacht-panel {
+  width: 100%;
+  max-width: none;
+  margin: 1.25rem 0 2rem;
+  padding: 1.25rem 1.25rem 1.5rem;
+  border-radius: 0;
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid var(--line);
+}
+
+.theme-gbtt .app-back {
+  font-weight: 600;
+  text-underline-offset: 0.2em;
+}
+
+@media (min-width: 900px) {
+  .showcase-shell {
+    background:
+      radial-gradient(900px 400px at 10% -10%, rgba(0, 0, 0, 0.05), transparent 55%),
+      linear-gradient(180deg, #fafaf8 0%, var(--paper) 50%, #ecece8 100%);
+    padding: 0;
+  }
+
+  .showcase-chrome .app-outside-bar {
+    width: 100%;
+    max-width: var(--max);
+    margin: 0 auto;
+    padding: 0.65rem var(--space);
+    background: transparent;
+    border: none;
+    border-radius: 0;
+  }
 }

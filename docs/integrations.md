@@ -27,9 +27,15 @@ flowchart LR
   Roster --> Invite["sendBookingInvite / sendBookingCancellation"]
   Invite --> Inbox["ICS emailed to that member only"]
 
-  Edit["Tom moves or cancels a class"] --> Session["onSessionWrite"]
+  Edit["Tom moves a class"] --> Session["onSessionWrite"]
   Session --> Upsert["calendarUpsertSession"]
   Upsert --> Shared["Shared GBTT class calendar"]
+
+  Remove["Class deleted or cancelled"] --> Session
+  Session --> Del["calendarDeleteSession"]
+  Del --> Shared
+
+  Shared --> Sub["Members subscribe by ICS"]
 
   Count["bookedCount changes"] -.->|"ignored"| Session
 ```
@@ -48,6 +54,27 @@ every other guest, which would leak the roster and override each member's
 (`weekStart`, `dayLabel`, `time`, `classTypeId`, `className`, `instructorId`, `venue`,
 `durationMinutes`, `cancelled`). A write that only bumps `bookedCount` is ignored — that guard is
 what keeps the calendar quiet.
+
+The event id returned by the upsert is stored back on the session as `calendarEventId`, so a later
+move or removal addresses that event directly. Sessions written before that was kept are matched by
+searching the week for their `sessionId`, which is why the description carries it.
+
+**Removing a class.** Both ways of taking a class off the timetable delete its calendar event, so a
+subscriber is never left with an entry for a session nobody can attend:
+
+- the session document is **deleted** when nobody had booked;
+- it is flagged **`cancelled`** when a roster had to be kept for attendance and billing.
+
+The delete fires on the transition into `cancelled` only, so re-saving an already-cancelled session
+does not spend a call removing an event that has already gone. Un-cancelling recreates the event,
+because `cancelled` is itself a schedule field.
+
+**Member subscriptions.** `getCalendarSubscribeUrl` is callable by any signed-in account and returns
+the calendar's Google and ICS addresses, which the member app offers under “Add the timetable to
+your calendar”. The result is cached in `meta/calendarSubscribe` for a day, and a stale cache is
+served in preference to an error. These are Google's *public* calendar URLs, so **the calendar must
+be shared publicly** ("Make available to public" in its Google Calendar settings) before they
+resolve for anyone but Tom.
 
 Nothing is ever read back from Google Calendar. Firestore is the source of truth and pushes live
 counts to the site; Calendar is a downstream mirror for personal diaries.

@@ -40,6 +40,11 @@ export interface LiveMember {
   name: string
   email: string
   status: string
+  /**
+   * The status held before archiving, so restoring is faithful rather than a
+   * blanket activation. Empty for anyone who has never been archived.
+   */
+  statusBeforeArchive: string
   /** 'member', or 'trainer'/'admin' for a client Tom has elevated. */
   role: string
   limitations: string
@@ -96,6 +101,7 @@ function mapMember(uid: string, data: DocumentData): LiveMember {
     name: String(profile.name ?? uid),
     email: String(profile.email ?? ''),
     status: String(profile.status ?? 'pending'),
+    statusBeforeArchive: String(profile.statusBeforeArchive ?? ''),
     role: String(profile.role ?? 'member'),
     limitations: String(clinical.limitations ?? ''),
     riskNotes: String(clinical.riskNotes ?? ''),
@@ -300,6 +306,48 @@ export async function saveMemberClinical(
     return null
   } catch (e) {
     return e instanceof Error ? e.message : 'Could not save these notes.'
+  }
+}
+
+/** Members who have stopped coming, kept off the working roll. */
+export const ARCHIVED_STATUS = 'archived'
+
+export function isArchivedMember(member: LiveMember): boolean {
+  return member.status === ARCHIVED_STATUS
+}
+
+/**
+ * Move a member into the archive, or bring one back.
+ *
+ * A status rather than a delete: the billing periods and attendance under an
+ * account are the record of what someone was charged for and turned up to, and
+ * someone leaving is no reason to lose it. `archived` also falls outside the
+ * broadcast query, which targets `active` only, so an archived member stops
+ * receiving studio email without anything else having to know about them.
+ *
+ * Signing in is deliberately left alone — that is what `suspended` is for.
+ *
+ * Written straight to Firestore because rules already restrict `users` updates
+ * to admins.
+ */
+export async function setMemberArchived(
+  member: LiveMember,
+  archived: boolean,
+): Promise<string | null> {
+  const db = getFirestoreDb()
+  if (!db) return 'Firebase not configured.'
+
+  const profile = archived
+    ? { status: ARCHIVED_STATUS, statusBeforeArchive: member.status }
+    : { status: member.statusBeforeArchive || 'active', statusBeforeArchive: '' }
+
+  try {
+    await setDoc(doc(db, 'users', member.uid), { profile }, { merge: true })
+    return null
+  } catch (e) {
+    return e instanceof Error
+      ? e.message
+      : `Could not ${archived ? 'archive' : 'restore'} this member.`
   }
 }
 

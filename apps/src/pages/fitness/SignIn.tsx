@@ -22,7 +22,7 @@ export default function SignIn() {
 
   return (
     <div className="classboard-page theme-gbtt">
-      <AppOutsideShell imageId="classboard" showBackLink={false} />
+      <AppOutsideShell imageId="classboard" />
       <div className="app-sections">
         <header className="classboard-top app-section">
           <div>

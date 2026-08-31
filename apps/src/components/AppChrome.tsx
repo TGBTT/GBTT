@@ -1,15 +1,11 @@
 import type { ReactNode } from 'react'
-import { Link } from 'react-router-dom'
 import { useAppPresentation } from '../context/AppPresentation'
 import { AppCardImage } from './AppHeroImage'
-import { SiteNav } from './SiteNav'
+import { InAppExitBar, InAppLogoutButton, marketingHomeHref } from './SiteNav'
 import { ShowcaseChrome } from './ShowcaseShell'
 import type { AppImageId } from '../shared/appAssets'
 
 interface OutsideProps {
-  backTo?: string
-  backLabel?: string
-  showBackLink?: boolean
   imageId?: AppImageId
   heroAlt?: string
   heroCompact?: boolean
@@ -35,9 +31,6 @@ function InAppHero({
 }
 
 export function AppOutsideShell({
-  backTo = '/',
-  backLabel = '← GBTT apps',
-  showBackLink = true,
   imageId,
   heroAlt,
   heroCompact,
@@ -48,13 +41,7 @@ export function AppOutsideShell({
   if (!showShowcaseChrome) {
     return (
       <>
-        {showBackLink ? (
-          <div className="app-outside-bar app-outside-bar--inline">
-            <Link to={backTo} className="app-back">
-              {backLabel}
-            </Link>
-          </div>
-        ) : null}
+        <InAppExitBar />
         {imageId ? <InAppHero imageId={imageId} heroAlt={heroAlt} heroCompact={heroCompact} /> : null}
         {children}
       </>
@@ -64,14 +51,7 @@ export function AppOutsideShell({
   return (
     <>
       <ShowcaseChrome>
-        <SiteNav />
-        {showBackLink ? (
-          <div className="app-outside-bar">
-            <Link to={backTo} className="app-back">
-              {backLabel}
-            </Link>
-          </div>
-        ) : null}
+        <InAppExitBar />
       </ShowcaseChrome>
       {imageId ? <InAppHero imageId={imageId} heroAlt={heroAlt} heroCompact={heroCompact} /> : null}
       {children}
@@ -86,8 +66,6 @@ interface Props {
   imageId: AppImageId
   heroAlt?: string
   badge?: string
-  backTo?: string
-  backLabel?: string
 }
 
 export function AppChrome({
@@ -97,28 +75,27 @@ export function AppChrome({
   imageId,
   heroAlt,
   badge,
-  backTo = '/',
-  backLabel = '← GBTT apps',
 }: Props) {
   const { showShowcaseChrome } = useAppPresentation()
 
   if (!showShowcaseChrome) {
     return (
       <header className="app-app-bar">
-        <Link to={backTo} className="app-back">
-          {backLabel}
-        </Link>
+        <a href={marketingHomeHref()} className="app-back">
+          ← GBTT apps
+        </a>
         <div className="app-app-bar__title">
           <span className="app-theme-tag">{theme}</span>
           <h1>{title}</h1>
         </div>
+        <InAppLogoutButton />
       </header>
     )
   }
 
   return (
     <>
-      <AppOutsideShell backTo={backTo} backLabel={backLabel} imageId={imageId} heroAlt={heroAlt} />
+      <AppOutsideShell imageId={imageId} heroAlt={heroAlt} />
       <header className="app-chrome app-chrome--in-app app-section app-section--chrome">
         <div>
           {badge ? <p className="app-badge">{badge}</p> : null}

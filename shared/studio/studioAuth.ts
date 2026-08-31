@@ -644,6 +644,43 @@ export async function studioRemoveSession(
   }
 }
 
+export interface CalendarSubscribeLinks {
+  error: string | null
+  /** One-click add for people already in Google Calendar. */
+  htmlLink: string
+  /** The ICS address to paste into Apple Calendar, Outlook or anything else. */
+  icsUrl: string
+  publicUrl: string
+}
+
+/**
+ * Where to subscribe to the shared class timetable.
+ *
+ * Returned from the server rather than built here: the calendar id is Tom's,
+ * not something the client should carry, and the server caches the lookup so
+ * every app load does not cost an Apps Script call.
+ */
+export async function studioCalendarSubscribeLinks(): Promise<CalendarSubscribeLinks> {
+  const functions = getFirebaseFunctions()
+  const empty = { htmlLink: '', icsUrl: '', publicUrl: '' }
+  if (!functions) return { error: 'Firebase not configured.', ...empty }
+  try {
+    const res = await httpsCallable(functions, 'getCalendarSubscribeUrl')({})
+    const d = (res.data ?? {}) as Record<string, unknown>
+    return {
+      error: null,
+      htmlLink: String(d.htmlLink ?? ''),
+      icsUrl: String(d.icsUrl ?? ''),
+      publicUrl: String(d.publicUrl ?? ''),
+    }
+  } catch (e) {
+    return {
+      error: e instanceof Error ? e.message : 'Could not load the calendar link.',
+      ...empty,
+    }
+  }
+}
+
 export interface RemoveSlotSessionsResult {
   error: string | null
   deleted: number

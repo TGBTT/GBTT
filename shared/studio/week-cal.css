@@ -14,9 +14,15 @@
 
 .week-cal__matrix {
   display: grid;
-  grid-template-columns: 4.75rem repeat(5, 5.5rem);
+  grid-template-columns: 4.75rem repeat(5, minmax(5.5rem, 1fr));
   width: max-content;
   min-width: 100%;
+}
+
+@media (min-width: 720px) {
+  .week-cal__matrix {
+    width: 100%;
+  }
 }
 
 .week-cal__corner,

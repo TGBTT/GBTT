@@ -17,7 +17,7 @@ export function appCardSources(id: AppImageId, base = appAssetBase(id)) {
     webpSrcSet: srcset(base, 'card', CARD_WIDTHS, 'webp'),
     jpgSrcSet: srcset(base, 'card', CARD_WIDTHS, 'jpg'),
     fallback: `${base}/card-800.jpg`,
-    sizes: '(max-width: 640px) 100vw, (max-width: 1100px) 50vw, 360px',
+    sizes: '(max-width: 640px) 100vw, (max-width: 1100px) 50vw, 540px',
     width: 800,
     height: 533,
   }
