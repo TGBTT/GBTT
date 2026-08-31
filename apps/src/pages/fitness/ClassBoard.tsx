@@ -24,7 +24,12 @@ import {
 import { StudioSignIn } from '../../components/StudioSignIn'
 import {
   createLiveSession,
+  createSessionSeries,
+  deactivateTimetableSlot,
+  saveTimetableSlot,
+  subscribeTimetableSlots,
   updateLiveSession,
+  type LiveTimetableSlot,
   type SessionEdit,
 } from '@gbtt/shared/studio/firebase/liveSessions'
 import { savePricingPlan } from '@gbtt/shared/studio/firebase/livePricing'
@@ -69,6 +74,9 @@ import {
   type ExerciseDisplay,
   type Weekday,
 } from '../../shared/fitnessStudio'
+
+/** How far forward a newly added class should run. */
+type Recurrence = 'once' | 'weeks' | 'ongoing'
 
 type Tab =
   | 'schedule'
@@ -167,6 +175,10 @@ export default function ClassBoard() {
   const [remTitle, setRemTitle] = useState('')
   const [remDue, setRemDue] = useState('')
   const [elevateUid, setElevateUid] = useState('')
+  const [recurrence, setRecurrence] = useState<Recurrence>('once')
+  const [repeatWeeks, setRepeatWeeks] = useState(10)
+  const [recurringSlots, setRecurringSlots] = useState<LiveTimetableSlot[]>([])
+  useEffect(() => subscribeTimetableSlots(setRecurringSlots), [])
   const [remKind, setRemKind] = useState<ReminderKind>('ops')
   const [newOccDay, setNewOccDay] = useState<Weekday>('Mon')
   const [newOccTime, setNewOccTime] = useState('07:00')
@@ -234,23 +246,53 @@ export default function ClassBoard() {
     }
     // Sessions are created into whichever week the navigator is showing, so
     // the week is named back to avoid silently adding to the wrong one.
-    const label = `${type.name} on ${newOccDay} at ${newOccTime} (${week.label})`
-
-    setBusy(true)
-    const { id, error } = await createLiveSession({
+    const what = `${type.name} on ${newOccDay} at ${newOccTime}`
+    const input = {
       classTypeId: type.id,
       className: type.name,
       cap: type.cap,
       dayLabel: newOccDay,
       time: newOccTime,
       weekStart: live.weekStart,
-    })
-    setBusy(false)
-    if (error) setActionError(error)
-    else {
-      setSelectedOccId(id)
-      setActionNote(`Added ${label}.`)
     }
+
+    setBusy(true)
+
+    if (recurrence === 'ongoing') {
+      /*
+       * An ongoing class is a standing slot, not a pile of sessions. The slot is
+       * what season generation reads, so it is written first; this week's
+       * session is created alongside it so the class shows on the board
+       * immediately rather than only after the next generate.
+       */
+      const slot = await saveTimetableSlot(input)
+      const { id, error } = slot.error
+        ? { id: null, error: slot.error }
+        : await createLiveSession(input)
+      setBusy(false)
+      if (error) {
+        setActionError(error)
+        return
+      }
+      setSelectedOccId(id)
+      setActionNote(
+        `${what} now runs every week. It is on ${week.label} already — run Generate sessions in Seasons to lay it across the rest of the term, which also skips holiday closures.`,
+      )
+      return
+    }
+
+    const weeks = recurrence === 'once' ? 1 : repeatWeeks
+    const { created, error } = await createSessionSeries(input, weeks)
+    setBusy(false)
+    if (error) {
+      setActionError(error)
+      return
+    }
+    setActionNote(
+      created === 1
+        ? `Added ${what} to ${week.label}.`
+        : `Added ${what} for ${created} weeks from ${week.label}.`,
+    )
   }
 
   const removeSession = async (occ: ClassOccurrence) => {
@@ -984,7 +1026,7 @@ export default function ClassBoard() {
           <div className="add-occ-row">
             <h3>Add a session</h3>
             <p className="hint">
-              Added to {week.label}. Members can book it as soon as it appears.
+              Starts from {week.label}. Members can book it as soon as it appears.
             </p>
             <label className="field">
               Class
@@ -1014,9 +1056,74 @@ export default function ClassBoard() {
                 onChange={(e) => setNewOccTime(e.target.value)}
               />
             </label>
+            <label className="field">
+              Repeats
+              <select
+                value={recurrence}
+                onChange={(e) => setRecurrence(e.target.value as Recurrence)}
+              >
+                <option value="once">This week only</option>
+                <option value="weeks">For a set number of weeks</option>
+                <option value="ongoing">Every week, ongoing</option>
+              </select>
+            </label>
+            {recurrence === 'weeks' ? (
+              <label className="field">
+                Number of weeks
+                <input
+                  type="number"
+                  min={1}
+                  max={52}
+                  value={repeatWeeks}
+                  onChange={(e) => setRepeatWeeks(Number(e.target.value))}
+                />
+              </label>
+            ) : null}
+            <p className="hint">
+              {recurrence === 'ongoing'
+                ? 'Adds it to the recurring weekly timetable. Sessions are laid across the term by Generate sessions in Seasons, which skips holiday closures.'
+                : recurrence === 'weeks'
+                  ? `Creates ${repeatWeeks} session${repeatWeeks === 1 ? '' : 's'}, one a week from ${week.label}. Holiday closures are not applied to a fixed run — use "ongoing" if the class should follow the term calendar.`
+                  : 'A one-off. Nothing is added to the recurring timetable.'}
+            </p>
             <button type="button" className="btn primary" disabled={busy} onClick={addSession}>
-              Add to calendar
+              {recurrence === 'ongoing' ? 'Add weekly class' : 'Add to calendar'}
             </button>
+          </div>
+
+          <div className="remove-occ-list">
+            <h3>Recurring weekly classes</h3>
+            <p className="hint">
+              The standing timetable that Generate sessions works from. Stopping one leaves every
+              session already created alone — remove those individually if they should not run.
+            </p>
+            {!recurringSlots.length ? (
+              <p className="hint">Nothing recurring yet.</p>
+            ) : (
+              <ul className="admin-session-list">
+                {recurringSlots.map((slot) => (
+                  <li key={slot.id}>
+                    <span>
+                      <strong>{classTypeById(slot.classTypeId)?.name ?? slot.classTypeId}</strong> ·{' '}
+                      {slot.dayLabel} {slot.time} · every week
+                    </span>
+                    <button
+                      type="button"
+                      className="btn ghost"
+                      disabled={busy}
+                      onClick={async () => {
+                        if (!confirm(`Stop ${slot.dayLabel} ${slot.time} running every week?`)) {
+                          return
+                        }
+                        setActionError(await deactivateTimetableSlot(slot.id))
+                      }}
+                    >
+                      Stop recurring
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
 
           <div className="remove-occ-list">

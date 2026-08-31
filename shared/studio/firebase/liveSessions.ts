@@ -281,6 +281,127 @@ export async function createLiveSession(
   }
 }
 
+export interface LiveTimetableSlot {
+  id: string
+  dayLabel: string
+  time: string
+  classTypeId: string
+  active: boolean
+}
+
+/** The recurring weekly template that season generation fans out. */
+export function subscribeTimetableSlots(
+  onChange: (slots: LiveTimetableSlot[]) => void,
+): () => void {
+  const db = getFirestoreDb()
+  if (!db) {
+    onChange([])
+    return noop
+  }
+
+  return onSnapshot(
+    collection(db, 'timetableSlots'),
+    (snap) =>
+      onChange(
+        snap.docs
+          .map((d) => ({
+            id: d.id,
+            dayLabel: String(d.data().dayLabel ?? ''),
+            time: String(d.data().time ?? ''),
+            classTypeId: String(d.data().classTypeId ?? ''),
+            active: d.data().active !== false,
+          }))
+          .filter((s) => s.active)
+          .sort((a, b) => a.time.localeCompare(b.time)),
+      ),
+    () => onChange([]),
+  )
+}
+
+/**
+ * Create the same session across a run of consecutive weeks.
+ *
+ * Each week is its own document keyed by slot and week, so re-running this over
+ * weeks that already exist updates them in place rather than doubling up, and
+ * an existing roster is untouched.
+ */
+export async function createSessionSeries(
+  input: NewSessionInput,
+  weeks: number,
+): Promise<{ created: number; error: string | null }> {
+  if (!Number.isInteger(weeks) || weeks < 1 || weeks > 52) {
+    return { created: 0, error: 'Repeat for between 1 and 52 weeks.' }
+  }
+
+  let created = 0
+  for (let i = 0; i < weeks; i += 1) {
+    const weekStart = shiftWeekStart(input.weekStart, i)
+    const { error } = await createLiveSession({ ...input, weekStart })
+    if (error) {
+      return {
+        created,
+        error: created
+          ? `Added ${created} week${created === 1 ? '' : 's'}, then stopped: ${error}`
+          : error,
+      }
+    }
+    created += 1
+  }
+  return { created, error: null }
+}
+
+/**
+ * Add a class to the recurring weekly template.
+ *
+ * The slot is the standing intention; the sessions members actually book are
+ * materialised from it by `generateSeasonSessions`, which is what knows about
+ * term dates and holiday closures. Writing sessions directly here instead would
+ * mean duplicating that logic and getting closures wrong.
+ */
+export async function saveTimetableSlot(
+  input: NewSessionInput,
+): Promise<{ slotId: string | null; error: string | null }> {
+  const db = getFirestoreDb()
+  if (!db) return { slotId: null, error: 'Firebase not configured.' }
+
+  const timing = sessionTiming(input.weekStart, input.dayLabel, input.time, input.classTypeId)
+  if ('error' in timing) return { slotId: null, error: timing.error }
+
+  try {
+    await setDoc(
+      doc(db, 'timetableSlots', timing.slotId),
+      {
+        slotId: timing.slotId,
+        dayLabel: input.dayLabel,
+        time: input.time,
+        classTypeId: input.classTypeId,
+        instructorId: input.instructorId ?? '',
+        venueId: input.venueId ?? 'rec-park-centre',
+        active: true,
+      },
+      { merge: true },
+    )
+    return { slotId: timing.slotId, error: null }
+  } catch (e) {
+    return {
+      slotId: null,
+      error: e instanceof Error ? e.message : 'Could not add this to the weekly timetable.',
+    }
+  }
+}
+
+/** Stop a recurring slot without touching sessions already generated from it. */
+export async function deactivateTimetableSlot(slotId: string): Promise<string | null> {
+  const db = getFirestoreDb()
+  if (!db) return 'Firebase not configured.'
+  try {
+    await setDoc(doc(db, 'timetableSlots', slotId), { active: false }, { merge: true })
+    return null
+  } catch (e) {
+    return e instanceof Error ? e.message : 'Could not stop this recurring slot.'
+  }
+}
+
 export interface SessionEdit {
   dayLabel?: string
   time?: string
