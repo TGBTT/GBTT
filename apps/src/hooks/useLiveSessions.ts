@@ -23,7 +23,9 @@ import {
   subscribeMyProfile,
   type LiveProfileState,
 } from '@gbtt/shared/studio/firebase/liveMembers'
-import { getFirebaseUser } from '@gbtt/shared/studio/studioAuth'
+import { getFirebaseUser, studioMarkAttendance } from '@gbtt/shared/studio/studioAuth'
+import type { RosterEntry, RosterStatus } from '@gbtt/shared/studio/fitnessStudio'
+import { readCachedRoster, writeCachedRoster } from './rosterCache'
 export function useLiveSessions(weekStart: string = currentWeekStart()) {
   const [state, setState] = useState<LiveSessionsState>({ status: 'loading', occurrences: [] })
 
@@ -64,12 +66,99 @@ export function useWeekNavigation(initial: string = currentWeekStart()) {
   }
 }
 
-export function useSessionRoster(sessionId: string | null) {
-  const [state, setState] = useState<LiveRosterState>({ status: 'loading', roster: [] })
+function cachedRosterState(sessionId: string | null): LiveRosterState {
+  const cached = sessionId ? readCachedRoster(sessionId) : null
+  if (!cached) return { status: 'loading', roster: [] }
+  return { status: 'ready', roster: cached, fromCache: true }
+}
 
-  useEffect(() => subscribeSessionRoster(sessionId, setState), [sessionId])
+/**
+ * A session's roster, seeded from the last list we saw for it.
+ *
+ * The listener still runs and its first snapshot replaces whatever the cache
+ * offered, so the cached names are only a head start on the paint — never a
+ * substitute for checking with the server.
+ */
+export function useSessionRoster(sessionId: string | null) {
+  const [state, setState] = useState<LiveRosterState>(() => cachedRosterState(sessionId))
+
+  useEffect(() => {
+    setState(cachedRosterState(sessionId))
+
+    return subscribeSessionRoster(sessionId, (next) => {
+      // The subscription announces 'loading' before it attaches. Holding on to
+      // the cached list through that keeps the names on screen.
+      if (next.status === 'loading') {
+        setState((current) =>
+          current.fromCache && current.roster.length ? current : { ...next, fromCache: false },
+        )
+        return
+      }
+      if (next.status === 'ready' && sessionId) writeCachedRoster(sessionId, next.roster)
+      setState({ ...next, fromCache: false })
+    })
+  }, [sessionId])
 
   return state
+}
+
+/**
+ * Roll call ticks applied locally while the server catches up.
+ *
+ * `markAttendance` is a callable, so the round-trip through Firestore and back
+ * out of the roster listener took long enough that the checkbox felt broken.
+ * These pending marks are what the UI renders until the snapshot agrees, and
+ * they are dropped if the call fails so the box never lies about what was
+ * recorded.
+ */
+export function usePendingAttendance(sessionId: string | null, roster: RosterEntry[]) {
+  const [pending, setPending] = useState<Record<string, RosterStatus>>({})
+
+  useEffect(() => setPending({}), [sessionId])
+
+  // Once the server reports the status we asked for, the local mark is redundant.
+  useEffect(() => {
+    setPending((current) => {
+      const keys = Object.keys(current)
+      if (!keys.length) return current
+      const settled = keys.filter(
+        (memberId) => roster.find((r) => r.memberId === memberId)?.status === current[memberId],
+      )
+      if (!settled.length) return current
+      const next = { ...current }
+      for (const memberId of settled) delete next[memberId]
+      return next
+    })
+  }, [roster])
+
+  const mark = useCallback(
+    async (memberId: string, status: RosterStatus): Promise<string | null> => {
+      if (!sessionId) return null
+      setPending((current) => ({ ...current, [memberId]: status }))
+      const error = await studioMarkAttendance(sessionId, memberId, status)
+      if (error) {
+        setPending((current) => {
+          const next = { ...current }
+          delete next[memberId]
+          return next
+        })
+      }
+      return error
+    },
+    [sessionId],
+  )
+
+  const merged = useMemo(
+    () =>
+      Object.keys(pending).length
+        ? roster.map((r) =>
+            r.memberId && pending[r.memberId] ? { ...r, status: pending[r.memberId] } : r,
+          )
+        : roster,
+    [roster, pending],
+  )
+
+  return { roster: merged, mark }
 }
 
 /** Slot ids the signed-in member has locked recurringly. */

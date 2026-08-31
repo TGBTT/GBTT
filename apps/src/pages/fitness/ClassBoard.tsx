@@ -3,7 +3,6 @@ import { Link } from 'react-router-dom'
 import { ClassTypeDescription } from '@gbtt/shared/studio/ClassTypeDescription'
 import {
   studioAddMemberToSession,
-  studioMarkAttendance,
   studioLogout,
   studioRemoveSession,
   studioRemoveSlotSessions,
@@ -65,7 +64,12 @@ import {
 } from '../../hooks/useLiveCatalog'
 import { AppOutsideShell } from '../../components/AppChrome'
 import { WeekSessionCalendar } from '../../components/WeekSessionCalendar'
-import { useLiveSessions, useSessionRoster, useWeekNavigation } from '../../hooks/useLiveSessions'
+import {
+  useLiveSessions,
+  usePendingAttendance,
+  useSessionRoster,
+  useWeekNavigation,
+} from '../../hooks/useLiveSessions'
 import { WeekNavigator } from '../../components/WeekNavigator'
 import { SeasonsPanel } from '../../components/SeasonsPanel'
 import { MembersPayments } from '../../components/MembersPayments'
@@ -332,6 +336,11 @@ export default function ClassBoard() {
   }, [seasonsState.seasons, week.weekStart])
   const selectedSeason = seasonsState.seasons.find((s) => s.id === selectedSeasonId)
   const liveRoster = useSessionRoster(live.status === 'ready' ? selectedOccId : null)
+  // Ticks show immediately and are reconciled against the roster snapshot.
+  const { roster: rollCallRoster, mark: markAttendance } = usePendingAttendance(
+    selectedOccId,
+    liveRoster.roster,
+  )
   const [liveMembers, setLiveMembers] = useState<LiveMembersState>({
     status: 'loading',
     members: [],
@@ -465,7 +474,7 @@ export default function ClassBoard() {
   // The calendar reads counts from the session document, but the roll call
   // needs the roster docs themselves, which are fetched only for the open session.
   const selectedOcc = baseSelectedOcc
-    ? { ...baseSelectedOcc, roster: liveRoster.roster }
+    ? { ...baseSelectedOcc, roster: rollCallRoster }
     : undefined
   const selectedOccType = selectedOcc ? classTypeById(selectedOcc.classTypeId) : undefined
 
@@ -844,6 +853,9 @@ export default function ClassBoard() {
                   {liveRoster.status === 'loading' ? (
                     <p className="hint">Loading roster…</p>
                   ) : null}
+                  {liveRoster.fromCache ? (
+                    <p className="hint">Showing the last roster while we check for changes…</p>
+                  ) : null}
                   {liveRoster.status === 'ready' && !liveRoster.roster.length ? (
                     <p className="hint">Nobody booked into this session yet.</p>
                   ) : null}
@@ -858,9 +870,7 @@ export default function ClassBoard() {
                               if (!r.memberId) return
                               const next = e.target.checked ? 'attended' : 'booked'
                               setActionError(null)
-                              studioMarkAttendance(selectedOcc.id, r.memberId, next).then((err) =>
-                                setActionError(err),
-                              )
+                              markAttendance(r.memberId, next).then((err) => setActionError(err))
                             }}
                           />
                           <span>

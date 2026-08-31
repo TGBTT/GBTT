@@ -69,6 +69,8 @@ export interface LiveRosterState {
   status: LiveStatus
   roster: RosterEntry[]
   error?: string
+  /** True while the list shown is a remembered one and the server has not answered yet. */
+  fromCache?: boolean
 }
 
 const noop = () => {}
