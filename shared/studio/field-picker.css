@@ -1,0 +1,249 @@
+/* Popover date and time fields. Same flat monochrome palette as the season
+   calendar, so an admin form does not look like two different products. */
+
+.field-pop {
+  position: relative;
+}
+
+.field-pop__trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  border-radius: 8px;
+  background: #fff;
+  font: inherit;
+  font-weight: 400;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.field-pop__trigger:hover:not(:disabled) {
+  border-color: #111;
+}
+
+.field-pop__trigger:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.field-pop__trigger.is-empty {
+  color: var(--muted, #5c5c5c);
+}
+
+.field-pop__icon {
+  font-size: 0.7rem;
+  opacity: 0.6;
+}
+
+.field-pop__panel {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 0.35rem);
+  left: 0;
+  min-width: 17rem;
+  padding: 0.6rem;
+  border: 1px solid var(--line, #d4d4d0);
+  border-radius: 10px;
+  background: #fafaf8;
+  font-weight: 400;
+  box-shadow: 0 12px 28px rgb(0 0 0 / 18%);
+}
+
+.field-pop__panel.is-above {
+  top: auto;
+  bottom: calc(100% + 0.35rem);
+}
+
+.field-pop__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.45rem;
+}
+
+.field-pop__month {
+  font-size: 0.82rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.field-pop__step {
+  border: 1px solid var(--line, #d4d4d0);
+  background: #fff;
+  font: inherit;
+  line-height: 1;
+  padding: 0.25rem 0.55rem;
+  cursor: pointer;
+}
+
+.field-pop__step:hover {
+  background: #ecece8;
+}
+
+.field-pop__grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  border: 1px solid var(--line, #d4d4d0);
+  background: #fff;
+}
+
+.field-pop__head {
+  background: #0a0a0a;
+  color: #f5f5f3;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  text-align: center;
+  padding: 0.3rem 0.1rem;
+}
+
+.field-pop__day {
+  min-height: 2.1rem;
+  padding: 0.25rem 0;
+  border: none;
+  border-right: 1px solid var(--line, #d4d4d0);
+  border-bottom: 1px solid var(--line, #d4d4d0);
+  background: #fff;
+  font: inherit;
+  font-size: 0.82rem;
+  color: inherit;
+  cursor: pointer;
+}
+
+.field-pop__day:nth-child(7n) {
+  border-right: none;
+}
+
+.field-pop__day:hover:not(:disabled) {
+  background: #ecece8;
+}
+
+.field-pop__day:disabled {
+  background: #f4f4f1;
+  color: #b5b5b0;
+  cursor: not-allowed;
+}
+
+.field-pop__day.is-other-month {
+  color: #a5a5a0;
+}
+
+.field-pop__day.is-today {
+  outline: 1px solid #111;
+  outline-offset: -3px;
+}
+
+.field-pop__day.is-selected {
+  background: #111;
+  color: #fff;
+}
+
+.field-pop__day.is-selected:hover:not(:disabled) {
+  background: #333;
+}
+
+.field-pop__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  margin-top: 0.45rem;
+}
+
+/* Time wheel */
+
+.time-pop__columns {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.4rem;
+}
+
+.time-pop__marker {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 2rem;
+  margin-top: -0.6rem;
+  border-top: 1px solid var(--line, #d4d4d0);
+  border-bottom: 1px solid var(--line, #d4d4d0);
+  pointer-events: none;
+}
+
+.time-pop__column {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.time-pop__column-label {
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  text-align: center;
+  color: var(--muted, #5c5c5c);
+}
+
+.time-pop__list {
+  height: 10rem;
+  overflow-y: auto;
+  scroll-snap-type: y mandatory;
+  padding-block: 4rem;
+  border: 1px solid var(--line, #d4d4d0);
+  background: #fff;
+  scrollbar-width: none;
+}
+
+.time-pop__list::-webkit-scrollbar {
+  display: none;
+}
+
+.time-pop__option {
+  scroll-snap-align: center;
+  display: block;
+  width: 100%;
+  height: 2rem;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 0.9rem;
+  color: var(--muted, #5c5c5c);
+  cursor: pointer;
+}
+
+.time-pop__option:hover {
+  background: #ecece8;
+}
+
+.time-pop__option.is-active {
+  font-weight: 700;
+  color: #111;
+}
+
+/* On the tablet and phone views the studio runs on, a floating panel is
+   cramped, so it becomes a sheet pinned to the bottom of the screen. */
+@media (max-width: 760px) {
+  .field-pop__panel,
+  .field-pop__panel.is-above {
+    position: fixed;
+    inset: auto 0 0;
+    top: auto;
+    bottom: 0;
+    min-width: 0;
+    padding: 0.9rem;
+    border-bottom: none;
+    box-shadow: 0 -12px 28px rgb(0 0 0 / 22%);
+  }
+
+  .field-pop__day {
+    min-height: 2.6rem;
+  }
+}

@@ -41,6 +41,7 @@ import {
   type LiveSeasonsState,
 } from '@gbtt/shared/studio/firebase/liveSeasons'
 import { shiftDayKey } from '@gbtt/shared/studio/SeasonCalendar'
+import { TimeField } from '@gbtt/shared/studio/TimeField'
 import { savePricingPlan } from '@gbtt/shared/studio/firebase/livePricing'
 import {
   addExercise,
@@ -935,18 +936,17 @@ export default function ClassBoard() {
                       ))}
                     </select>
                   </label>
-                  <label className="field">
-                    Time
-                    <input
-                      type="time"
+                  <div className="field">
+                    <span>Time</span>
+                    <TimeField
+                      ariaLabel="Session time"
                       value={selectedOcc.time}
                       disabled={role !== 'admin' || busy}
-                      onChange={(e) => {
-                        if (!e.target.value) return
-                        void saveSessionEdit(selectedOcc, { time: e.target.value })
+                      onChange={(time) => {
+                        void saveSessionEdit(selectedOcc, { time })
                       }}
                     />
-                  </label>
+                  </div>
                   <label className="field">
                     Class
                     <select
@@ -1367,18 +1367,17 @@ export default function ClassBoard() {
                     ))}
                   </select>
                 </label>
-                <label className="field">
-                  Time
-                  <input
-                    type="time"
+                <div className="field">
+                  <span>Time</span>
+                  <TimeField
+                    ariaLabel="Session time"
                     value={selectedOcc.time}
                     disabled={role !== 'admin' || busy}
-                    onChange={(e) => {
-                      if (!e.target.value) return
-                      void editSelectedSession(selectedOcc, { time: e.target.value })
+                    onChange={(time) => {
+                      void editSelectedSession(selectedOcc, { time })
                     }}
                   />
-                </label>
+                </div>
                 <label className="field">
                   Class
                   <select
@@ -1499,14 +1498,14 @@ export default function ClassBoard() {
                 ))}
               </select>
             </label>
-            <label className="field">
-              Time
-              <input
-                type="time"
+            <div className="field">
+              <span>Time</span>
+              <TimeField
+                ariaLabel="New session time"
                 value={newOccTime}
-                onChange={(e) => setNewOccTime(e.target.value)}
+                onChange={setNewOccTime}
               />
-            </label>
+            </div>
             <label className="field">
               Repeats
               <select

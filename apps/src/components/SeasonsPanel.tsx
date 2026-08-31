@@ -23,6 +23,7 @@ import {
   breakCovering,
   shiftDayKey,
 } from '@gbtt/shared/studio/SeasonCalendar'
+import { DateField } from '@gbtt/shared/studio/DateField'
 
 const BLANK: LiveSeason = {
   id: '',
@@ -92,10 +93,23 @@ export function SeasonsPanel() {
       setError(res.error)
       return
     }
+    if (dryRun) {
+      setNote(
+        `Dry run: ${res.created} session${res.created === 1 ? '' : 's'} across ${res.teachingDays} teaching days, ${res.archived} to archive. Nothing written.`,
+      )
+      return
+    }
+
+    // The seat and invite counts matter as much as the session count: they are
+    // what tells Tom the members on a weekly slot actually got the new weeks.
     setNote(
-      dryRun
-        ? `Dry run: ${res.created} session${res.created === 1 ? '' : 's'} across ${res.teachingDays} teaching days, ${res.archived} to archive. Nothing written.`
-        : `${res.created} created, ${res.updated} updated, ${res.archived} archived across ${res.teachingDays} teaching days.`,
+      `${res.created} created, ${res.updated} updated, ${res.archived} archived across ${res.teachingDays} teaching days.` +
+        (res.seatsFilled
+          ? ` ${res.seatsFilled} seat${res.seatsFilled === 1 ? '' : 's'} filled for ${res.membersUpdated} member${res.membersUpdated === 1 ? '' : 's'} on a weekly slot, and their calendar invites were re-sent.`
+          : ' No weekly slots needed seats.') +
+        (res.calendarFailed
+          ? ` ${res.calendarFailed} session${res.calendarFailed === 1 ? '' : 's'} did not reach the shared calendar — run this again to retry.`
+          : ''),
     )
   }
 
@@ -257,22 +271,24 @@ export function SeasonsPanel() {
             onChange={(e) => setDraft({ ...draft, name: e.target.value })}
           />
         </label>
-        <label className="field">
-          Starts
-          <input
-            type="date"
+        <div className="field">
+          <span>Starts</span>
+          <DateField
+            ariaLabel="Season start date"
             value={draft.startDate}
-            onChange={(e) => setDraft({ ...draft, startDate: e.target.value })}
+            max={draft.endDate || undefined}
+            onChange={(startDate) => setDraft({ ...draft, startDate })}
           />
-        </label>
-        <label className="field">
-          Ends
-          <input
-            type="date"
+        </div>
+        <div className="field">
+          <span>Ends</span>
+          <DateField
+            ariaLabel="Season end date"
             value={draft.endDate}
-            onChange={(e) => setDraft({ ...draft, endDate: e.target.value })}
+            min={draft.startDate || undefined}
+            onChange={(endDate) => setDraft({ ...draft, endDate })}
           />
-        </label>
+        </div>
 
         <fieldset className="season-mode">
           <legend>How this season is charged</legend>
@@ -324,22 +340,26 @@ export function SeasonsPanel() {
                   onChange={(e) => setBreak(i, { label: e.target.value })}
                 />
               </label>
-              <label className="field">
-                From
-                <input
-                  type="date"
+              <div className="field">
+                <span>From</span>
+                <DateField
+                  ariaLabel="Closure start date"
                   value={b.startDate}
-                  onChange={(e) => setBreak(i, { startDate: e.target.value })}
+                  min={draft.startDate || undefined}
+                  max={b.endDate || draft.endDate || undefined}
+                  onChange={(startDate) => setBreak(i, { startDate })}
                 />
-              </label>
-              <label className="field">
-                To
-                <input
-                  type="date"
+              </div>
+              <div className="field">
+                <span>To</span>
+                <DateField
+                  ariaLabel="Closure end date"
                   value={b.endDate}
-                  onChange={(e) => setBreak(i, { endDate: e.target.value })}
+                  min={b.startDate || draft.startDate || undefined}
+                  max={draft.endDate || undefined}
+                  onChange={(endDate) => setBreak(i, { endDate })}
                 />
-              </label>
+              </div>
               <button
                 type="button"
                 className="link-button"
