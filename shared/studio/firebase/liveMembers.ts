@@ -48,6 +48,27 @@ export interface LiveMember {
   totalAttended: number
 }
 
+/** The signed-in member's own record, for the things they control themselves. */
+export interface LiveProfile {
+  uid: string
+  name: string
+  email: string
+  planId: string
+  classesPerWeek: number
+  creditsRemaining: number
+  showNameToClassmates: boolean
+  termsAccepted: boolean
+  /** The plan they have asked to move to, while Tom has yet to action it. */
+  pendingPlanId: string | null
+  pendingPlanName: string | null
+}
+
+export interface LiveProfileState {
+  status: LiveStatus
+  profile: LiveProfile | null
+  error?: string
+}
+
 export interface LiveMembersState {
   status: LiveStatus
   members: LiveMember[]
@@ -92,6 +113,105 @@ function mapBillingPeriod(id: string, uid: string, data: DocumentData): LiveBill
     attendedCount: Number(data.attendedCount ?? 0),
     paymentNote: String(data.paymentNote ?? ''),
   }
+}
+
+/**
+ * The signed-in member's own profile and any open plan change.
+ *
+ * Two listeners rather than one: the plan request lives outside the user
+ * document precisely because members may not write their own `membership`, so
+ * the pending plan has to be read from where the callable puts it.
+ */
+export function subscribeMyProfile(
+  uid: string,
+  onChange: (state: LiveProfileState) => void,
+): () => void {
+  const db = getFirestoreDb()
+  if (!db || !uid) {
+    onChange({ status: 'unavailable', profile: null })
+    return () => {}
+  }
+
+  onChange({ status: 'loading', profile: null })
+
+  let latest: DocumentData | null = null
+  let pendingPlanId: string | null = null
+  let pendingPlanName: string | null = null
+
+  const emit = () => {
+    if (!latest) return
+    const profile = (latest.profile ?? {}) as DocumentData
+    const membership = (latest.membership ?? {}) as DocumentData
+    const preferences = (latest.preferences ?? {}) as DocumentData
+    const compliance = (latest.compliance ?? {}) as DocumentData
+
+    onChange({
+      status: 'ready',
+      profile: {
+        uid,
+        name: String(profile.name ?? ''),
+        email: String(profile.email ?? ''),
+        planId: String(membership.planId ?? 'casual'),
+        classesPerWeek: Number(membership.classesPerWeek ?? 0),
+        creditsRemaining: Number(membership.creditsRemaining ?? 0),
+        showNameToClassmates: preferences.showNameToClassmates !== false,
+        termsAccepted: Boolean(compliance.termsAcceptedAt),
+        pendingPlanId,
+        pendingPlanName,
+      },
+    })
+  }
+
+  const stopUser = onSnapshot(
+    doc(db, 'users', uid),
+    (snap) => {
+      latest = snap.data() ?? {}
+      emit()
+    },
+    (err) => onChange({ status: 'error', profile: null, error: err.message }),
+  )
+
+  const stopRequest = onSnapshot(
+    doc(db, 'planChangeRequests', uid),
+    (snap) => {
+      const data = snap.data()
+      pendingPlanId = data ? String(data.toPlanId ?? '') || null : null
+      pendingPlanName = data ? String(data.requestedPlanName ?? '') || null : null
+      emit()
+    },
+    // A missing request is the normal case and must not blank the profile.
+    () => {
+      pendingPlanId = null
+      pendingPlanName = null
+      emit()
+    },
+  )
+
+  return () => {
+    stopUser()
+    stopRequest()
+  }
+}
+
+/** Every open plan change request, for the admin members screen. */
+export function subscribePlanChangeRequests(
+  onChange: (requests: { uid: string; memberName: string; requestedPlanName: string }[]) => void,
+): () => void {
+  const db = getFirestoreDb()
+  if (!db) return () => {}
+
+  return onSnapshot(
+    collection(db, 'planChangeRequests'),
+    (snap) =>
+      onChange(
+        snap.docs.map((d) => ({
+          uid: d.id,
+          memberName: String(d.data().memberName ?? d.id),
+          requestedPlanName: String(d.data().requestedPlanName ?? d.data().toPlanId ?? ''),
+        })),
+      ),
+    () => onChange([]),
+  )
 }
 
 /** Every member profile. Staff only — rules deny this to members. */

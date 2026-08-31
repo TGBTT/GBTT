@@ -75,6 +75,13 @@ before(async () => {
       ratePerClass: 17,
       classesPerWeek: 0,
     })
+    await setDoc(doc(db, 'planChangeRequests', MEMBER), {
+      uid: MEMBER,
+      memberName: 'Member',
+      toPlanId: 'weekly2',
+      requestedPlanName: '2 / week',
+      status: 'pending',
+    })
     await setDoc(doc(db, `users/${MEMBER}/billingPeriods`, '2026-08-01'), {
       periodStart: '2026-08-01',
       periodEnd: '2026-08-31',
@@ -450,6 +457,47 @@ describe('seasons and pricing are admin-set', () => {
   it('admin can set the drop-in rate', async () => {
     await assertSucceeds(
       setDoc(doc(adminDb(), 'pricingPlans', 'casual'), { ratePerClass: 17 }, { merge: true }),
+    )
+  })
+})
+
+describe('plan change requests', () => {
+  // The request names a plan, and the plan carries a price. Letting a member
+  // write the document directly would let them request a plan at a rate that
+  // is not the one on the price list.
+  it('member cannot raise a plan change request directly', async () => {
+    await assertFails(
+      setDoc(doc(memberDb(), 'planChangeRequests', MEMBER), {
+        uid: MEMBER,
+        toPlanId: 'weekly3',
+        requestedPlanName: 'Free',
+      }),
+    )
+  })
+
+  it('member cannot approve their own request by editing it', async () => {
+    await assertFails(
+      updateDoc(doc(memberDb(), 'planChangeRequests', MEMBER), { status: 'approved' }),
+    )
+  })
+
+  it('member can read their own open request', async () => {
+    await assertSucceeds(getDoc(doc(memberDb(), 'planChangeRequests', MEMBER)))
+  })
+
+  it('member cannot read another member request', async () => {
+    await assertFails(getDoc(doc(memberDb(), 'planChangeRequests', OTHER)))
+  })
+
+  it('staff can read plan change requests', async () => {
+    await assertSucceeds(getDoc(doc(trainerDb(), 'planChangeRequests', MEMBER)))
+  })
+
+  // Even an admin goes through the callable, so that applying a change and
+  // clearing the request stay one server-side step.
+  it('admin cannot write a plan change request directly', async () => {
+    await assertFails(
+      setDoc(doc(adminDb(), 'planChangeRequests', OTHER), { uid: OTHER, toPlanId: 'weekly1' }),
     )
   })
 })

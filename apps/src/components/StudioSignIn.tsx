@@ -1,6 +1,10 @@
 import { useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { studioSignIn, type StudioRole } from '@gbtt/shared/studio/studioAuth'
+import {
+  studioRequestPasswordReset,
+  studioSignIn,
+  type StudioRole,
+} from '@gbtt/shared/studio/studioAuth'
 import { homePathForRole } from './studioRoutes'
 
 interface StudioSignInProps {
@@ -46,20 +50,47 @@ export function StudioSignIn({
   const [password, setPassword] = useState(SEED_PASSWORD)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [notice, setNotice] = useState<string | null>(null)
+  const [offerReset, setOfferReset] = useState(false)
+
+  /*
+   * Sending the reset is deliberately unconditional on the address existing.
+   * Firebase reports "no such user" and echoing that back would turn this form
+   * into a way to test which emails hold accounts.
+   */
+  const sendReset = async () => {
+    if (!email.trim()) {
+      setError('Enter your email address first, then choose reset.')
+      return
+    }
+    setBusy(true)
+    setError(null)
+    const err = await studioRequestPasswordReset(email)
+    setBusy(false)
+    if (err) {
+      setError(err)
+      return
+    }
+    setOfferReset(false)
+    setNotice(`If an account exists for ${email.trim()}, a reset link is on its way. Check spam too.`)
+  }
 
   const submit = async () => {
     setBusy(true)
     setError(null)
+    setNotice(null)
     try {
       const { error: err, role } = await studioSignIn(email, password)
       if (err || !role) {
         setError(err ?? 'Sign-in failed. Try again.')
+        setOfferReset(true)
         return
       }
       onSignedIn?.(role)
       if (redirectOnSuccess) navigate(homePathForRole(role))
     } catch {
       setError('Sign-in failed. Try again.')
+      setOfferReset(true)
     } finally {
       setBusy(false)
     }
@@ -93,13 +124,31 @@ export function StudioSignIn({
           autoComplete="current-password"
         />
       </label>
-      {error ? <p className="form-error">{error}</p> : null}
+      {error ? (
+        <p className="form-error">
+          {error}
+          {offerReset ? (
+            <>
+              {' '}
+              <button type="button" className="link-button" onClick={() => void sendReset()}>
+                Email me a reset link
+              </button>
+            </>
+          ) : null}
+        </p>
+      ) : null}
+      {notice ? <p className="form-notice">{notice}</p> : null}
       <div className="btn-row">
         <button type="submit" className="btn primary" disabled={busy}>
           {busy ? 'Signing in…' : 'Sign in'}
         </button>
         {extraActions}
       </div>
+      <p className="hint">
+        <button type="button" className="link-button" onClick={() => void sendReset()} disabled={busy}>
+          Forgot your password?
+        </button>
+      </p>
       {hint ? <p className="hint">{hint}</p> : null}
     </form>
   )

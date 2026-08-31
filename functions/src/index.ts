@@ -267,6 +267,31 @@ interface BillingLineItem {
   amountCents: number
 }
 
+/**
+ * Sends the set-password invite via Apps Script.
+ *
+ * A failure here is reported, never thrown: the Auth user and profile are
+ * already written by the time we get here, so throwing would leave the admin
+ * with an account they think failed to create. The caller surfaces the reason.
+ */
+async function sendInviteEmail(invite: {
+  email: string
+  name: string
+  phone: string
+  planId: string
+  resetLink: string
+}): Promise<AppsScriptResult> {
+  const result = await callAppsScript(
+    { action: 'sendInvite', ...invite, source: 'cloud-function' },
+    webhookSecret.value(),
+    formEndpoint.value(),
+  )
+  if (!result.ok) {
+    console.error(`sendInvite failed for ${invite.email}: ${result.error}`)
+  }
+  return result
+}
+
 /** Admin creates a member Auth user + Firestore profile; sends invite / password reset. */
 export const createMemberAccount = onCall(
   { secrets: [webhookSecret] },
@@ -315,20 +340,7 @@ export const createMemberAccount = onCall(
     })
 
     const resetLink = await auth.generatePasswordResetLink(email)
-
-    const scriptResult = await callAppsScript(
-      {
-        action: 'sendInvite',
-        email,
-        name,
-        phone,
-        planId,
-        resetLink,
-        source: 'cloud-function',
-      },
-      webhookSecret.value(),
-      formEndpoint.value(),
-    )
+    const scriptResult = await sendInviteEmail({ email, name, phone, planId, resetLink })
 
     await db.collection('audit').add({
       type: 'createMemberAccount',
@@ -336,6 +348,7 @@ export const createMemberAccount = onCall(
       actorUid: request.auth!.uid,
       at: FieldValue.serverTimestamp(),
       appsScriptOk: scriptResult.ok,
+      appsScriptError: scriptResult.error ?? null,
     })
 
     return {
@@ -343,10 +356,57 @@ export const createMemberAccount = onCall(
       uid: userRecord.uid,
       resetLink,
       inviteEmailSent: scriptResult.ok,
-      inviteError: scriptResult.error,
+      inviteError: scriptResult.error ?? null,
     }
   },
 )
+
+/** Re-issues a set-password link and re-sends the invite email to an existing member. */
+export const resendInvite = onCall({ secrets: [webhookSecret] }, async (request) => {
+  requireAdmin(request)
+
+  const email = String(request.data?.email ?? '')
+    .trim()
+    .toLowerCase()
+  if (!email) {
+    throw new HttpsError('invalid-argument', 'Email is required.')
+  }
+
+  let userRecord
+  try {
+    userRecord = await auth.getUserByEmail(email)
+  } catch {
+    throw new HttpsError('not-found', `No account exists for ${email}.`)
+  }
+
+  const snap = await db.doc(`users/${userRecord.uid}`).get()
+  const profile = (snap.data()?.profile ?? {}) as { name?: string; phone?: string }
+  const membership = (snap.data()?.membership ?? {}) as { planId?: string }
+
+  const resetLink = await auth.generatePasswordResetLink(email)
+  const scriptResult = await sendInviteEmail({
+    email,
+    name: profile.name || userRecord.displayName || email,
+    phone: profile.phone ?? '',
+    planId: membership.planId ?? '',
+    resetLink,
+  })
+
+  await db.collection('audit').add({
+    type: 'resendInvite',
+    targetUid: userRecord.uid,
+    actorUid: request.auth!.uid,
+    at: FieldValue.serverTimestamp(),
+    appsScriptOk: scriptResult.ok,
+    appsScriptError: scriptResult.error ?? null,
+  })
+
+  if (!scriptResult.ok) {
+    throw new HttpsError('internal', scriptResult.error ?? 'Invite email failed to send.')
+  }
+
+  return { ok: true, uid: userRecord.uid, resetLink }
+})
 
 /** Admin triggers Firebase password reset email for a member. */
 export const adminResetPassword = onCall(async (request) => {
@@ -1688,4 +1748,123 @@ export const approveMember = onCall(async (request) => {
   })
 
   return { ok: true, uid }
+})
+
+/**
+ * A member asks to move plan. This cannot be a client write: `membership` is
+ * priced, so Firestore rules keep members out of it. The request is recorded
+ * for Tom to action and the member's current plan keeps running until he does.
+ */
+export const requestPlanChange = onCall({ secrets: [webhookSecret] }, async (request) => {
+  const { uid } = requireAuth(request)
+
+  const planId = String(request.data?.planId ?? '').trim()
+  const notes = String(request.data?.notes ?? '').trim()
+  if (!planId) {
+    throw new HttpsError('invalid-argument', 'planId is required.')
+  }
+
+  const planSnap = await db.doc(`pricingPlans/${planId}`).get()
+  if (!planSnap.exists) {
+    throw new HttpsError('not-found', 'Unknown plan.')
+  }
+
+  const userRef = db.doc(`users/${uid}`)
+  const userSnap = await userRef.get()
+  if (!userSnap.exists) {
+    throw new HttpsError('not-found', 'Member profile not found.')
+  }
+
+  const profile = (userSnap.data()?.profile ?? {}) as { name?: string; email?: string }
+  const membership = (userSnap.data()?.membership ?? {}) as { planId?: string }
+
+  if (membership.planId === planId) {
+    throw new HttpsError('failed-precondition', 'You are already on that plan.')
+  }
+
+  const currentPlanName = membership.planId
+    ? ((await db.doc(`pricingPlans/${membership.planId}`).get()).data()?.name ??
+      membership.planId)
+    : '—'
+  const requestedPlanName = String(planSnap.data()?.name ?? planId)
+
+  // One open request per member: a second click should revise the ask, not
+  // queue a duplicate for Tom to reconcile.
+  const requestRef = db.doc(`planChangeRequests/${uid}`)
+  await requestRef.set({
+    uid,
+    memberName: profile.name ?? '',
+    memberEmail: profile.email ?? '',
+    fromPlanId: membership.planId ?? '',
+    toPlanId: planId,
+    requestedPlanName,
+    notes,
+    status: 'pending',
+    requestedAt: FieldValue.serverTimestamp(),
+  })
+
+  const scriptResult = await callAppsScript(
+    {
+      action: 'sendPlanChangeNotice',
+      memberName: profile.name ?? '',
+      memberEmail: profile.email ?? '',
+      currentPlan: currentPlanName,
+      requestedPlan: requestedPlanName,
+      notes,
+    },
+    webhookSecret.value(),
+    formEndpoint.value(),
+  )
+  if (!scriptResult.ok) {
+    // The request is already recorded, so Tom will see it in the admin console
+    // even when the notification email fails. Log, do not fail the member.
+    console.error(`sendPlanChangeNotice failed for ${uid}: ${scriptResult.error}`)
+  }
+
+  return { ok: true, notified: scriptResult.ok, requestedPlanName }
+})
+
+/** Admin resolves an open plan change: applies the new plan, or declines it. */
+export const resolvePlanChange = onCall(async (request) => {
+  requireAdmin(request)
+
+  const uid = String(request.data?.uid ?? '').trim()
+  const approve = Boolean(request.data?.approve)
+  if (!uid) {
+    throw new HttpsError('invalid-argument', 'uid is required.')
+  }
+
+  const requestRef = db.doc(`planChangeRequests/${uid}`)
+  const snap = await requestRef.get()
+  if (!snap.exists) {
+    throw new HttpsError('not-found', 'No open plan change for this member.')
+  }
+
+  const toPlanId = String(snap.data()?.toPlanId ?? '')
+
+  if (approve) {
+    const planSnap = await db.doc(`pricingPlans/${toPlanId}`).get()
+    await db.doc(`users/${uid}`).set(
+      {
+        membership: {
+          planId: toPlanId,
+          classesPerWeek: Number(planSnap.data()?.classesPerWeek ?? 0),
+        },
+      },
+      { merge: true },
+    )
+  }
+
+  await requestRef.delete()
+
+  await db.collection('audit').add({
+    type: 'resolvePlanChange',
+    uid,
+    toPlanId,
+    approved: approve,
+    actorUid: request.auth!.uid,
+    at: FieldValue.serverTimestamp(),
+  })
+
+  return { ok: true, uid, approved: approve }
 })

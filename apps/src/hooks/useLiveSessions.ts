@@ -19,6 +19,10 @@ import {
   type LiveRosterState,
   type LiveSessionsState,
 } from '@gbtt/shared/studio/firebase/liveSessions'
+import {
+  subscribeMyProfile,
+  type LiveProfileState,
+} from '@gbtt/shared/studio/firebase/liveMembers'
 import { getFirebaseUser } from '@gbtt/shared/studio/studioAuth'
 import { WEEKDAYS, type ClassOccurrence, type Weekday } from '../shared/fitnessStudio'
 
@@ -87,4 +91,14 @@ export function useWeeklyLocks(enabled: boolean) {
   useEffect(() => subscribeWeeklyLocks(uid, setSlotIds), [uid])
 
   return slotIds
+}
+
+/** The signed-in member's own record: preferences, terms, and any pending plan. */
+export function useMyProfile(enabled: boolean) {
+  const [state, setState] = useState<LiveProfileState>({ status: 'loading', profile: null })
+  const uid = enabled ? (getFirebaseUser()?.uid ?? '') : ''
+
+  useEffect(() => subscribeMyProfile(uid, setState), [uid])
+
+  return state
 }

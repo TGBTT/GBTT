@@ -147,6 +147,14 @@ service cloud.firestore {
       }
     }
 
+    // A member's open request to move plan. Written only by the callable, which
+    // holds the price list the request is validated against; a direct write
+    // would let a member name a plan and a price that do not match.
+    match /planChangeRequests/{uid} {
+      allow read: if isOwner(uid) || isStaff();
+      allow write: if false;
+    }
+
     // —— Pricing plans & discounts (signed-in members read; admin writes) ——
     match /pricing/{document=**} {
       allow read: if isSignedIn();

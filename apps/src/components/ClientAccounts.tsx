@@ -12,8 +12,17 @@
  */
 
 import { useEffect, useState } from 'react'
-import { studioCreateMemberAccount } from '@gbtt/shared/studio/studioAuth'
+import { studioCreateMemberAccount, studioResendInvite } from '@gbtt/shared/studio/studioAuth'
 import { useLivePricing } from '../hooks/useLivePricing'
+
+/** A created account, tracked so a failed invite email can be retried on its own. */
+interface Invited {
+  name: string
+  email: string
+  emailSent: boolean
+  inviteError: string | null
+  resending?: boolean
+}
 
 interface Row {
   key: string
@@ -104,7 +113,7 @@ export function ClientAccounts() {
   const [paste, setPaste] = useState('')
   const [pasteNote, setPasteNote] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const [created, setCreated] = useState<string[]>([])
+  const [created, setCreated] = useState<Invited[]>([])
   const [error, setError] = useState<string | null>(null)
 
   // Plans load asynchronously, so the first row is created before the default
@@ -116,6 +125,25 @@ export function ClientAccounts() {
   }, [defaultPlan])
 
   const problems = validate(rows)
+
+  /*
+   * The account exists either way — only the email failed. Resending is
+   * therefore a mail retry, not an account retry, and it issues a fresh
+   * set-password link because the original one may have expired.
+   */
+  const resend = async (email: string) => {
+    setCreated((list) =>
+      list.map((c) => (c.email === email ? { ...c, resending: true, inviteError: null } : c)),
+    )
+    const err = await studioResendInvite(email)
+    setCreated((list) =>
+      list.map((c) =>
+        c.email === email
+          ? { ...c, resending: false, emailSent: !err, inviteError: err }
+          : c,
+      ),
+    )
+  }
   const fillable = rows.filter((r) => !isBlank(r))
   const canSubmit = fillable.length > 0 && Object.keys(problems).length === 0 && !busy
 
@@ -145,7 +173,7 @@ export function ClientAccounts() {
     setBusy(true)
     setError(null)
     setPasteNote(null)
-    const succeeded: string[] = []
+    const succeeded: Invited[] = []
     const remaining: Row[] = []
 
     for (const row of rows) {
@@ -160,9 +188,12 @@ export function ClientAccounts() {
       if (result.error) {
         remaining.push({ ...row, failure: result.error })
       } else {
-        succeeded.push(
-          `${row.name} (${row.email.trim().toLowerCase()})${result.inviteEmailSent ? '' : ' — account created, but the invite email did not send'}`,
-        )
+        succeeded.push({
+          name: row.name,
+          email: row.email.trim().toLowerCase(),
+          emailSent: result.inviteEmailSent,
+          inviteError: result.inviteError,
+        })
       }
     }
 
@@ -224,11 +255,31 @@ export function ClientAccounts() {
       {created.length ? (
         <div className="form-success">
           <p>
-            Invited {created.length} client{created.length === 1 ? '' : 's'}:
+            Created {created.length} account{created.length === 1 ? '' : 's'}:
           </p>
           <ul>
             {created.map((c) => (
-              <li key={c}>{c}</li>
+              <li key={c.email}>
+                {c.name} ({c.email}){' '}
+                {c.emailSent ? (
+                  <span>— invite emailed</span>
+                ) : (
+                  <>
+                    <span className="form-error">
+                      — the invite email did not send
+                      {c.inviteError ? `: ${c.inviteError}` : ''}
+                    </span>{' '}
+                    <button
+                      type="button"
+                      className="link-button"
+                      disabled={c.resending}
+                      onClick={() => void resend(c.email)}
+                    >
+                      {c.resending ? 'Resending…' : 'Resend invite'}
+                    </button>
+                  </>
+                )}
+              </li>
             ))}
           </ul>
         </div>

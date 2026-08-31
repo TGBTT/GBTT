@@ -13,6 +13,7 @@ import {
   saveMemberDiscount,
   subscribeBillingPeriods,
   subscribeMembers,
+  subscribePlanChangeRequests,
   type LiveBillingState,
   type LiveMembersState,
 } from '@gbtt/shared/studio/firebase/liveMembers'
@@ -23,7 +24,14 @@ import {
 import {
   studioCalculateBillingPeriod,
   studioMarkBillingPeriodPaid,
+  studioResolvePlanChange,
 } from '@gbtt/shared/studio/studioAuth'
+
+interface PlanChangeRequest {
+  uid: string
+  memberName: string
+  requestedPlanName: string
+}
 
 const money = (cents: number) => `$${(cents / 100).toFixed(2)}`
 
@@ -41,10 +49,22 @@ export function MembersPayments({ role }: { role: string }) {
   const [error, setError] = useState<string | null>(null)
   const [note, setNote] = useState<string | null>(null)
   const [busyUid, setBusyUid] = useState<string | null>(null)
+  const [planRequests, setPlanRequests] = useState<PlanChangeRequest[]>([])
 
   useEffect(() => subscribeMembers(setMembers), [])
   useEffect(() => subscribeBillingPeriods(setBilling), [])
   useEffect(() => subscribeSeasons(setSeasons), [])
+  useEffect(() => subscribePlanChangeRequests(setPlanRequests), [])
+
+  const resolveRequest = async (uid: string, approve: boolean) => {
+    setBusyUid(uid)
+    setError(null)
+    setNote(null)
+    const err = await studioResolvePlanChange(uid, approve)
+    setBusyUid(null)
+    if (err) setError(err)
+    else setNote(approve ? 'Plan change applied.' : 'Plan change declined.')
+  }
 
   const recalculate = async (uid: string) => {
     setBusyUid(uid)
@@ -95,6 +115,46 @@ export function MembersPayments({ role }: { role: string }) {
 
       {error ? <p className="form-error">{error}</p> : null}
       {note ? <p className="form-success">{note}</p> : null}
+
+      {planRequests.length ? (
+        <div className="plan-requests">
+          <h3>
+            Plan change request{planRequests.length === 1 ? '' : 's'} ({planRequests.length})
+          </h3>
+          <p className="hint">
+            Approving switches the member onto the new plan from now. Their existing plan stays in
+            force until you do.
+          </p>
+          <ul className="plan-request-list">
+            {planRequests.map((r) => (
+              <li key={r.uid}>
+                <span>
+                  <strong>{r.memberName}</strong> → {r.requestedPlanName}
+                </span>
+                <span className="btn-row">
+                  <button
+                    type="button"
+                    className="btn primary"
+                    disabled={busyUid === r.uid}
+                    onClick={() => void resolveRequest(r.uid, true)}
+                  >
+                    Approve
+                  </button>
+                  <button
+                    type="button"
+                    className="btn ghost"
+                    disabled={busyUid === r.uid}
+                    onClick={() => void resolveRequest(r.uid, false)}
+                  >
+                    Decline
+                  </button>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
       {members.status === 'error' ? (
         <p className="form-error">Could not load members: {members.error}</p>
       ) : null}

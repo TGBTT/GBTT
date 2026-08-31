@@ -8,23 +8,25 @@ Cloud Functions (Firebase) call protected actions with `webhookSecret` in the JS
 
 ## Deploy
 
-1. Create a Google Sheet (audit tabs are created automatically on first use).
-2. Extensions → Apps Script → paste [`Code.gs`](Code.gs) → Save.
-3. **Script properties** (Project settings → Script properties):
+1. Create the Apps Script project at [script.google.com](https://script.google.com) and paste [`Code.gs`](Code.gs) → Save. A standalone project is fine; it does not need to be bound to a Sheet.
+2. **Script properties** (Project settings → Script properties):
 
    | Property | Example | Purpose |
    |----------|---------|---------|
    | `NOTIFY_EMAIL` | `Tom.GBTT@gmail.com` | Tom's inbox for admin notifications |
    | `CALENDAR_ID` | `abc@group.calendar.google.com` | Shared studio Google Calendar ID |
    | `FUNCTIONS_WEBHOOK_SECRET` | long random string | Shared secret for Cloud Functions → Apps Script |
+   | `AUDIT_SPREADSHEET_ID` | *(optional)* Sheet id from its URL | Where audit tabs are written |
 
-4. **Calendar setup** — create or share a Google Calendar with the Google account that deploys the script. Copy the calendar ID (Settings → Integrate calendar). Set `CALENDAR_ID` in script properties. Make the calendar public if members need ICS subscribe links.
+   Audit logging is optional. A standalone script has no active spreadsheet, so unless `AUDIT_SPREADSHEET_ID` is set the audit rows are skipped. Skipping is never fatal: `auditLog_` swallows its own failures so a logging problem can never stop an email or a calendar update.
 
-5. Deploy → **New deployment** → Type: **Web app**
+3. **Calendar setup** — create or share a Google Calendar with the Google account that deploys the script. Copy the calendar ID (Settings → Integrate calendar). Set `CALENDAR_ID` in script properties. Make the calendar public if members need ICS subscribe links.
+
+4. Deploy → **New deployment** → Type: **Web app**
    - Execute as: **Me**
    - Who has access: **Anyone**
 
-6. Copy the deployment URL into site and apps env:
+5. Copy the deployment URL into site and apps env:
 
 ```bash
 VITE_FORM_ENDPOINT=https://script.google.com/macros/s/YOUR_DEPLOYMENT_ID/exec
@@ -198,7 +200,7 @@ curl -sS -X POST "$ENDPOINT" \
 ## Smoke tests (no Firebase)
 
 1. Deploy web app with all script properties set.
-2. POST `enquiry` from curl or the marketing contact form → row in `Submissions`, email to `NOTIFY_EMAIL`.
+2. POST `enquiry` from curl or the marketing contact form → email to `NOTIFY_EMAIL` (plus a row in `Submissions` if `AUDIT_SPREADSHEET_ID` is set).
 3. POST `calendarUpsertSession` with sample JSON → event appears in Google Calendar.
 4. POST `sendSubscriberBroadcast` with `testMode: true` → email to Tom only.
 5. POST `calendarGetSubscribeUrl` → valid ICS URL in response.

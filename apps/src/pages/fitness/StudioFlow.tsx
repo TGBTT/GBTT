@@ -2,23 +2,30 @@ import { useEffect, useMemo, useState } from 'react'
 import { ClassTypeDescription } from '@gbtt/shared/studio/ClassTypeDescription'
 import { AppChrome } from '../../components/AppChrome'
 import { WeekSessionCalendar } from '../../components/WeekSessionCalendar'
-import { useLiveSessions, useWeekNavigation, useWeeklyLocks } from '../../hooks/useLiveSessions'
+import {
+  useLiveSessions,
+  useMyProfile,
+  useWeekNavigation,
+  useWeeklyLocks,
+} from '../../hooks/useLiveSessions'
 import { WeekNavigator } from '../../components/WeekNavigator'
 import { SeasonCost } from '../../components/SeasonCost'
 import { StudioSignIn } from '../../components/StudioSignIn'
 import {
+  studioAcceptTerms,
   studioBookSession,
   studioEmailVerified,
   studioHasFirebaseUser,
   studioLockWeeklySlot,
   studioRegisterMember,
+  studioRequestPlanChange,
   studioResendVerification,
+  studioSetShowName,
   studioUnlockWeeklySlot,
   type DropInPrompt,
 } from '@gbtt/shared/studio/studioAuth'
 import {
   FITNESS_PLANS,
-  acceptTerms,
   classTypeById,
   formatSessionAttending,
   formatPrepaid,
@@ -26,9 +33,7 @@ import {
   getSiteContent,
   logout,
   planById,
-  requestSubscriptionChange,
   sessionExercises,
-  setShowNameToClassmates,
   spotsLeft,
   subscribeStore,
   syncLabels,
@@ -68,6 +73,7 @@ export default function StudioFlow() {
   const week = useWeekNavigation()
   const live = useLiveSessions(week.weekStart)
   const lockedSlotIds = useWeeklyLocks(!!member)
+  const myProfile = useMyProfile(!!member).profile
   const byDay = live.byDay
   const sync = useMemo(() => syncLabels(), [tick])
   const selected = selectedId
@@ -577,27 +583,30 @@ export default function StudioFlow() {
               {planById(member.planId)?.name}
               {member.classesPerWeek > 0
                 ? ` · ${lockedSlotIds.length}/${member.classesPerWeek} weekly slots locked`
-                : ` · ${member.creditsLeft} credits`}
+                : ` · ${myProfile?.creditsRemaining ?? 0} credits`}
             </p>
-            {member.pendingPlanId ? (
+            {myProfile?.pendingPlanName ? (
               <p className="form-success">
-                Plan change to <strong>{planById(member.pendingPlanId)?.name}</strong> sent to Tom —
-                awaiting payment confirmation.
+                Plan change to <strong>{myProfile.pendingPlanName}</strong> sent to Tom — awaiting
+                payment confirmation.
               </p>
             ) : null}
             <p className="hint">{site.paymentInstructions}</p>
             <label className="exercise-check">
               <input
                 type="checkbox"
-                checked={member.showNameToClassmates}
-                onChange={(e) => {
-                  setShowNameToClassmates(e.target.checked)
-                  refresh()
+                checked={myProfile?.showNameToClassmates ?? true}
+                disabled={busy || !myProfile}
+                onChange={async (e) => {
+                  setBusy(true)
+                  const err = await studioSetShowName(e.target.checked)
+                  setBusy(false)
+                  if (err) flash(null, err)
                 }}
               />
               Show my name to other subscribers in the same class
             </label>
-            {!member.termsAccepted ? (
+            {myProfile && !myProfile.termsAccepted ? (
               <div className="legal-box">
                 <h3>Terms &amp; waiver</h3>
                 <p>{site.termsText}</p>
@@ -605,9 +614,12 @@ export default function StudioFlow() {
                 <button
                   type="button"
                   className="btn primary"
-                  onClick={() => {
-                    acceptTerms()
-                    flash('Terms accepted.', null)
+                  disabled={busy}
+                  onClick={async () => {
+                    setBusy(true)
+                    const err = await studioAcceptTerms()
+                    setBusy(false)
+                    flash(err ? null : 'Terms accepted.', err)
                   }}
                 >
                   I agree
@@ -625,9 +637,12 @@ export default function StudioFlow() {
                 <button
                   key={p.id}
                   type="button"
-                  className={`pkg-card${member.planId === p.id ? ' selected' : ''}${member.pendingPlanId === p.id ? ' is-pending' : ''}`}
-                  onClick={() => {
-                    const err = requestSubscriptionChange(p.id)
+                  className={`pkg-card${member.planId === p.id ? ' selected' : ''}${myProfile?.pendingPlanId === p.id ? ' is-pending' : ''}`}
+                  disabled={busy}
+                  onClick={async () => {
+                    setBusy(true)
+                    const err = await studioRequestPlanChange(p.id)
+                    setBusy(false)
                     flash(
                       err
                         ? null

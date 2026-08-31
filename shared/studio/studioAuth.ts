@@ -615,6 +615,8 @@ export interface CreateMemberResult {
   uid: string
   /** Whether the Apps Script invite email went out. */
   inviteEmailSent: boolean
+  /** Why the invite email failed, when it did. */
+  inviteError: string | null
 }
 
 /**
@@ -629,7 +631,9 @@ export async function studioCreateMemberAccount(
   input: CreateMemberInput,
 ): Promise<CreateMemberResult> {
   const functions = getFirebaseFunctions()
-  if (!functions) return { error: 'Firebase not configured.', uid: '', inviteEmailSent: false }
+  if (!functions) {
+    return { error: 'Firebase not configured.', uid: '', inviteEmailSent: false, inviteError: null }
+  }
   try {
     const res = await httpsCallable(functions, 'createMemberAccount')({
       name: input.name.trim(),
@@ -638,18 +642,111 @@ export async function studioCreateMemberAccount(
       planId: input.planId ?? 'weekly1',
       classesPerWeek: input.classesPerWeek ?? 1,
     })
-    const d = (res.data ?? {}) as { uid?: string; inviteEmailSent?: boolean }
+    const d = (res.data ?? {}) as {
+      uid?: string
+      inviteEmailSent?: boolean
+      inviteError?: string | null
+    }
     return {
       error: null,
       uid: String(d.uid ?? ''),
       inviteEmailSent: Boolean(d.inviteEmailSent),
+      inviteError: d.inviteError ?? null,
     }
   } catch (e) {
     return {
       error: e instanceof Error ? e.message : 'Could not create this account.',
       uid: '',
       inviteEmailSent: false,
+      inviteError: null,
     }
+  }
+}
+
+/**
+ * Member asks Tom to move them to another plan.
+ *
+ * Returns the error, or null. The plan does not change here — the current one
+ * runs until Tom confirms, which is what the caller should tell the member.
+ */
+export async function studioRequestPlanChange(
+  planId: string,
+  notes = '',
+): Promise<string | null> {
+  const functions = getFirebaseFunctions()
+  if (!functions) return 'Firebase not configured.'
+  try {
+    await httpsCallable(functions, 'requestPlanChange')({ planId, notes })
+    return null
+  } catch (e) {
+    return e instanceof Error ? e.message : 'Could not send that request.'
+  }
+}
+
+/** Admin approves or declines a member's open plan change. */
+export async function studioResolvePlanChange(
+  uid: string,
+  approve: boolean,
+): Promise<string | null> {
+  const functions = getFirebaseFunctions()
+  if (!functions) return 'Firebase not configured.'
+  try {
+    await httpsCallable(functions, 'resolvePlanChange')({ uid, approve })
+    return null
+  } catch (e) {
+    return e instanceof Error ? e.message : 'Could not update this request.'
+  }
+}
+
+/**
+ * Records that the member accepted the terms and waiver.
+ *
+ * This is a direct write rather than a callable: `compliance` is one of the
+ * few areas rules leave in the member's own hands, and the acceptance is only
+ * meaningful as a record of what they themselves clicked.
+ */
+export async function studioAcceptTerms(): Promise<string | null> {
+  const user = getFirebaseAuth()?.currentUser
+  const db = getFirestoreDb()
+  if (!user || !db) return 'Sign in first.'
+  try {
+    await setDoc(
+      doc(db, 'users', user.uid),
+      { compliance: { termsAcceptedAt: new Date().toISOString() } },
+      { merge: true },
+    )
+    return null
+  } catch (e) {
+    return e instanceof Error ? e.message : 'Could not record your acceptance.'
+  }
+}
+
+/** Member's choice about showing their name to classmates. */
+export async function studioSetShowName(value: boolean): Promise<string | null> {
+  const user = getFirebaseAuth()?.currentUser
+  const db = getFirestoreDb()
+  if (!user || !db) return 'Sign in first.'
+  try {
+    await setDoc(
+      doc(db, 'users', user.uid),
+      { preferences: { showNameToClassmates: value } },
+      { merge: true },
+    )
+    return null
+  } catch (e) {
+    return e instanceof Error ? e.message : 'Could not save that preference.'
+  }
+}
+
+/** Admin re-sends the set-password invite to a client who never received it. */
+export async function studioResendInvite(email: string): Promise<string | null> {
+  const functions = getFirebaseFunctions()
+  if (!functions) return 'Firebase not configured.'
+  try {
+    await httpsCallable(functions, 'resendInvite')({ email: email.trim().toLowerCase() })
+    return null
+  } catch (e) {
+    return e instanceof Error ? e.message : 'Could not resend the invite.'
   }
 }
 

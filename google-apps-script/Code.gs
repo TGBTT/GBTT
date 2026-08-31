@@ -2,10 +2,11 @@
  * GBTT — comprehensive web app endpoint (email + Google Calendar)
  *
  * Setup:
- * 1. Create a Google Sheet (audit tabs are created automatically).
- * 2. Extensions → Apps Script → paste this file → Save.
- * 3. Project settings → Script properties:
+ * 1. Create the Apps Script project (standalone is fine) and paste this file.
+ * 2. Project settings → Script properties:
  *    NOTIFY_EMAIL, CALENDAR_ID, FUNCTIONS_WEBHOOK_SECRET
+ * 3. Optional: AUDIT_SPREADSHEET_ID — the id of a Sheet to write audit tabs
+ *    to. Leave it unset to run without auditing; it never blocks a send.
  * 4. Deploy → New deployment → Web app (Execute as: Me, Anyone).
  * 5. Copy the Web app URL into VITE_FORM_ENDPOINT (site + apps env).
  *
@@ -78,8 +79,23 @@ function stamp_() {
   return Utilities.formatDate(new Date(), TIMEZONE, 'yyyy-MM-dd HH:mm:ss')
 }
 
+/**
+ * The audit spreadsheet, or null when there is none.
+ *
+ * getActiveSpreadsheet() only returns a spreadsheet for a container-bound
+ * script. This project is deployed standalone, so set AUDIT_SPREADSHEET_ID to
+ * the id of a Sheet you want the audit tabs written to. Without it, auditing
+ * is simply off — it must never be a precondition for sending mail.
+ */
+function auditSpreadsheet_() {
+  const id = prop_('AUDIT_SPREADSHEET_ID', '')
+  if (id) return SpreadsheetApp.openById(id)
+  return SpreadsheetApp.getActiveSpreadsheet()
+}
+
 function getSheet_(name, headerRow) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet()
+  const ss = auditSpreadsheet_()
+  if (!ss) return null
   let sheet = ss.getSheetByName(name)
   if (!sheet) {
     sheet = ss.insertSheet(name)
@@ -88,8 +104,17 @@ function getSheet_(name, headerRow) {
   return sheet
 }
 
+/** Returns whether the row was recorded. Never throws: auditing is optional. */
 function auditLog_(sheetName, headerRow, row) {
-  getSheet_(sheetName, headerRow).appendRow(row)
+  try {
+    const sheet = getSheet_(sheetName, headerRow)
+    if (!sheet) return false
+    sheet.appendRow(row)
+    return true
+  } catch (err) {
+    console.warn('auditLog_ failed for ' + sheetName + ': ' + err)
+    return false
+  }
 }
 
 /**
@@ -335,15 +360,6 @@ function handleEnquiry_(data) {
     return jsonResponse({ ok: false, error: 'Missing required fields' })
   }
 
-  auditLog_(SHEET_ENQUIRIES, ['Timestamp', 'Name', 'Email', 'Phone', 'Message', 'Source'], [
-    stamp_(),
-    name,
-    email,
-    phone,
-    message,
-    source,
-  ])
-
   MailApp.sendEmail({
     to: notifyEmail_(),
     subject: 'GBTT enquiry — ' + name,
@@ -360,6 +376,15 @@ function handleEnquiry_(data) {
       message,
   })
 
+  auditLog_(SHEET_ENQUIRIES, ['Timestamp', 'Name', 'Email', 'Phone', 'Message', 'Source'], [
+    stamp_(),
+    name,
+    email,
+    phone,
+    message,
+    source,
+  ])
+
   return jsonResponse({ ok: true })
 }
 
@@ -372,14 +397,6 @@ function handleSendInvite_(data) {
   if (!name || !email || !inviteLink) {
     return jsonResponse({ ok: false, error: 'name, email, and inviteLink required.' })
   }
-
-  auditLog_(SHEET_INVITES, ['Timestamp', 'Name', 'Email', 'Plan', 'InviteLink'], [
-    stamp_(),
-    name,
-    email,
-    planName,
-    inviteLink,
-  ])
 
   const planLine = planName ? '\nPlan: ' + planName + '\n' : ''
 
@@ -401,6 +418,14 @@ function handleSendInvite_(data) {
     subject: 'GBTT invite sent — ' + name,
     body: 'Invite email sent to ' + name + ' (' + email + ')',
   })
+
+  auditLog_(SHEET_INVITES, ['Timestamp', 'Name', 'Email', 'Plan', 'InviteLink'], [
+    stamp_(),
+    name,
+    email,
+    planName,
+    inviteLink,
+  ])
 
   return jsonResponse({ ok: true })
 }
@@ -444,12 +469,6 @@ function handleSendPlanChangeNotice_(data) {
     return jsonResponse({ ok: false, error: 'memberName, memberEmail, and requestedPlan required.' })
   }
 
-  auditLog_(
-    SHEET_PLAN_CHANGES,
-    ['Timestamp', 'MemberName', 'MemberEmail', 'CurrentPlan', 'RequestedPlan', 'Notes'],
-    [stamp_(), memberName, memberEmail, currentPlan, requestedPlan, notes],
-  )
-
   const body =
     'Member: ' +
     memberName +
@@ -468,6 +487,12 @@ function handleSendPlanChangeNotice_(data) {
     body: body,
   })
 
+  auditLog_(
+    SHEET_PLAN_CHANGES,
+    ['Timestamp', 'MemberName', 'MemberEmail', 'CurrentPlan', 'RequestedPlan', 'Notes'],
+    [stamp_(), memberName, memberEmail, currentPlan, requestedPlan, notes],
+  )
+
   return jsonResponse({ ok: true })
 }
 
@@ -485,12 +510,6 @@ function handleSendTransferNotice_(data) {
     })
   }
 
-  auditLog_(
-    SHEET_TRANSFERS,
-    ['Timestamp', 'MemberName', 'MemberEmail', 'FromSession', 'ToSession', 'Notes'],
-    [stamp_(), memberName, memberEmail, fromSession, toSession, notes],
-  )
-
   const body =
     'Hi ' +
     memberName +
@@ -507,6 +526,12 @@ function handleSendTransferNotice_(data) {
     body: body,
   })
 
+  auditLog_(
+    SHEET_TRANSFERS,
+    ['Timestamp', 'MemberName', 'MemberEmail', 'FromSession', 'ToSession', 'Notes'],
+    [stamp_(), memberName, memberEmail, fromSession, toSession, notes],
+  )
+
   return jsonResponse({ ok: true })
 }
 
@@ -521,12 +546,6 @@ function handleSendPaymentReminder_(data) {
   if (!memberName || !memberEmail || !amountDue) {
     return jsonResponse({ ok: false, error: 'memberName, memberEmail, and amountDue required.' })
   }
-
-  auditLog_(
-    SHEET_PAYMENT_REMINDERS,
-    ['Timestamp', 'MemberName', 'MemberEmail', 'AmountDue', 'DueDate', 'BalanceNote'],
-    [stamp_(), memberName, memberEmail, amountDue, dueDate, balanceNote],
-  )
 
   const dueLine = dueDate ? '\nDue: ' + dueDate : ''
   const balanceLine = balanceNote ? '\n' + balanceNote : ''
@@ -554,6 +573,12 @@ function handleSendPaymentReminder_(data) {
     body: 'Reminder sent to ' + memberName + ' (' + memberEmail + ') for ' + amountDue,
   })
 
+  auditLog_(
+    SHEET_PAYMENT_REMINDERS,
+    ['Timestamp', 'MemberName', 'MemberEmail', 'AmountDue', 'DueDate', 'BalanceNote'],
+    [stamp_(), memberName, memberEmail, amountDue, dueDate, balanceNote],
+  )
+
   return jsonResponse({ ok: true })
 }
 
@@ -571,12 +596,6 @@ function handleSendGuestPass_(data) {
       error: 'guestName, guestEmail, passCode, and sessionLabel required.',
     })
   }
-
-  auditLog_(
-    SHEET_GUEST_PASSES,
-    ['Timestamp', 'GuestName', 'GuestEmail', 'PassCode', 'SessionLabel', 'ExpiresAt', 'Notes'],
-    [stamp_(), guestName, guestEmail, passCode, sessionLabel, expiresAt, notes],
-  )
 
   const expiryLine = expiresAt ? '\nExpires: ' + expiresAt : ''
   const notesLine = notes ? '\n\n' + notes : ''
@@ -610,6 +629,12 @@ function handleSendGuestPass_(data) {
       ')\nSession: ' +
       sessionLabel,
   })
+
+  auditLog_(
+    SHEET_GUEST_PASSES,
+    ['Timestamp', 'GuestName', 'GuestEmail', 'PassCode', 'SessionLabel', 'ExpiresAt', 'Notes'],
+    [stamp_(), guestName, guestEmail, passCode, sessionLabel, expiresAt, notes],
+  )
 
   return jsonResponse({ ok: true })
 }
