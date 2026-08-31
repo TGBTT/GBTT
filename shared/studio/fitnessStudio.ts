@@ -132,7 +132,6 @@ export interface TeamMember {
   notes: string
 }
 
-export const FITNESS_VENUE = 'Rec Park Centre, Golden Bay'
 // Bumped for the substitute -> trainer rename: a store persisted under the old
 // key holds seed users whose role no longer exists.
 export const STORAGE_KEY = 'gbtt-sim-v5'
@@ -768,16 +767,6 @@ function persist(): void {
   for (const listener of listeners) listener()
 }
 
-export function resetStudioData(): void {
-  store = seedState()
-  persist()
-}
-
-/** @deprecated Use resetStudioData */
-export function resetSimStore(): void {
-  resetStudioData()
-}
-
 export function reloadStore(): void {
   if (typeof localStorage === 'undefined') return
   store = loadState()
@@ -803,10 +792,6 @@ export function subscribeStore(onChange: () => void): () => void {
   }
 }
 
-export function getStoreSnapshot(): StoreState {
-  return store
-}
-
 export function planById(id: PlanId): FitnessPlan | undefined {
   return FITNESS_PLANS.find((p) => p.id === id)
 }
@@ -823,10 +808,6 @@ export function getExercises(): Exercise[] {
 
 export function getClassTypes(): ClassType[] {
   return store.classes.filter((c) => c.active !== false)
-}
-
-export function getAllClassTypes(): ClassType[] {
-  return store.classes
 }
 
 /** Default exercises linked to a class type (trainer admin checklist). */
@@ -875,12 +856,6 @@ export function getSessionRole(): SimRole {
   return u.role
 }
 
-/** @deprecated use getSessionUser — kept for older call sites */
-export function getMember(): { name: string; planId: PlanId; creditsLeft: number } {
-  const u = getSessionUser() ?? store.users.find((x) => x.role === 'member')!
-  return { name: u.name, planId: u.planId, creditsLeft: u.creditsLeft }
-}
-
 export function classTypeById(id: string): ClassType | undefined {
   return store.classes.find((c) => c.id === id)
 }
@@ -896,10 +871,6 @@ export function userById(id: string): SimUser | undefined {
 export function spotsLeft(occ: ClassOccurrence): number {
   const maxCapacity = capacityFor(occ)
   return Math.max(0, maxCapacity - occ.bookedCount)
-}
-
-export function maxCapacityFor(classTypeId: string): number {
-  return classTypeById(classTypeId)?.cap ?? 0
 }
 
 /**
@@ -1097,12 +1068,6 @@ export function bindMemberSession(input: {
   persist()
 }
 
-export function getWeeklyLockedOccurrenceIds(): string[] {
-  const u = getSessionUser()
-  if (!u || u.role !== 'member') return []
-  return u.weeklyLockedOccurrenceIds
-}
-
 export function setShowNameToClassmates(value: boolean): void {
   const u = getSessionUser()
   if (!u || u.role !== 'member') return
@@ -1120,23 +1085,6 @@ export function acceptTerms(): void {
   if (!u) return
   u.termsAccepted = true
   persist()
-}
-
-export function setMemberPlan(planId: PlanId): string | null {
-  const u = getSessionUser()
-  if (!u || u.role !== 'member') return 'Log in as a member first.'
-  const plan = planById(planId)
-  if (!plan) return 'Unknown plan.'
-  u.planId = planId
-  u.classesPerWeek = plan.classesPerWeek
-  u.pendingPlanId = null
-  if (plan.credits > 0) u.creditsLeft = plan.credits
-  if (plan.classesPerWeek > 0 && u.weeklyLockedOccurrenceIds.length > plan.classesPerWeek) {
-    u.weeklyLockedOccurrenceIds = u.weeklyLockedOccurrenceIds.slice(0, plan.classesPerWeek)
-    u.heldOccurrenceIds = [...u.weeklyLockedOccurrenceIds]
-  }
-  persist()
-  return null
 }
 
 /** Request a subscription change — notifies Tom; does not apply until admin confirms. */
@@ -1372,33 +1320,12 @@ export function reshuffleBooking(fromId: string, toId: string): string | null {
   return null
 }
 
-/** Legacy wizard helper */
-export function bookOccurrence(
-  occurrenceId: string,
-  planId: PlanId,
-  attendeeName = 'You (demo)',
-): string | null {
-  const u = getSessionUser()
-  if (u?.role === 'member') {
-    if (u.planId !== planId) setMemberPlan(planId)
-    return bookAsMember(occurrenceId)
-  }
-  return bookAsGuest(occurrenceId, attendeeName, 'guest@demo')
-}
-
 export function toggleExercise(classTypeId: string, exerciseId: string): void {
   const cls = classTypeById(classTypeId)
   if (!cls) return
   cls.exerciseIds = cls.exerciseIds.includes(exerciseId)
     ? cls.exerciseIds.filter((id) => id !== exerciseId)
     : [...cls.exerciseIds, exerciseId]
-  persist()
-}
-
-export function setOccurrenceExercises(occurrenceId: string, exerciseIds: string[]): void {
-  const occ = occurrenceById(occurrenceId)
-  if (!occ) return
-  occ.exerciseIds = [...exerciseIds]
   persist()
 }
 
@@ -1546,15 +1473,6 @@ export function syncLabels(): { calendar: string; firebase: string } {
       : 'Firestore · configure Firebase secrets to enable live sync',
   }
 }
-
-export const SEED_ACCOUNTS = [
-  { label: 'Member', email: 'alex@demo', password: 'demo' },
-  { label: 'Admin (Tom)', email: 'tom@gbtt', password: 'demo' },
-  { label: 'Trainer', email: 'cover@gbtt', password: 'demo' },
-] as const
-
-/** @deprecated Dev seed only — not shown in production UI */
-export const DEMO_CREDENTIALS = SEED_ACCOUNTS
 
 export function getTransferWindowHours(): number {
   return store.transferWindowHours
@@ -1705,12 +1623,3 @@ export function adminAddMemberToSession(occurrenceId: string, userId: string): s
   return null
 }
 
-export function canMemberTransfer(occurrenceId: string): boolean {
-  const occ = occurrenceById(occurrenceId)
-  if (!occ) return false
-  return store.transferWindowHours > 0
-}
-
-export function createGuestPassCode(): string {
-  return `GBTT-${Math.random().toString(36).slice(2, 8).toUpperCase()}`
-}

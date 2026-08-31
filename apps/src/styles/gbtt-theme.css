@@ -266,24 +266,6 @@
   }
 }
 
-.sim-toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  gap: 0.75rem;
-  max-width: 960px;
-  margin: 0 auto 1rem;
-  padding: 0.75rem 1rem;
-  border: 1px solid #d4d4d0;
-  background: #fff;
-}
-
-.sim-toolbar__actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem;
-}
-
 .sim-banner {
   max-width: 960px;
   margin: 0 auto 0.75rem;
@@ -690,10 +672,6 @@
   margin-top: 1rem;
 }
 
-.guest-book-row {
-  flex-wrap: wrap;
-}
-
 .pkg-card.is-pending {
   outline: 2px dashed #111;
 }
@@ -780,6 +758,25 @@
 .theme-gbtt .exercise-check.on {
   border-color: var(--ink);
   background: var(--accent-soft);
+}
+
+/* The base rule is drawn for the dark board; on paper it needs ink lines. */
+.theme-gbtt .icon-btn {
+  border-color: var(--line);
+  color: var(--ink);
+}
+
+.theme-gbtt .icon-btn:hover:not(:disabled),
+.theme-gbtt .icon-btn:focus-visible {
+  background: var(--accent-soft);
+  border-color: var(--ink);
+}
+
+.theme-gbtt .icon-btn.danger:hover:not(:disabled),
+.theme-gbtt .icon-btn.danger:focus-visible {
+  border-color: #b42318;
+  background: #fdf1f0;
+  color: #b42318;
 }
 
 .theme-gbtt .week-cal__badge {
@@ -1092,8 +1089,7 @@
 
   .theme-gbtt .app-sections > .app-section:nth-child(even) .field input,
   .theme-gbtt .app-sections > .app-section:nth-child(even) .field textarea,
-  .theme-gbtt .app-sections > .app-section:nth-child(even) .field select,
-  .theme-gbtt .app-sections > .app-section:nth-child(even) .guest-book-row input {
+  .theme-gbtt .app-sections > .app-section:nth-child(even) .field select {
     background: #1a1a1a;
     color: var(--paper);
     border-color: #444;

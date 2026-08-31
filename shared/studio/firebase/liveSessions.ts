@@ -21,11 +21,17 @@ import {
   query,
   setDoc,
   Timestamp,
+  updateDoc,
   where,
   type DocumentData,
 } from 'firebase/firestore'
 import { getFirestoreDb } from './init'
-import type { ClassOccurrence, RosterEntry, RosterStatus } from '../fitnessStudio'
+import type {
+  ClassOccurrence,
+  ExerciseDisplay,
+  RosterEntry,
+  RosterStatus,
+} from '../fitnessStudio'
 
 export type LiveStatus = 'unavailable' | 'loading' | 'ready' | 'error'
 
@@ -205,25 +211,47 @@ export interface NewSessionInput {
  * and unlockWeeklySlot will refuse to act on it, and `cap` must be set or
  * bookSession has nothing to enforce.
  */
+/**
+ * The slot key and start instant a session's day, time and class imply.
+ *
+ * Both are derived client-side, so any edit to day, time or class has to run
+ * through here again: `slotId` is what weekly locks and the season generator
+ * match on, and `startsAt` is what the transfer window is measured from.
+ */
+function sessionTiming(
+  weekStart: string,
+  dayLabel: string,
+  time: string,
+  classTypeId: string,
+): { slotId: string; startsAt: Timestamp } | { error: string } {
+  const dayOffset = DAY_INDEX[dayLabel]
+  if (dayOffset === undefined) return { error: `Unsupported day "${dayLabel}".` }
+
+  const [y, m, d] = weekStart.split('-').map(Number)
+  const [hour, minute] = time.split(':').map(Number)
+  if (!y || !m || !d || Number.isNaN(hour) || Number.isNaN(minute)) {
+    return { error: 'Could not read the week or time for this session.' }
+  }
+
+  const date = new Date(y, m - 1, d + dayOffset)
+  return {
+    slotId: `${dayLabel.toLowerCase()}-${time.replace(':', '')}-${classTypeId}`,
+    startsAt: Timestamp.fromDate(
+      zonedToUtc(date.getFullYear(), date.getMonth() + 1, date.getDate(), hour, minute),
+    ),
+  }
+}
+
 export async function createLiveSession(
   input: NewSessionInput,
 ): Promise<{ id: string | null; error: string | null }> {
   const db = getFirestoreDb()
   if (!db) return { id: null, error: 'Firebase not configured.' }
 
-  const dayOffset = DAY_INDEX[input.dayLabel]
-  if (dayOffset === undefined) {
-    return { id: null, error: `Unsupported day "${input.dayLabel}".` }
-  }
+  const timing = sessionTiming(input.weekStart, input.dayLabel, input.time, input.classTypeId)
+  if ('error' in timing) return { id: null, error: timing.error }
 
-  const [y, m, d] = input.weekStart.split('-').map(Number)
-  const [hour, minute] = input.time.split(':').map(Number)
-  if (!y || !m || !d || Number.isNaN(hour) || Number.isNaN(minute)) {
-    return { id: null, error: 'Could not read the week or time for this session.' }
-  }
-
-  const date = new Date(y, m - 1, d + dayOffset)
-  const slotId = `${input.dayLabel.toLowerCase()}-${input.time.replace(':', '')}-${input.classTypeId}`
+  const { slotId, startsAt } = timing
   const id = `${slotId}-${input.weekStart}`
 
   try {
@@ -243,15 +271,80 @@ export async function createLiveSession(
         durationMinutes: 60,
         cancelled: false,
         bookedCount: 0,
-        startsAt: Timestamp.fromDate(
-          zonedToUtc(date.getFullYear(), date.getMonth() + 1, date.getDate(), hour, minute),
-        ),
+        startsAt,
       },
       { merge: true },
     )
     return { id, error: null }
   } catch (e) {
     return { id: null, error: e instanceof Error ? e.message : 'Could not add this session.' }
+  }
+}
+
+export interface SessionEdit {
+  dayLabel?: string
+  time?: string
+  classTypeId?: string
+  /** Sent alongside `classTypeId` so the stored display name stays in step. */
+  className?: string
+  /** Class-type capacity for the new class; the server enforces this on booking. */
+  cap?: number
+  instructorId?: string
+  exerciseDisplay?: ExerciseDisplay
+}
+
+/**
+ * Edit an existing session in place.
+ *
+ * Day, time and class are not independent fields: `slotId` is built from all
+ * three and `startsAt` from the day and time in the studio's timezone, so both
+ * are recomputed from the merged values rather than patched field by field.
+ * Leaving them stale would point weekly locks at a slot that no longer exists
+ * and measure the transfer window from the old start time.
+ *
+ * The document id also encodes the original slot and week. It is deliberately
+ * left alone — renaming it would mean copying the roster subcollection — and
+ * nothing reads it as data: the week query, locks and billing all use the
+ * fields written here.
+ */
+export async function updateLiveSession(
+  sessionId: string,
+  current: Pick<ClassOccurrence, 'dayLabel' | 'time' | 'classTypeId'>,
+  weekStart: string,
+  edit: SessionEdit,
+): Promise<string | null> {
+  const db = getFirestoreDb()
+  if (!db) return 'Firebase not configured.'
+
+  const patch: Record<string, unknown> = {}
+  if (edit.instructorId !== undefined) patch.instructorId = edit.instructorId
+  if (edit.exerciseDisplay !== undefined) patch.exerciseDisplay = edit.exerciseDisplay
+  if (edit.className !== undefined) patch.className = edit.className
+  if (edit.cap !== undefined) patch.cap = edit.cap
+
+  const retimed =
+    edit.dayLabel !== undefined || edit.time !== undefined || edit.classTypeId !== undefined
+
+  if (retimed) {
+    const dayLabel = edit.dayLabel ?? current.dayLabel
+    const time = edit.time ?? current.time
+    const classTypeId = edit.classTypeId ?? current.classTypeId
+    const timing = sessionTiming(weekStart, dayLabel, time, classTypeId)
+    if ('error' in timing) return timing.error
+    patch.dayLabel = dayLabel
+    patch.time = time
+    patch.classTypeId = classTypeId
+    patch.slotId = timing.slotId
+    patch.startsAt = timing.startsAt
+  }
+
+  if (!Object.keys(patch).length) return null
+
+  try {
+    await updateDoc(doc(db, 'sessions', sessionId), patch)
+    return null
+  } catch (e) {
+    return e instanceof Error ? e.message : 'Could not save this change.'
   }
 }
 

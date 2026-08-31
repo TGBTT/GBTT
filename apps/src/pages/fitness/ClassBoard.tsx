@@ -8,7 +8,11 @@ import {
   studioRemoveSession,
 } from '@gbtt/shared/studio/studioAuth'
 import { StudioSignIn } from '../../components/StudioSignIn'
-import { createLiveSession } from '@gbtt/shared/studio/firebase/liveSessions'
+import {
+  createLiveSession,
+  updateLiveSession,
+  type SessionEdit,
+} from '@gbtt/shared/studio/firebase/liveSessions'
 import { savePricingPlan } from '@gbtt/shared/studio/firebase/livePricing'
 import { useLivePricing } from '../../hooks/useLivePricing'
 import { AppOutsideShell } from '../../components/AppChrome'
@@ -22,18 +26,15 @@ import {
   WEEKDAYS,
   addExercise,
   addReminder,
-  adminAddMemberToSession,
   archiveClassType,
   classTypeById,
   createClassType,
   deleteExercise,
-  deleteOccurrence,
   formatSessionAttending,
   getClassTypes,
   getEquipmentChecked,
   getExercises,
   getOutbox,
-  getPricingPlans,
   getReminders,
   getSessionRole,
   getSessionUser,
@@ -42,18 +43,12 @@ import {
   getTransferWindowHours,
   getUsers,
   logout,
-  occurrenceById,
-  occurrencesByWeekday,
   renameExercise,
-  resetStudioData,
   sendSubscriberEmail,
   sessionIsFull,
   setClassCap,
   setEquipmentChecked,
   setMemberRisk,
-  setOccurrenceInstructor,
-  setRosterStatus,
-  setSessionExerciseDisplay,
   setTransferWindowHours,
   spotsLeft,
   subscribeStore,
@@ -61,14 +56,10 @@ import {
   toggleExercise,
   toggleReminder,
   updateClassType,
-  updateOccurrenceFields,
-  updatePricingPlan,
   updateSiteContent,
   updateTeamMember,
-  upsertOccurrence,
   type ClassOccurrence,
   type ExerciseDisplay,
-  type PlanId,
   type Weekday,
 } from '../../shared/fitnessStudio'
 
@@ -91,6 +82,45 @@ const EQUIPMENT_ITEMS = [
   { id: 'audio', label: 'Audio / mic tested' },
   { id: 'firstaid', label: 'First-aid kit checked' },
 ] as const
+
+/*
+ * Inline rather than an icon font or sprite: three glyphs used in one list is
+ * not worth a dependency or a network request, and inlining lets them inherit
+ * currentColor so the danger variant needs no separate asset.
+ *
+ * Each is decorative — the button carries the accessible name — so they are
+ * hidden from assistive tech.
+ */
+const iconProps = {
+  viewBox: '0 0 16 16',
+  width: 14,
+  height: 14,
+  fill: 'none',
+  stroke: 'currentColor',
+  strokeWidth: 1.6,
+  strokeLinecap: 'round' as const,
+  strokeLinejoin: 'round' as const,
+  'aria-hidden': true,
+  focusable: false,
+}
+
+const PencilIcon = () => (
+  <svg {...iconProps}>
+    <path d="M11.2 2.3a1.1 1.1 0 0 1 1.6 0l0.9 0.9a1.1 1.1 0 0 1 0 1.6L6.3 11.2l-2.6 0.7 0.7-2.6z" />
+  </svg>
+)
+
+const CrossIcon = () => (
+  <svg {...iconProps}>
+    <path d="M4 4l8 8M12 4l-8 8" />
+  </svg>
+)
+
+const TickIcon = () => (
+  <svg {...iconProps}>
+    <path d="M3.5 8.5l3 3 6-7" />
+  </svg>
+)
 
 const ALL_TABS: { id: Tab; label: string; adminOnly?: boolean }[] = [
   { id: 'schedule', label: 'Schedule' },
@@ -136,17 +166,23 @@ export default function ClassBoard() {
   const [renameExerciseId, setRenameExerciseId] = useState<string | null>(null)
   const [renameExerciseName, setRenameExerciseName] = useState('')
 
+  /** Ignores a blank name rather than letting an unnamed exercise through. */
+  const commitRename = (exerciseId: string) => {
+    const name = renameExerciseName.trim()
+    if (!name) return
+    renameExercise(exerciseId, name)
+    setRenameExerciseId(null)
+    refresh()
+  }
+
   const classes = getClassTypes()
 
   // Firestore is the source of truth for the timetable, its counts and the
-  // roster. The seeded local store is only a development fallback; in
-  // production an empty week renders as empty rather than as seed numbers.
+  // roster. An unconfigured build shows an empty week rather than seed numbers.
   const week = useWeekNavigation()
   const live = useLiveSessions(week.weekStart)
   const liveRoster = useSessionRoster(live.status === 'ready' ? selectedOccId : null)
-  const usingLive = live.status !== 'unavailable'
-  const localByDay = useMemo(() => occurrencesByWeekday(), [tick, selectedOccId, tab])
-  const byDay = usingLive ? live.byDay : localByDay
+  const byDay = live.byDay
   const [actionError, setActionError] = useState<string | null>(null)
   const [actionNote, setActionNote] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -161,18 +197,10 @@ export default function ClassBoard() {
   const sessionList = useMemo(() => WEEKDAYS.flatMap((d) => byDay[d] ?? []), [byDay])
 
   const pricing = useLivePricing()
-  const usingLivePricing = pricing.status !== 'unavailable'
   const [pricingError, setPricingError] = useState<string | null>(null)
 
   const savePlanRate = async (planId: string, ratePerClass: number) => {
     setPricingError(null)
-    if (!usingLivePricing) {
-      // The seed store types plan ids as a closed union; live plan ids are
-      // whatever Firestore holds, so this narrows only on the fallback path.
-      updatePricingPlan(planId as PlanId, { ratePerClass })
-      refresh()
-      return
-    }
     setPricingError(await savePricingPlan(planId, { ratePerClass }))
   }
 
@@ -186,22 +214,7 @@ export default function ClassBoard() {
     }
     // Sessions are created into whichever week the navigator is showing, so
     // the week is named back to avoid silently adding to the wrong one.
-    const label = usingLive
-      ? `${type.name} on ${newOccDay} at ${newOccTime} (${week.label})`
-      : `${type.name} on ${newOccDay} at ${newOccTime}`
-
-    if (!usingLive) {
-      setSelectedOccId(
-        upsertOccurrence({
-          classTypeId: selectedTypeId,
-          dayLabel: newOccDay,
-          time: newOccTime,
-        }),
-      )
-      refresh()
-      setActionNote(`Added ${label}.`)
-      return
-    }
+    const label = `${type.name} on ${newOccDay} at ${newOccTime} (${week.label})`
 
     setBusy(true)
     const { id, error } = await createLiveSession({
@@ -234,14 +247,6 @@ export default function ClassBoard() {
     )
     if (!confirmed) return
 
-    if (!usingLive) {
-      deleteOccurrence(occ.id)
-      if (selectedOccId === occ.id) setSelectedOccId(null)
-      refresh()
-      setActionNote(`Removed ${label}.`)
-      return
-    }
-
     setBusy(true)
     const result = await studioRemoveSession(occ.id)
     setBusy(false)
@@ -267,18 +272,34 @@ export default function ClassBoard() {
   const sync = useMemo(() => syncLabels(), [tab, selectedTypeId, tick])
   const selected = classTypeById(selectedTypeId)
   const baseSelectedOcc = selectedOccId
-    ? usingLive
-      ? live.occurrences.find((o) => o.id === selectedOccId)
-      : occurrenceById(selectedOccId)
+    ? live.occurrences.find((o) => o.id === selectedOccId)
     : undefined
   // The calendar reads counts from the session document, but the roll call
   // needs the roster docs themselves, which are fetched only for the open session.
   const selectedOcc = baseSelectedOcc
-    ? usingLive
-      ? { ...baseSelectedOcc, roster: liveRoster.roster }
-      : baseSelectedOcc
+    ? { ...baseSelectedOcc, roster: liveRoster.roster }
     : undefined
   const selectedOccType = selectedOcc ? classTypeById(selectedOcc.classTypeId) : undefined
+
+  /**
+   * Write a session edit straight to Firestore.
+   *
+   * These controls used to call the seed-store mutators, which silently did
+   * nothing for a live session id — the select simply snapped back on the next
+   * render. Errors are surfaced instead.
+   */
+  const saveSessionEdit = async (occ: ClassOccurrence, edit: SessionEdit) => {
+    setActionError(null)
+    setBusy(true)
+    const err = await updateLiveSession(
+      occ.id,
+      { dayLabel: occ.dayLabel, time: occ.time, classTypeId: occ.classTypeId },
+      live.weekStart,
+      edit,
+    )
+    setBusy(false)
+    if (err) setActionError(err)
+  }
 
   const tabs = ALL_TABS.filter((t) => !t.adminOnly || role === 'admin')
 
@@ -364,20 +385,6 @@ export default function ClassBoard() {
           >
             Log out
           </button>
-          {role === 'admin' ? (
-            <button
-              type="button"
-              className="btn ghost"
-              onClick={() => {
-                if (confirm('Reset all  data to seed?')) {
-                  resetStudioData()
-                  refresh()
-                }
-              }}
-            >
-              Reset demo data
-            </button>
-          ) : null}
         </div>
       </header>
 
@@ -404,18 +411,16 @@ export default function ClassBoard() {
               Same Mon–Fri grid as member booking. Select a session badge to edit time, day, class, or
               instructor{staff ? ' — or add a new session below' : ''}.
             </p>
-            {usingLive ? (
-              <WeekNavigator
-                label={week.label}
-                isCurrentWeek={week.isCurrentWeek}
-                isPast={week.isPast}
-                onPrevious={week.previousWeek}
-                onNext={week.nextWeek}
-                onReset={week.resetWeek}
-                disabled={live.status === 'loading'}
-              />
-            ) : null}
-            {usingLive && live.status === 'loading' ? (
+            <WeekNavigator
+              label={week.label}
+              isCurrentWeek={week.isCurrentWeek}
+              isPast={week.isPast}
+              onPrevious={week.previousWeek}
+              onNext={week.nextWeek}
+              onReset={week.resetWeek}
+              disabled={live.status === 'loading'}
+            />
+            {live.status === 'loading' ? (
               <p className="hint">Loading sessions for {week.label}…</p>
             ) : null}
             {live.status === 'error' ? (
@@ -434,9 +439,7 @@ export default function ClassBoard() {
                 selectedId={selectedOccId}
                 onSelect={(id) => {
                   setSelectedOccId(id)
-                  const o = usingLive
-                    ? live.occurrences.find((x) => x.id === id)
-                    : occurrenceById(id)
+                  const o = live.occurrences.find((x) => x.id === id)
                   if (o) setSelectedTypeId(o.classTypeId)
                 }}
                 mode="admin"
@@ -464,10 +467,10 @@ export default function ClassBoard() {
                 <div className="role-call-panel">
                   <h3>Role-call</h3>
                   {actionError ? <p className="form-error">{actionError}</p> : null}
-                  {usingLive && liveRoster.status === 'loading' ? (
+                  {liveRoster.status === 'loading' ? (
                     <p className="hint">Loading roster…</p>
                   ) : null}
-                  {usingLive && liveRoster.status === 'ready' && !liveRoster.roster.length ? (
+                  {liveRoster.status === 'ready' && !liveRoster.roster.length ? (
                     <p className="hint">Nobody booked into this session yet.</p>
                   ) : null}
                   <ul className="role-call-list">
@@ -481,14 +484,9 @@ export default function ClassBoard() {
                               if (!r.memberId) return
                               const next = e.target.checked ? 'attended' : 'booked'
                               setActionError(null)
-                              if (usingLive) {
-                                studioMarkAttendance(selectedOcc.id, r.memberId, next).then(
-                                  (err) => setActionError(err),
-                                )
-                                return
-                              }
-                              setRosterStatus(selectedOcc.id, r.memberId, next)
-                              refresh()
+                              studioMarkAttendance(selectedOcc.id, r.memberId, next).then((err) =>
+                                setActionError(err),
+                              )
                             }}
                           />
                           {r.displayName}
@@ -518,18 +516,10 @@ export default function ClassBoard() {
                       disabled={!addMemberId}
                       onClick={() => {
                         setActionError(null)
-                        if (usingLive) {
-                          studioAddMemberToSession(selectedOcc.id, addMemberId).then((err) => {
-                            setActionError(err)
-                            if (!err) setAddMemberId('')
-                          })
-                          return
-                        }
-                        const err = adminAddMemberToSession(selectedOcc.id, addMemberId)
-                        if (!err) {
-                          setAddMemberId('')
-                          refresh()
-                        }
+                        studioAddMemberToSession(selectedOcc.id, addMemberId).then((err) => {
+                          setActionError(err)
+                          if (!err) setAddMemberId('')
+                        })
                       }}
                     >
                       Add
@@ -540,12 +530,11 @@ export default function ClassBoard() {
                   Exercise preview for members
                   <select
                     value={selectedOcc.exerciseDisplay ?? 'defaults'}
+                    disabled={busy}
                     onChange={(e) => {
-                      setSessionExerciseDisplay(
-                        selectedOcc.id,
-                        e.target.value as ExerciseDisplay,
-                      )
-                      refresh()
+                      void saveSessionEdit(selectedOcc, {
+                        exerciseDisplay: e.target.value as ExerciseDisplay,
+                      })
                     }}
                   >
                     <option value="hidden">Hide planned exercises</option>
@@ -558,10 +547,9 @@ export default function ClassBoard() {
                     Day
                     <select
                       value={selectedOcc.dayLabel}
-                      disabled={role !== 'admin'}
+                      disabled={role !== 'admin' || busy}
                       onChange={(e) => {
-                        updateOccurrenceFields(selectedOcc.id, { dayLabel: e.target.value })
-                        refresh()
+                        void saveSessionEdit(selectedOcc, { dayLabel: e.target.value })
                       }}
                     >
                       {WEEKDAYS.map((d) => (
@@ -576,10 +564,10 @@ export default function ClassBoard() {
                     <input
                       type="time"
                       value={selectedOcc.time}
-                      disabled={role !== 'admin'}
+                      disabled={role !== 'admin' || busy}
                       onChange={(e) => {
-                        updateOccurrenceFields(selectedOcc.id, { time: e.target.value })
-                        refresh()
+                        if (!e.target.value) return
+                        void saveSessionEdit(selectedOcc, { time: e.target.value })
                       }}
                     />
                   </label>
@@ -587,11 +575,15 @@ export default function ClassBoard() {
                     Class
                     <select
                       value={selectedOcc.classTypeId}
-                      disabled={role !== 'admin'}
+                      disabled={role !== 'admin' || busy}
                       onChange={(e) => {
-                        updateOccurrenceFields(selectedOcc.id, { classTypeId: e.target.value })
+                        const nextType = classTypeById(e.target.value)
                         setSelectedTypeId(e.target.value)
-                        refresh()
+                        void saveSessionEdit(selectedOcc, {
+                          classTypeId: e.target.value,
+                          className: nextType?.name,
+                          cap: nextType?.cap,
+                        })
                       }}
                     >
                       {classes.map((c) => (
@@ -605,9 +597,9 @@ export default function ClassBoard() {
                     Instructor / cover
                     <select
                       value={selectedOcc.instructorId}
+                      disabled={busy}
                       onChange={(e) => {
-                        setOccurrenceInstructor(selectedOcc.id, e.target.value)
-                        refresh()
+                        void saveSessionEdit(selectedOcc, { instructorId: e.target.value })
                       }}
                     >
                       {team.map((i) => (
@@ -776,48 +768,77 @@ export default function ClassBoard() {
                           {renameExerciseId === ex.id ? (
                             <input
                               value={renameExerciseName}
+                              aria-label={`Rename ${ex.name}`}
+                              autoFocus
                               onChange={(e) => setRenameExerciseName(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') commitRename(ex.id)
+                                if (e.key === 'Escape') setRenameExerciseId(null)
+                              }}
                             />
                           ) : (
                             ex.name
                           )}
                         </label>
                         {role === 'admin' ? (
-                          <span className="btn-row">
+                          <span className="icon-btn-row">
                             {renameExerciseId === ex.id ? (
-                              <button
-                                type="button"
-                                className="btn ghost"
-                                onClick={() => {
-                                  renameExercise(ex.id, renameExerciseName)
-                                  setRenameExerciseId(null)
-                                  refresh()
-                                }}
-                              >
-                                Save
-                              </button>
+                              <>
+                                <button
+                                  type="button"
+                                  className="icon-btn"
+                                  title="Save name"
+                                  aria-label={`Save name for ${ex.name}`}
+                                  onClick={() => commitRename(ex.id)}
+                                >
+                                  <TickIcon />
+                                </button>
+                                <button
+                                  type="button"
+                                  className="icon-btn"
+                                  title="Cancel"
+                                  aria-label={`Cancel renaming ${ex.name}`}
+                                  onClick={() => setRenameExerciseId(null)}
+                                >
+                                  <CrossIcon />
+                                </button>
+                              </>
                             ) : (
-                              <button
-                                type="button"
-                                className="btn ghost"
-                                onClick={() => {
-                                  setRenameExerciseId(ex.id)
-                                  setRenameExerciseName(ex.name)
-                                }}
-                              >
-                                Rename
-                              </button>
+                              <>
+                                <button
+                                  type="button"
+                                  className="icon-btn"
+                                  title="Rename"
+                                  aria-label={`Rename ${ex.name}`}
+                                  onClick={() => {
+                                    setRenameExerciseId(ex.id)
+                                    setRenameExerciseName(ex.name)
+                                  }}
+                                >
+                                  <PencilIcon />
+                                </button>
+                                <button
+                                  type="button"
+                                  className="icon-btn danger"
+                                  title="Delete"
+                                  aria-label={`Delete ${ex.name}`}
+                                  onClick={() => {
+                                    // Named in the prompt: the icons sit in a
+                                    // list of near-identical rows, so "are you
+                                    // sure?" alone would not tell an admin
+                                    // which one they are about to lose.
+                                    const ok = window.confirm(
+                                      `Delete "${ex.name}"? It will be removed from every class type that uses it.`,
+                                    )
+                                    if (!ok) return
+                                    deleteExercise(ex.id)
+                                    refresh()
+                                  }}
+                                >
+                                  <CrossIcon />
+                                </button>
+                              </>
                             )}
-                            <button
-                              type="button"
-                              className="btn ghost"
-                              onClick={() => {
-                                deleteExercise(ex.id)
-                                refresh()
-                              }}
-                            >
-                              Delete
-                            </button>
                           </span>
                         ) : null}
                       </div>
@@ -926,24 +947,20 @@ export default function ClassBoard() {
 
           {/* Shares the schedule tab's week, so stepping forward here builds
               out future weeks rather than only editing the current one. */}
-          {usingLive ? (
-            <WeekNavigator
-              label={week.label}
-              isCurrentWeek={week.isCurrentWeek}
-              isPast={week.isPast}
-              onPrevious={week.previousWeek}
-              onNext={week.nextWeek}
-              onReset={week.resetWeek}
-              disabled={busy || live.status === 'loading'}
-            />
-          ) : null}
+          <WeekNavigator
+            label={week.label}
+            isCurrentWeek={week.isCurrentWeek}
+            isPast={week.isPast}
+            onPrevious={week.previousWeek}
+            onNext={week.nextWeek}
+            onReset={week.resetWeek}
+            disabled={busy || live.status === 'loading'}
+          />
 
           <div className="add-occ-row">
             <h3>Add a session</h3>
             <p className="hint">
-              {usingLive
-                ? `Added to ${week.label}. Members can book it as soon as it appears.`
-                : 'Members can book it as soon as it appears.'}
+              Added to {week.label}. Members can book it as soon as it appears.
             </p>
             <label className="field">
               Class
@@ -1075,7 +1092,7 @@ export default function ClassBoard() {
           <ul className="admin-member-list">
             {/* The drop-in tier is listed here too: it used to be filtered out,
                 which left the rate most often charged uneditable. */}
-            {(usingLivePricing ? pricing.plans : getPricingPlans()).map((p) => (
+            {pricing.plans.map((p) => (
               <li key={p.id}>
                 <strong>{p.name}</strong>
                 {p.classesPerWeek > 0 ? (
@@ -1135,7 +1152,6 @@ export default function ClassBoard() {
       {tab === 'notify' && role === 'admin' && (
         <section className="yacht-panel app-enter app-section">
           <h2>Email all subscribers</h2>
-          <p className="hint"> outbox — no real email is sent.</p>
           <label className="field">
             Subject
             <input value={mailSubject} onChange={(e) => setMailSubject(e.target.value)} />
@@ -1152,7 +1168,7 @@ export default function ClassBoard() {
               refresh()
             }}
           >
-            Send to subscribers (demo)
+            Send to subscribers
           </button>
           <h3>Outbox</h3>
           <ul>

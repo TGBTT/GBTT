@@ -10,13 +10,7 @@ import { doc, getDoc, setDoc } from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions'
 import { getFirebaseAuth, getFirebaseFunctions, getFirestoreDb } from './firebase/init'
 import { isFirebaseConfigured } from './firebase/config'
-import {
-  bindMemberSession,
-  bindStaffSession,
-  getSessionRole,
-  login as localLogin,
-  logout as localLogout,
-} from './fitnessStudio'
+import { bindMemberSession, bindStaffSession, logout as localLogout } from './fitnessStudio'
 
 export type StudioRole = 'member' | 'admin' | 'trainer'
 export type StudioStatus = 'pending' | 'active' | 'suspended'
@@ -74,29 +68,6 @@ async function completeMemberSignIn(
   return null
 }
 
-export async function studioLogin(email: string, password: string): Promise<string | null> {
-  if (!isFirebaseConfigured()) {
-    return localLogin(email, password)
-  }
-  const auth = getFirebaseAuth()
-  const db = getFirestoreDb()
-  if (!auth || !db) return 'Firebase not configured.'
-  let user: User
-  try {
-    const cred = await signInWithEmailAndPassword(auth, email.trim(), password)
-    user = cred.user
-  } catch {
-    return 'Sign-in failed. Check email and password.'
-  }
-  try {
-    // The password path keeps the session on a missing profile: the account
-    // provably belongs to whoever typed the password.
-    return await completeMemberSignIn(user, email, false)
-  } catch {
-    return 'Sign-in failed. Try again.'
-  }
-}
-
 /**
  * Read the role from the signed-in user's ID token.
  *
@@ -113,37 +84,6 @@ export async function studioRole(): Promise<StudioRole | null> {
   // rename still carries it. Remove once no legacy claims exist.
   if (role === 'substitute') return 'trainer'
   return role === 'admin' || role === 'trainer' || role === 'member' ? role : null
-}
-
-/**
- * Staff sign-in for the trainer admin. Falls back to the local seed store in
- * development only; a production build refuses seed staff logins because those
- * passwords ship inside the public bundle.
- */
-export async function studioStaffLogin(
-  email: string,
-  password: string,
-): Promise<{ error: string | null; role: StudioRole | null }> {
-  if (!isFirebaseConfigured()) {
-    if (import.meta.env.PROD) {
-      return {
-        error: 'Staff sign-in is unavailable until Firebase is configured.',
-        role: null,
-      }
-    }
-    return { error: localLogin(email, password), role: null }
-  }
-
-  const auth = getFirebaseAuth()
-  if (!auth) return { error: 'Firebase not configured.', role: null }
-
-  try {
-    await signInWithEmailAndPassword(auth, email.trim(), password)
-  } catch {
-    return { error: 'Sign-in failed. Check email and password.', role: null }
-  }
-
-  return completeStaffSignIn(email)
 }
 
 /**
@@ -198,15 +138,7 @@ export async function studioSignIn(
   password: string,
 ): Promise<{ error: string | null; role: StudioRole | null }> {
   if (!isFirebaseConfigured()) {
-    if (import.meta.env.PROD) {
-      return { error: 'Sign-in is unavailable until Firebase is configured.', role: null }
-    }
-    // Seed sign-in binds the local session itself, so the role is read back
-    // from the store rather than from a token that does not exist here.
-    const error = localLogin(email, password)
-    if (error) return { error, role: null }
-    const seeded = getSessionRole()
-    return { error: null, role: seeded === 'public' ? null : seeded }
+    return { error: 'Sign-in is unavailable until Firebase is configured.', role: null }
   }
 
   const auth = getFirebaseAuth()

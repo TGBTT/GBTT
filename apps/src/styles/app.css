@@ -3406,6 +3406,62 @@ textarea {
   background: rgba(182, 227, 74, 0.12);
 }
 
+/* The row had no rule at all, so the label and its buttons were unstyled
+   siblings that sprawled onto separate lines. */
+.exercise-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.exercise-row > .exercise-check {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Renaming happens in place, so the field has to be able to shrink inside the
+   label or it pushes the icons off the row. */
+.exercise-row .exercise-check input[type='text'],
+.exercise-row .exercise-check input:not([type]) {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.icon-btn-row {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 0.2rem;
+}
+
+/* Square and text-free: these sit beside a text input, and full-size buttons
+   with words drew more attention than the name being edited. */
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.85rem;
+  height: 1.85rem;
+  padding: 0;
+  border-radius: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.72;
+}
+
+.icon-btn:hover:not(:disabled),
+.icon-btn:focus-visible {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.icon-btn.danger:hover:not(:disabled),
+.icon-btn.danger:focus-visible {
+  border-color: rgba(255, 143, 143, 0.5);
+  color: #ff8f8f;
+}
+
 .add-exercise-row {
   display: flex;
   gap: 0.45rem;
@@ -5052,12 +5108,6 @@ textarea {
   color: #e07a5f;
   font-weight: 600;
   margin: 0 0 0.75rem;
-}
-
-.benefit-list-sim {
-  margin: 0.5rem 0 1rem;
-  padding-left: 1.1rem;
-  font-size: 0.9rem;
 }
 
 .hub-card-harbourbook {

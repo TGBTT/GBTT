@@ -4,9 +4,7 @@
  * Everything money-related here comes from Firestore. The owed figure is a
  * `billingPeriods` document written by `calculateBillingPeriod`, and marking a
  * period paid goes through `markBillingPeriodPaid` so the sign-off is recorded
- * against an admin and survives outside the browser it was clicked in. The
- * seed store is still rendered when Firebase is unconfigured, so development
- * works offline, but it is never used to show a real balance.
+ * against an admin and survives outside the browser it was clicked in.
  */
 
 import { useEffect, useState } from 'react'
@@ -26,15 +24,6 @@ import {
   studioCalculateBillingPeriod,
   studioMarkBillingPeriodPaid,
 } from '@gbtt/shared/studio/studioAuth'
-import {
-  calculateMemberOwed,
-  confirmSubscriptionChange,
-  getMemberAttendance,
-  getUsers,
-  planById,
-  setMemberDiscount,
-  setMemberPaid,
-} from '../shared/fitnessStudio'
 
 const money = (cents: number) => `$${(cents / 100).toFixed(2)}`
 
@@ -52,17 +41,10 @@ export function MembersPayments({ role }: { role: string }) {
   const [error, setError] = useState<string | null>(null)
   const [note, setNote] = useState<string | null>(null)
   const [busyUid, setBusyUid] = useState<string | null>(null)
-  // Seed-store writes are not reactive, so the fallback path re-renders by hand.
-  const [, forceRender] = useState(0)
 
   useEffect(() => subscribeMembers(setMembers), [])
   useEffect(() => subscribeBillingPeriods(setBilling), [])
   useEffect(() => subscribeSeasons(setSeasons), [])
-
-  const usingLive = members.status !== 'unavailable'
-  // Read straight through rather than memoising: the seed store is a plain
-  // object, so `tick` is the only thing that would invalidate a memo anyway.
-  const seedUsers = usingLive ? [] : getUsers().filter((u) => u.role === 'member')
 
   const recalculate = async (uid: string) => {
     setBusyUid(uid)
@@ -100,81 +82,6 @@ export function MembersPayments({ role }: { role: string }) {
   const changeDiscount = async (uid: string, pct: number) => {
     setError(null)
     setError(await saveMemberDiscount(uid, pct))
-  }
-
-  if (!usingLive) {
-    return (
-      <section className="yacht-panel app-enter app-section">
-        <h2>Members &amp; payments</h2>
-        <p className="hint">
-          Firebase is not configured, so these are seed records for development only — the balances
-          below are not real invoices.
-        </p>
-        <ul className="admin-member-list">
-          {seedUsers.map((u) => (
-            <li key={u.id}>
-              <strong>{u.name}</strong> · {u.email} · {planById(u.planId)?.name ?? u.planId}
-              <br />
-              <label className="exercise-check">
-                <input
-                  type="checkbox"
-                  checked={u.paid}
-                  disabled={role !== 'admin'}
-                  onChange={(e) => {
-                    setMemberPaid(u.id, e.target.checked, e.target.checked ? 'Marked paid' : 'Unpaid')
-                    forceRender((n) => n + 1)
-                  }}
-                />
-                Paid
-              </label>
-              <p className="hint">
-                Attended: {getMemberAttendance(u.id).length} · Owed: ${calculateMemberOwed(u.id).total}
-              </p>
-              {role === 'admin' ? (
-                <label className="field">
-                  Discount %
-                  <input
-                    type="number"
-                    min={0}
-                    max={100}
-                    value={u.discountPercent ?? 0}
-                    onChange={(e) => {
-                      setMemberDiscount(u.id, Number(e.target.value))
-                      forceRender((n) => n + 1)
-                    }}
-                  />
-                </label>
-              ) : null}
-              {u.pendingPlanId && role === 'admin' ? (
-                <div className="btn-row">
-                  <p className="form-success">Pending change → {planById(u.pendingPlanId)?.name}</p>
-                  <button
-                    type="button"
-                    className="btn primary"
-                    onClick={() => {
-                      confirmSubscriptionChange(u.id, true)
-                      forceRender((n) => n + 1)
-                    }}
-                  >
-                    Confirm payment &amp; apply
-                  </button>
-                  <button
-                    type="button"
-                    className="btn ghost"
-                    onClick={() => {
-                      confirmSubscriptionChange(u.id, false)
-                      forceRender((n) => n + 1)
-                    }}
-                  >
-                    Decline
-                  </button>
-                </div>
-              ) : null}
-            </li>
-          ))}
-        </ul>
-      </section>
-    )
   }
 
   return (

@@ -591,7 +591,6 @@ h2 {
 }
 
 .offering-list,
-.app-showcase,
 .future-list,
 .venue-list,
 .contact-direct {
@@ -601,19 +600,16 @@ h2 {
 }
 
 .offering-list li,
-.app-showcase li,
 .future-list li {
   padding: 1.25rem 0;
   border-top: 1px solid var(--line);
 }
 
 .offering-list li:last-child,
-.demo-showcase li:last-child,
 .future-list li:last-child {
   border-bottom: 1px solid var(--line);
 }
 
-.app-showcase__role,
 .future-list__source,
 .venue-card__area,
 .venue-card__notes {
