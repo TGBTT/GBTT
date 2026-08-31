@@ -174,11 +174,25 @@ export async function studioLogout(): Promise<void> {
   localLogout()
 }
 
+/**
+ * Where Firebase sends people once they have set a new password or confirmed
+ * their address. Without it they land on Firebase's bare confirmation screen
+ * with no way back into the app.
+ *
+ * Built from the running origin so a preview build returns to itself rather
+ * than bouncing people to production. The domain has to be listed under
+ * Authentication → Settings → Authorized domains.
+ */
+function signInContinueUrl(): { url: string; handleCodeInApp: false } {
+  const base = import.meta.env.VITE_APP_BASE ?? '/app/'
+  return { url: new URL(`${base}signin/`, window.location.origin).toString(), handleCodeInApp: false }
+}
+
 export async function studioRequestPasswordReset(email: string): Promise<string | null> {
   const auth = getFirebaseAuth()
   if (!auth) return 'Firebase not configured.'
   try {
-    await sendPasswordResetEmail(auth, email.trim())
+    await sendPasswordResetEmail(auth, email.trim(), signInContinueUrl())
     return null
   } catch {
     return 'Could not send reset email.'
@@ -216,7 +230,7 @@ export async function studioRegisterMember(
 
     // Casual drop-in accounts activate off this link rather than admin
     // approval, so the email has to go out as part of registering.
-    await sendEmailVerification(cred.user)
+    await sendEmailVerification(cred.user, signInContinueUrl())
 
     const planSnap = await getDoc(doc(db, 'pricingPlans', planId))
     bindMemberSession({
@@ -238,7 +252,7 @@ export async function studioResendVerification(): Promise<string | null> {
   if (!user) return 'Sign in first.'
   if (user.emailVerified) return null
   try {
-    await sendEmailVerification(user)
+    await sendEmailVerification(user, signInContinueUrl())
     return null
   } catch {
     return 'Could not send the verification email. Try again shortly.'

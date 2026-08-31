@@ -183,7 +183,11 @@ async function printInviteLink(auth, user, args) {
     return
   }
 
-  const link = await auth.generatePasswordResetLink(user.email)
+  // Matches the callables: land them on sign-in once the password is set.
+  const link = await auth.generatePasswordResetLink(user.email, {
+    url: process.env.SIGN_IN_URL ?? 'https://gbtt.co.nz/app/signin/',
+    handleCodeInApp: false,
+  })
   console.log(`\nSet-password link for ${user.email}:\n\n${link}\n`)
   console.log('Send it to them, or open it yourself if this is your own account.')
 }

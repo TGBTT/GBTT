@@ -18,6 +18,24 @@ const formEndpoint = defineString('FORM_ENDPOINT', {
 })
 const webhookSecret = defineSecret('FUNCTIONS_WEBHOOK_SECRET')
 
+const signInUrl = defineString('SIGN_IN_URL', {
+  description: 'Where Firebase sends people after they set or reset their password',
+  default: 'https://gbtt.co.nz/app/signin/',
+})
+
+/**
+ * Sends the person to the sign-in page once Firebase has taken their new
+ * password, instead of leaving them on Firebase's bare confirmation screen with
+ * nowhere to go.
+ *
+ * `handleCodeInApp: false` keeps Firebase's own handler doing the actual reset —
+ * this only adds the continue link at the end of it. The domain must be listed
+ * under Authentication → Settings → Authorized domains or Firebase rejects it.
+ */
+function passwordActionSettings() {
+  return { url: signInUrl.value(), handleCodeInApp: false }
+}
+
 setGlobalOptions({ region: 'australia-southeast1' })
 
 type AppsScriptResult = { ok: boolean; error?: string; data?: unknown }
@@ -339,7 +357,7 @@ export const createMemberAccount = onCall(
       createdBy: request.auth!.uid,
     })
 
-    const resetLink = await auth.generatePasswordResetLink(email)
+    const resetLink = await auth.generatePasswordResetLink(email, passwordActionSettings())
     const scriptResult = await sendInviteEmail({ email, name, phone, planId, resetLink })
 
     await db.collection('audit').add({
@@ -383,7 +401,7 @@ export const resendInvite = onCall({ secrets: [webhookSecret] }, async (request)
   const profile = (snap.data()?.profile ?? {}) as { name?: string; phone?: string }
   const membership = (snap.data()?.membership ?? {}) as { planId?: string }
 
-  const resetLink = await auth.generatePasswordResetLink(email)
+  const resetLink = await auth.generatePasswordResetLink(email, passwordActionSettings())
   const scriptResult = await sendInviteEmail({
     email,
     name: profile.name || userRecord.displayName || email,
@@ -419,7 +437,7 @@ export const adminResetPassword = onCall(async (request) => {
     throw new HttpsError('invalid-argument', 'Email is required.')
   }
 
-  const resetLink = await auth.generatePasswordResetLink(email)
+  const resetLink = await auth.generatePasswordResetLink(email, passwordActionSettings())
 
   await db.collection('audit').add({
     type: 'adminResetPassword',
