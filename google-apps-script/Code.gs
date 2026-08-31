@@ -5,14 +5,13 @@
  * 1. Create a Google Sheet (audit tabs are created automatically).
  * 2. Extensions → Apps Script → paste this file → Save.
  * 3. Project settings → Script properties:
- *    NOTIFY_EMAIL, CALENDAR_ID, FUNCTIONS_WEBHOOK_SECRET, ACTIVATION_KEY
+ *    NOTIFY_EMAIL, CALENDAR_ID, FUNCTIONS_WEBHOOK_SECRET
  * 4. Deploy → New deployment → Web app (Execute as: Me, Anyone).
  * 5. Copy the Web app URL into VITE_FORM_ENDPOINT (site + apps env).
  *
  * POST JSON (Content-Type: text/plain;charset=utf-8):
  *   Public (no webhook secret):
  *     { action: "enquiry", name, email, phone, message, source }
- *     { action: "activation", name, email, planId, source }
  *   Server (webhookSecret in JSON body — Apps Script web apps cannot read HTTP headers):
  *     { action: "sendInvite", webhookSecret, email, name, inviteLink, planName? }
  *     { action: "sendSubscriberBroadcast", webhookSecret, subject, body, recipients[], testMode? }
@@ -31,7 +30,6 @@
 const TIMEZONE = 'Pacific/Auckland'
 
 const SHEET_ENQUIRIES = 'Submissions'
-const SHEET_ACTIVATIONS = 'Activations'
 const SHEET_INVITES = 'Invites'
 const SHEET_BROADCASTS = 'Broadcasts'
 const SHEET_PLAN_CHANGES = 'PlanChanges'
@@ -44,7 +42,11 @@ const SHEET_CALENDAR_SUBSCRIBE = 'CalendarSubscribe'
 const SHEET_CALENDAR_MEMBER_SLOTS = 'CalendarMemberSlots'
 const SHEET_BOOKING_INVITES = 'BookingInvites'
 
-const PUBLIC_ACTIONS = ['enquiry', 'activation']
+// Anything not listed here must present the webhook secret. Keep this list as
+// short as the site allows: a public action is an open relay for whatever it
+// does, and `enquiry` only mails Tom's own inbox, never an address supplied by
+// the caller.
+const PUBLIC_ACTIONS = ['enquiry']
 const DEFAULT_SESSION_MINUTES = 60
 const WEEKDAY_OFFSET = { Mon: 0, Tue: 1, Wed: 2, Thu: 3, Fri: 4, Sat: 5, Sun: 6 }
 
@@ -66,10 +68,6 @@ function notifyEmail_() {
 
 function calendarId_() {
   return prop_('CALENDAR_ID', '')
-}
-
-function activationKey_() {
-  return prop_('ACTIVATION_KEY', 'GBTT-DEMO-ACTIVATE')
 }
 
 function webhookSecretExpected_() {
@@ -309,7 +307,6 @@ function doGet() {
     timezone: TIMEZONE,
     actions: [
       'enquiry',
-      'activation',
       'sendInvite',
       'sendSubscriberBroadcast',
       'sendPlanChangeNotice',
@@ -361,45 +358,6 @@ function handleEnquiry_(data) {
       source +
       '\n\n' +
       message,
-  })
-
-  return jsonResponse({ ok: true })
-}
-
-function handleActivation_(data) {
-  const name = String(data.name || '').trim()
-  const email = String(data.email || '').trim().toLowerCase()
-  const planId = String(data.planId || '').trim()
-  const source = String(data.source || 'member-booking').trim()
-  const key = activationKey_()
-
-  if (!name || !email) {
-    return jsonResponse({ ok: false, error: 'Name and email required.' })
-  }
-
-  auditLog_(SHEET_ACTIVATIONS, ['Timestamp', 'Name', 'Email', 'Plan', 'Source'], [
-    stamp_(),
-    name,
-    email,
-    planId,
-    source,
-  ])
-
-  MailApp.sendEmail({
-    to: email,
-    subject: 'Activate your GBTT membership',
-    body:
-      'Hi ' +
-      name +
-      ',\n\nThanks for joining Golden Bay Team Training.\n\nYour activation key:\n\n' +
-      key +
-      '\n\nOpen member booking on the GBTT site, choose New subscription, and enter this key to finish creating your account.\n\nSee you at Rec Park Centre!\n\n— Tom · GBTT',
-  })
-
-  MailApp.sendEmail({
-    to: notifyEmail_(),
-    subject: 'GBTT activation email sent — ' + name,
-    body: 'Activation requested for ' + name + ' (' + email + ')\nPlan: ' + planId,
   })
 
   return jsonResponse({ ok: true })
@@ -1029,7 +987,6 @@ function doPost(e) {
     if (authError) return jsonResponse({ ok: false, error: authError })
 
     if (action === 'enquiry') return handleEnquiry_(data)
-    if (action === 'activation') return handleActivation_(data)
     if (action === 'sendInvite') return handleSendInvite_(data)
     if (action === 'sendSubscriberBroadcast') return handleSendSubscriberBroadcast_(data)
     if (action === 'sendPlanChangeNotice') return handleSendPlanChangeNotice_(data)

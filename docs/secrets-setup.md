@@ -278,19 +278,22 @@ Copy examples and fill values (never commit real secrets):
 | `NOTIFY_EMAIL` | Tom’s inbox for admin notifications. Defaults to `Tom.GBTT@gmail.com` if unset |
 | `CALENDAR_ID` | Shared studio Google Calendar ID. Value: `d33869728efbe6bcbb6639433e96141db8a89b6919e1f4b7169f9c2cbbd93912@group.calendar.google.com` |
 | `FUNCTIONS_WEBHOOK_SECRET` | Must match Firebase `FUNCTIONS_WEBHOOK_SECRET` |
-| `ACTIVATION_KEY` | **Vestigial — do not set.** See below |
 
 4. Deploy → **New deployment** → Web app:
    - Execute as: **Me**
    - Who has access: **Anyone**
 5. Copy the deployment URL → `VITE_FORM_ENDPOINT` (GitHub Secret) and `FORM_ENDPOINT` (Functions).
 
-> **`ACTIVATION_KEY` and the `activate` action are vestigial.** The emailed key
-> was replaced by Firebase email verification, and no client sends one any more,
-> so the script property and the `activate` branch in
-> `google-apps-script/Code.gs` are dead code. Leave the property unset; the
-> matching `VITE_ACTIVATION_KEY` must not be set as a GitHub secret or in any
-> `.env` either. Both can be deleted outright next time `Code.gs` is edited.
+> **The activation key is gone.** Firebase email verification replaced it, and
+> the `activation` action, its `ACTIVATION_KEY` property and the matching
+> `VITE_ACTIVATION_KEY` have been deleted from `Code.gs` and the env examples.
+> Set neither. Removing it also closed a hole: `activation` was a *public*
+> action that emailed whatever address the caller supplied, so anyone who found
+> the endpoint could have used it to send mail under the studio's name. The only
+> remaining public action is `enquiry`, which mails Tom's own inbox.
+>
+> If the script project already has an `ACTIVATION_KEY` property from an earlier
+> deployment, delete it — it is now read by nothing.
 
 > **Calendar write access.** The web app runs as Tom (`Execute as: Me`), so it
 > acts on the shared calendar with his permissions. He must hold **Make changes

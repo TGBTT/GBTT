@@ -1,8 +1,8 @@
 # GBTT Apps Script web endpoint
 
-Comprehensive web app for GBTT email and Google Calendar integration. Handles contact enquiries, member activation (legacy), invites, admin broadcasts, billing notices, guest passes, and studio calendar sync.
+Comprehensive web app for GBTT email and Google Calendar integration. Handles contact enquiries, invites, admin broadcasts, billing notices, guest passes, and studio calendar sync.
 
-Cloud Functions (Firebase) call protected actions with `webhookSecret` in the JSON body. Public marketing-site actions (`enquiry`, `activation`) do not require a secret.
+Cloud Functions (Firebase) call protected actions with `webhookSecret` in the JSON body. Only `enquiry` is public, and it mails Tom's own inbox rather than any address the caller supplies — keep it that way, since a public action that mails arbitrary recipients is an open relay.
 
 **Note:** Apps Script web app deployments do not expose custom HTTP headers to `doPost`. Server-side callers must include `webhookSecret` in the JSON payload (matching script property `FUNCTIONS_WEBHOOK_SECRET`). The `X-GBTT-Webhook-Secret` header is documented for curl convenience but is not readable by the script runtime.
 
@@ -17,7 +17,6 @@ Cloud Functions (Firebase) call protected actions with `webhookSecret` in the JS
    | `NOTIFY_EMAIL` | `Tom.GBTT@gmail.com` | Tom's inbox for admin notifications |
    | `CALENDAR_ID` | `abc@group.calendar.google.com` | Shared studio Google Calendar ID |
    | `FUNCTIONS_WEBHOOK_SECRET` | long random string | Shared secret for Cloud Functions → Apps Script |
-   | `ACTIVATION_KEY` | `GBTT-DEMO-ACTIVATE` | Legacy signup key (matches `VITE_ACTIVATION_KEY`) |
 
 4. **Calendar setup** — create or share a Google Calendar with the Google account that deploys the script. Copy the calendar ID (Settings → Integrate calendar). Set `CALENDAR_ID` in script properties. Make the calendar public if members need ICS subscribe links.
 
@@ -29,7 +28,6 @@ Cloud Functions (Firebase) call protected actions with `webhookSecret` in the JS
 
 ```bash
 VITE_FORM_ENDPOINT=https://script.google.com/macros/s/YOUR_DEPLOYMENT_ID/exec
-VITE_ACTIVATION_KEY=your-secret-key
 ```
 
 7. After code changes, create a **New deployment** (or manage versions) — editing the script does not update an existing deployment URL automatically.
@@ -41,7 +39,6 @@ Each action logs a row to a dedicated tab:
 | Sheet | Action |
 |-------|--------|
 | `Submissions` | `enquiry` |
-| `Activations` | `activation` |
 | `Invites` | `sendInvite` |
 | `Broadcasts` | `sendSubscriberBroadcast` |
 | `PlanChanges` | `sendPlanChangeNotice` |
@@ -59,7 +56,6 @@ Each action logs a row to a dedicated tab:
 | action | Auth | Channel | Purpose |
 |--------|------|---------|---------|
 | `enquiry` | Public | Email + Sheet | Contact form |
-| `activation` | Public | Email + Sheet | Legacy signup key email |
 | `sendInvite` | Webhook | Email + Sheet | New member set-password invite |
 | `sendSubscriberBroadcast` | Webhook | Email + Sheet | Bulk email to recipients array |
 | `sendPlanChangeNotice` | Webhook | Email + Sheet | Notify Tom of plan change request |
@@ -88,14 +84,6 @@ export SECRET="your-functions-webhook-secret"
 curl -sS -X POST "$ENDPOINT" \
   -H "Content-Type: text/plain;charset=utf-8" \
   -d '{"action":"enquiry","name":"Jane Doe","email":"jane@example.com","phone":"021 000 0000","message":"Interested in Strong class","source":"website"}'
-```
-
-### activation (public)
-
-```bash
-curl -sS -X POST "$ENDPOINT" \
-  -H "Content-Type: text/plain;charset=utf-8" \
-  -d '{"action":"activation","name":"Alex Member","email":"alex@example.com","planId":"weekly2","source":"member-booking"}'
 ```
 
 ### sendInvite
@@ -218,12 +206,11 @@ curl -sS -X POST "$ENDPOINT" \
 
 ## Site integration
 
-Until the endpoint is configured, the contact form falls back to `mailto:` and member signup shows the demo activation key in the UI.
+Until the endpoint is configured, the contact form falls back to `mailto:`. Member signup is unaffected: accounts are created through Firebase, which sends its own verification and set-password emails.
 
 ```bash
 # .env
 VITE_FORM_ENDPOINT=https://script.google.com/macros/s/YOUR_DEPLOYMENT_ID/exec
-VITE_ACTIVATION_KEY=your-secret-key
 ```
 
 Firebase Cloud Functions use the same `VITE_FORM_ENDPOINT` URL pattern with `webhookSecret` in the JSON body for protected actions.
