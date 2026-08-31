@@ -395,8 +395,9 @@ export function SeasonsPanel() {
 
         <p className="hint">
           After changing dates or closures, run <strong>Generate sessions</strong> for that season.
-          It updates sessions in place and archives any that now fall inside a closure, so rosters
-          and attendance are never lost.
+          New weekly classes already lay themselves across the term when they are added. Generate
+          updates sessions in place and archives any that now fall inside a closure, so rosters and
+          attendance are never lost.
         </p>
       </div>
     </section>

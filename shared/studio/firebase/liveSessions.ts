@@ -17,6 +17,7 @@
 import {
   collection,
   doc,
+  getDoc,
   onSnapshot,
   query,
   setDoc,
@@ -26,6 +27,7 @@ import {
   type DocumentData,
 } from 'firebase/firestore'
 import { getFirestoreDb } from './init'
+import { listSeasons, seasonTeachingDays } from './liveSeasons'
 import { WEEKDAYS } from '../fitnessStudio'
 import type {
   ClassOccurrence,
@@ -223,7 +225,12 @@ export interface NewSessionInput {
   weekStart: string
   instructorId?: string
   venueId?: string
+  /** Set when this session is laid out from a season, so later generates can archive it. */
+  seasonId?: string
 }
+
+/** How far an ongoing class is laid out when no season covers the weeks ahead. */
+export const ONGOING_HORIZON_WEEKS = 16
 
 /**
  * Add a one-off session to a week.
@@ -232,13 +239,10 @@ export interface NewSessionInput {
  * need a callable — but `startsAt` must be a real timestamp or cancelBooking
  * and unlockWeeklySlot will refuse to act on it, and `cap` must be set or
  * bookSession has nothing to enforce.
- */
-/**
- * The slot key and start instant a session's day, time and class imply.
  *
- * Both are derived client-side, so any edit to day, time or class has to run
- * through here again: `slotId` is what weekly locks and the season generator
- * match on, and `startsAt` is what the transfer window is measured from.
+ * The slot key and start instant are derived from day, time and class:
+ * `slotId` is what weekly locks and the season generator match on, and
+ * `startsAt` is what the transfer window is measured from.
  */
 function sessionTiming(
   weekStart: string,
@@ -264,6 +268,40 @@ function sessionTiming(
   }
 }
 
+/** Calendar date the session falls on, as `YYYY-MM-DD` in studio local time. */
+function sessionDayKey(weekStart: string, dayLabel: string): string | null {
+  const dayOffset = DAY_INDEX[dayLabel]
+  if (dayOffset === undefined) return null
+  const [y, m, d] = weekStart.split('-').map(Number)
+  if (!y || !m || !d) return null
+  const date = new Date(y, m - 1, d + dayOffset)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+}
+
+function sessionFields(
+  input: NewSessionInput,
+  slotId: string,
+  startsAt: Timestamp,
+): Record<string, unknown> {
+  return {
+    slotId,
+    weekStart: input.weekStart,
+    dayLabel: input.dayLabel,
+    time: input.time,
+    classTypeId: input.classTypeId,
+    className: input.className,
+    cap: input.cap,
+    instructorId: input.instructorId ?? 'tom',
+    venueId: input.venueId ?? 'rec-park-centre',
+    venue: input.venueId ?? 'rec-park-centre',
+    durationMinutes: 60,
+    cancelled: false,
+    startsAt,
+    ...(input.seasonId ? { seasonId: input.seasonId } : {}),
+  }
+}
+
 export async function createLiveSession(
   input: NewSessionInput,
 ): Promise<{ id: string | null; error: string | null }> {
@@ -275,28 +313,18 @@ export async function createLiveSession(
 
   const { slotId, startsAt } = timing
   const id = `${slotId}-${input.weekStart}`
+  const fields = sessionFields(input, slotId, startsAt)
 
   try {
-    await setDoc(
-      doc(db, 'sessions', id),
-      {
-        slotId,
-        weekStart: input.weekStart,
-        dayLabel: input.dayLabel,
-        time: input.time,
-        classTypeId: input.classTypeId,
-        className: input.className,
-        cap: input.cap,
-        instructorId: input.instructorId ?? 'tom',
-        venueId: input.venueId ?? 'rec-park-centre',
-        venue: input.venueId ?? 'rec-park-centre',
-        durationMinutes: 60,
-        cancelled: false,
-        bookedCount: 0,
-        startsAt,
-      },
-      { merge: true },
-    )
+    const ref = doc(db, 'sessions', id)
+    const existing = await getDoc(ref)
+    // `bookedCount` is owned by the booking callables. Writing 0 on a merge
+    // would silently drop seats members are already holding.
+    if (existing.exists()) {
+      await setDoc(ref, fields, { merge: true })
+    } else {
+      await setDoc(ref, { ...fields, bookedCount: 0 })
+    }
     return { id, error: null }
   } catch (e) {
     return { id: null, error: e instanceof Error ? e.message : 'Could not add this session.' }
@@ -372,13 +400,80 @@ export async function createSessionSeries(
   return { created, error: null }
 }
 
+export interface PopulateSlotResult {
+  weeks: number
+  thisWeekId: string | null
+  /** `season` when teaching days came from a defined term; `fallback` when a horizon was used. */
+  horizon: 'season' | 'fallback'
+  error: string | null
+}
+
+/**
+ * Materialise a recurring slot into bookable sessions for the weeks ahead.
+ *
+ * Weekly views and weekly locks both read `sessions` by week, so a standing
+ * slot with no instances is invisible on every following week. Covering
+ * seasons are preferred because they already know term dates and closures; if
+ * none overlap the weeks ahead, the next `ONGOING_HORIZON_WEEKS` are written
+ * so the class can still be searched and allocated.
+ *
+ * The week the class was added from is always included, even if that day is
+ * inside a closure — the admin is looking at that week and asked for it.
+ */
+export async function populateSlotAcrossWeeks(input: NewSessionInput): Promise<PopulateSlotResult> {
+  const empty: PopulateSlotResult = { weeks: 0, thisWeekId: null, horizon: 'fallback', error: null }
+  const fromDay = sessionDayKey(input.weekStart, input.dayLabel)
+  if (!fromDay) return { ...empty, error: `Unsupported day "${input.dayLabel}".` }
+
+  const seasons = await listSeasons()
+  const covering = seasons.filter((s) => s.endDate >= fromDay)
+  const thisSeason = covering.find((s) => s.startDate <= fromDay && s.endDate >= fromDay)
+
+  const byWeek = new Map<string, string | undefined>()
+  byWeek.set(input.weekStart, thisSeason?.id)
+
+  for (const season of covering) {
+    for (const day of seasonTeachingDays(season)) {
+      if (day.dayLabel !== input.dayLabel) continue
+      if (day.day < fromDay) continue
+      byWeek.set(day.weekStart, season.id)
+    }
+  }
+
+  const horizon: PopulateSlotResult['horizon'] = covering.length > 0 ? 'season' : 'fallback'
+  if (horizon === 'fallback') {
+    for (let i = 1; i < ONGOING_HORIZON_WEEKS; i += 1) {
+      byWeek.set(shiftWeekStart(input.weekStart, i), undefined)
+    }
+  }
+
+  const weeks = [...byWeek.entries()].sort(([a], [b]) => a.localeCompare(b))
+  let written = 0
+  let thisWeekId: string | null = null
+  for (const [weekStart, seasonId] of weeks) {
+    const { id, error } = await createLiveSession({ ...input, weekStart, seasonId })
+    if (error) {
+      return {
+        weeks: written,
+        thisWeekId,
+        horizon,
+        error: written
+          ? `Added ${written} week${written === 1 ? '' : 's'}, then stopped: ${error}`
+          : error,
+      }
+    }
+    written += 1
+    if (weekStart === input.weekStart) thisWeekId = id
+  }
+  return { weeks: written, thisWeekId, horizon, error: null }
+}
+
 /**
  * Add a class to the recurring weekly template.
  *
- * The slot is the standing intention; the sessions members actually book are
- * materialised from it by `generateSeasonSessions`, which is what knows about
- * term dates and holiday closures. Writing sessions directly here instead would
- * mean duplicating that logic and getting closures wrong.
+ * The slot is the standing intention. Call `saveRecurringTimetableSlot` (or
+ * `populateSlotAcrossWeeks` after this) so members can actually book the weeks
+ * ahead — weekly views and allocation only see concrete `sessions`.
  */
 export async function saveTimetableSlot(
   input: NewSessionInput,
@@ -409,6 +504,30 @@ export async function saveTimetableSlot(
       slotId: null,
       error: e instanceof Error ? e.message : 'Could not add this to the weekly timetable.',
     }
+  }
+}
+
+/**
+ * Write the standing weekly slot and lay sessions across the rest of the term.
+ *
+ * This is what "every week, ongoing" has to do on create: the template alone
+ * does not appear on following weeks, so search, the calendar and weekly
+ * allocation would all look empty.
+ */
+export async function saveRecurringTimetableSlot(
+  input: NewSessionInput,
+): Promise<PopulateSlotResult & { slotId: string | null }> {
+  const slot = await saveTimetableSlot(input)
+  if (slot.error) {
+    return { slotId: null, thisWeekId: null, weeks: 0, horizon: 'fallback', error: slot.error }
+  }
+  const populated = await populateSlotAcrossWeeks(input)
+  return {
+    slotId: slot.slotId,
+    thisWeekId: populated.thisWeekId,
+    weeks: populated.weeks,
+    horizon: populated.horizon,
+    error: populated.error,
   }
 }
 

@@ -24,10 +24,10 @@ import {
 } from '@gbtt/shared/studio/firebase/liveReminders'
 import { StudioSignIn } from '../../components/StudioSignIn'
 import {
-  createLiveSession,
   createSessionSeries,
   deactivateTimetableSlot,
-  saveTimetableSlot,
+  populateSlotAcrossWeeks,
+  saveRecurringTimetableSlot,
   subscribeTimetableSlots,
   updateLiveSession,
   type LiveTimetableSlot,
@@ -77,6 +77,17 @@ import {
 
 /** How far forward a newly added class should run. */
 type Recurrence = 'once' | 'weeks' | 'ongoing'
+
+function recurringSpanNote(
+  weeks: number,
+  weekLabel: string,
+  horizon: 'season' | 'fallback',
+): string {
+  const span =
+    weeks === 1 ? `It is on ${weekLabel}` : `It is laid across ${weeks} weeks from ${weekLabel}`
+  const closures = horizon === 'season' && weeks > 1 ? ', skipping holiday closures' : ''
+  return `${span}${closures}`
+}
 
 type Tab =
   | 'schedule'
@@ -353,23 +364,19 @@ export default function ClassBoard() {
 
     if (recurrence === 'ongoing') {
       /*
-       * An ongoing class is a standing slot, not a pile of sessions. The slot is
-       * what season generation reads, so it is written first; this week's
-       * session is created alongside it so the class shows on the board
-       * immediately rather than only after the next generate.
+       * An ongoing class is a standing slot plus the sessions members book.
+       * Weekly views and allocation read `sessions` by week, so the rest of
+       * the term is laid out here rather than waiting for a separate generate.
        */
-      const slot = await saveTimetableSlot(input)
-      const { id, error } = slot.error
-        ? { id: null, error: slot.error }
-        : await createLiveSession(input)
+      const { thisWeekId, weeks, horizon, error } = await saveRecurringTimetableSlot(input)
       setBusy(false)
-      if (error) {
+      if (error && !thisWeekId) {
         setActionError(error)
         return
       }
-      setSelectedOccId(id)
+      setSelectedOccId(thisWeekId)
       setActionNote(
-        `${what} now runs every week. It is on ${week.label} already — run Generate sessions in Seasons to lay it across the rest of the term, which also skips holiday closures.`,
+        `${what} now runs every week. ${recurringSpanNote(weeks, week.label, horizon)}.${error ? ` ${error}` : ''}`,
       )
       return
     }
@@ -485,9 +492,8 @@ export default function ClassBoard() {
    * Edit the selected session, carrying its weekly repeat with it.
    *
    * Moving a session that repeats would otherwise leave the standing slot on
-   * the old day and time, so the next Generate sessions would put the class
-   * back where it used to be. The old slot is stopped and a new one written at
-   * the new day, time and class.
+   * the old day and time. The old slot is stopped and a new one written at the
+   * new day, time and class, with sessions laid across the following weeks.
    */
   const editSelectedSession = async (occ: ClassOccurrence, edit: SessionEdit) => {
     setActionNote(null)
@@ -500,11 +506,17 @@ export default function ClassBoard() {
 
     setBusy(true)
     const stopped = await deactivateTimetableSlot(slot.id)
-    const moved = stopped ? { error: stopped } : await saveTimetableSlot(sessionInput(occ, edit))
+    const moved = stopped
+      ? { error: stopped, weeks: 0 }
+      : await saveRecurringTimetableSlot(sessionInput(occ, edit))
     setBusy(false)
     setActionError(moved.error ?? null)
     if (!moved.error) {
-      setActionNote('Session moved, and its weekly repeat moved with it.')
+      setActionNote(
+        moved.weeks > 1
+          ? `Session moved, and its weekly repeat moved with it across ${moved.weeks} weeks.`
+          : 'Session moved, and its weekly repeat moved with it.',
+      )
     }
   }
 
@@ -513,14 +525,15 @@ export default function ClassBoard() {
     setActionError(null)
     setActionNote(null)
     setBusy(true)
-    const { error } = await saveTimetableSlot(sessionInput(occ))
+    const { weeks, horizon, error } = await saveRecurringTimetableSlot(sessionInput(occ))
     setBusy(false)
-    if (error) {
+    if (error && weeks === 0) {
       setActionError(error)
       return
     }
+    const name = classTypeById(occ.classTypeId)?.name ?? occ.classTypeId
     setActionNote(
-      `${classTypeById(occ.classTypeId)?.name ?? occ.classTypeId} on ${occ.dayLabel} at ${occ.time} now runs every week — run Generate sessions in Seasons to lay it across the rest of the term, which skips holiday closures.`,
+      `${name} on ${occ.dayLabel} at ${occ.time} now runs every week. ${recurringSpanNote(weeks, week.label, horizon)}.${error ? ` ${error}` : ''}`,
     )
   }
 
@@ -539,6 +552,30 @@ export default function ClassBoard() {
     }
     setActionNote(
       'Stopped repeating. Sessions already on the calendar still run — remove them individually if they should not.',
+    )
+  }
+
+  /** Lay an existing standing slot onto the weeks ahead, the same as a new weekly class. */
+  const fillRecurringSlot = async (slot: LiveTimetableSlot) => {
+    const type = classTypeById(slot.classTypeId)
+    setActionError(null)
+    setActionNote(null)
+    setBusy(true)
+    const { weeks, horizon, error } = await populateSlotAcrossWeeks({
+      classTypeId: slot.classTypeId,
+      className: type?.name ?? slot.classTypeId,
+      cap: type?.cap ?? 0,
+      dayLabel: slot.dayLabel,
+      time: slot.time,
+      weekStart: live.weekStart,
+    })
+    setBusy(false)
+    if (error && weeks === 0) {
+      setActionError(error)
+      return
+    }
+    setActionNote(
+      `${type?.name ?? slot.classTypeId} on ${slot.dayLabel} at ${slot.time}: ${recurringSpanNote(weeks, week.label, horizon)}.${error ? ` ${error}` : ''}`,
     )
   }
 
@@ -1413,7 +1450,7 @@ export default function ClassBoard() {
             ) : null}
             <p className="hint">
               {recurrence === 'ongoing'
-                ? 'Adds it to the recurring weekly timetable. Sessions are laid across the term by Generate sessions in Seasons, which skips holiday closures.'
+                ? 'Adds it to the recurring weekly timetable and creates sessions for the rest of the term, skipping holiday closures. Future weeks can be opened, searched and allocated immediately.'
                 : recurrence === 'weeks'
                   ? `Creates ${repeatWeeks} session${repeatWeeks === 1 ? '' : 's'}, one a week from ${week.label}. Holiday closures are not applied to a fixed run — use "ongoing" if the class should follow the term calendar.`
                   : 'A one-off. Nothing is added to the recurring timetable.'}
@@ -1426,8 +1463,9 @@ export default function ClassBoard() {
           <div className="remove-occ-list">
             <h3>Recurring weekly classes</h3>
             <p className="hint">
-              The standing timetable that Generate sessions works from. Stopping one leaves every
-              session already created alone — remove those individually if they should not run.
+              The standing timetable. Adding one also creates the sessions for following weeks.
+              Stopping one leaves every session already created alone — remove those individually if
+              they should not run.
             </p>
             {!recurringSlots.length ? (
               <p className="hint">Nothing recurring yet.</p>
@@ -1439,6 +1477,14 @@ export default function ClassBoard() {
                       <strong>{classTypeById(slot.classTypeId)?.name ?? slot.classTypeId}</strong> ·{' '}
                       {slot.dayLabel} {slot.time} · every week
                     </span>
+                    <button
+                      type="button"
+                      className="btn ghost"
+                      disabled={busy}
+                      onClick={() => void fillRecurringSlot(slot)}
+                    >
+                      Fill coming weeks
+                    </button>
                     <button
                       type="button"
                       className="btn ghost"

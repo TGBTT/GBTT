@@ -9,7 +9,7 @@
  * Rules let any signed-in member read seasons and only an admin write them.
  */
 
-import { collection, deleteDoc, doc, onSnapshot, setDoc } from 'firebase/firestore'
+import { collection, deleteDoc, doc, getDocs, onSnapshot, setDoc } from 'firebase/firestore'
 import { getFirestoreDb } from './init'
 
 export interface SeasonBreak {
@@ -80,25 +80,78 @@ export function subscribeSeasons(onChange: (state: LiveSeasonsState) => void): (
   )
 }
 
-/** Number of weekdays a season runs, closures removed. Mirrors the server count. */
-export function countTeachingDays(season: LiveSeason): number {
-  if (!season.startDate || !season.endDate || season.endDate < season.startDate) return 0
+const SEASON_DAY_INDEX: Record<string, number> = { Mon: 0, Tue: 1, Wed: 2, Thu: 3, Fri: 4 }
+
+function pad2(n: number): string {
+  return String(n).padStart(2, '0')
+}
+
+function dayKey(d: Date): string {
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
+}
+
+function mondayOf(d: Date): Date {
+  const out = new Date(d.getFullYear(), d.getMonth(), d.getDate())
+  const dow = out.getDay()
+  out.setDate(out.getDate() + (dow === 0 ? -6 : 1 - dow))
+  return out
+}
+
+export interface SeasonTeachingDay {
+  weekStart: string
+  day: string
+  dayLabel: string
+}
+
+/**
+ * Every weekday a season can hold a session, closures removed.
+ *
+ * Mirrors the server `seasonDays` walk: sessions are filed under the Monday of
+ * their week, while closures are checked against the session's own date, so a
+ * break covering only part of a week cancels only the days it covers.
+ */
+export function seasonTeachingDays(season: LiveSeason): SeasonTeachingDay[] {
+  if (!season.startDate || !season.endDate || season.endDate < season.startDate) return []
 
   const [sy, sm, sd] = season.startDate.split('-').map(Number)
   const [ey, em, ed] = season.endDate.split('-').map(Number)
-  const cursor = new Date(sy, sm - 1, sd)
-  const end = new Date(ey, em - 1, ed)
-  const pad = (n: number) => String(n).padStart(2, '0')
+  if (!sy || !sm || !sd || !ey || !em || !ed) return []
 
-  let count = 0
-  while (cursor <= end) {
-    const day = cursor.getDay()
-    const key = `${cursor.getFullYear()}-${pad(cursor.getMonth() + 1)}-${pad(cursor.getDate())}`
-    const closed = season.breaks.some((b) => b.startDate && key >= b.startDate && key <= b.endDate)
-    if (day >= 1 && day <= 5 && !closed) count += 1
-    cursor.setDate(cursor.getDate() + 1)
+  const start = new Date(sy, sm - 1, sd)
+  const end = new Date(ey, em - 1, ed)
+  const out: SeasonTeachingDay[] = []
+
+  for (let week = mondayOf(start); week <= end; week.setDate(week.getDate() + 7)) {
+    const weekStart = dayKey(week)
+    for (const [label, offset] of Object.entries(SEASON_DAY_INDEX)) {
+      const date = new Date(week.getFullYear(), week.getMonth(), week.getDate() + offset)
+      const day = dayKey(date)
+      if (day < season.startDate || day > season.endDate) continue
+      if (season.breaks.some((b) => b.startDate && day >= b.startDate && day <= b.endDate)) continue
+      out.push({ weekStart, day, dayLabel: label })
+    }
   }
-  return count
+  return out
+}
+
+/** Number of weekdays a season runs, closures removed. Mirrors the server count. */
+export function countTeachingDays(season: LiveSeason): number {
+  return seasonTeachingDays(season).length
+}
+
+/** One-shot read of every season. Used when laying a new recurring class across the term. */
+export async function listSeasons(): Promise<LiveSeason[]> {
+  const db = getFirestoreDb()
+  if (!db) return []
+
+  try {
+    const snap = await getDocs(collection(db, 'seasons'))
+    return snap.docs
+      .map((d) => mapSeason(d.id, d.data()))
+      .sort((a, b) => a.startDate.localeCompare(b.startDate))
+  } catch {
+    return []
+  }
 }
 
 export async function saveSeason(season: LiveSeason): Promise<string | null> {
