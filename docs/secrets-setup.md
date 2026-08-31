@@ -275,8 +275,8 @@ Copy examples and fill values (never commit real secrets):
 
 | Property | Purpose |
 |----------|---------|
-| `NOTIFY_EMAIL` | Tom’s inbox for admin notifications |
-| `CALENDAR_ID` | Shared studio Google Calendar ID |
+| `NOTIFY_EMAIL` | Tom’s inbox for admin notifications. Defaults to `Tom.GBTT@gmail.com` if unset |
+| `CALENDAR_ID` | Shared studio Google Calendar ID. Value: `d33869728efbe6bcbb6639433e96141db8a89b6919e1f4b7169f9c2cbbd93912@group.calendar.google.com` |
 | `FUNCTIONS_WEBHOOK_SECRET` | Must match Firebase `FUNCTIONS_WEBHOOK_SECRET` |
 | `ACTIVATION_KEY` | **Vestigial — do not set.** See below |
 
@@ -291,6 +291,14 @@ Copy examples and fill values (never commit real secrets):
 > `google-apps-script/Code.gs` are dead code. Leave the property unset; the
 > matching `VITE_ACTIVATION_KEY` must not be set as a GitHub secret or in any
 > `.env` either. Both can be deleted outright next time `Code.gs` is edited.
+
+> **Calendar write access.** The web app runs as Tom (`Execute as: Me`), so it
+> acts on the shared calendar with his permissions. He must hold **Make changes
+> to events** on that calendar, not just view rights, or `calendarUpsertSession`
+> and `calendarDeleteSession` fail at the point of writing rather than at
+> configuration time. The first run touching `CalendarApp` also prompts for the
+> Calendar scope; until that consent is given the calls error out. Trigger it
+> once from the editor rather than discovering it on a live booking.
 
 ### Apps Script actions used by Cloud Functions
 
