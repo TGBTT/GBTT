@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, Outlet, useLocation } from 'react-router-dom'
-import { NAV, SITE, adminAppHref } from '../data/siteConfig'
+import { NAV, SITE, signInHref } from '../data/siteConfig'
 
 function navIsActive(to: string, pathname: string, hash: string): boolean {
   if (to === '/') return pathname === '/' && !hash
@@ -66,8 +66,8 @@ export function SiteLayout() {
                 )
               })}
             </nav>
-            <a className="admin-nav-badge" href={adminAppHref()} title="Staff login">
-              Admin
+            <a className="admin-nav-badge" href={signInHref()} title="Sign in">
+              Sign in
             </a>
           </div>
         </div>

@@ -89,8 +89,11 @@ jobs:
           mkdir -p _site/app/images
           cp -R apps/public/images/classes _site/app/images/
 
-          # SPA deep links
-          mkdir -p _site/app/fitness/studioflow _site/app/fitness/classboard
+          # SPA deep links. Pages serves static files only, so every client
+          # route needs its own index.html or it 404s before React loads.
+          # Adding a route to App.tsx means adding it here too.
+          mkdir -p _site/app/signin _site/app/fitness/studioflow _site/app/fitness/classboard
+          cp _site/app/index.html _site/app/signin/index.html
           cp _site/app/index.html _site/app/fitness/studioflow/index.html
           cp _site/app/index.html _site/app/fitness/classboard/index.html
           for path in contact; do
@@ -110,6 +113,7 @@ jobs:
           echo "--- required files ---"
           test -f _site/index.html
           test -f _site/app/index.html
+          test -f _site/app/signin/index.html
           test -f _site/images/classes/sweat/card-480.jpg
           test -f _site/app/images/classes/sweat/card-480.jpg
           test -f _site/.nojekyll

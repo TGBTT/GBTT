@@ -4,9 +4,10 @@ import { ClassTypeDescription } from '@gbtt/shared/studio/ClassTypeDescription'
 import {
   studioAddMemberToSession,
   studioMarkAttendance,
+  studioLogout,
   studioRemoveSession,
-  studioStaffLogin,
 } from '@gbtt/shared/studio/studioAuth'
+import { StudioSignIn } from '../../components/StudioSignIn'
 import { createLiveSession } from '@gbtt/shared/studio/firebase/liveSessions'
 import { savePricingPlan } from '@gbtt/shared/studio/firebase/livePricing'
 import { useLivePricing } from '../../hooks/useLivePricing'
@@ -55,6 +56,7 @@ import {
   setSessionExerciseDisplay,
   setTransferWindowHours,
   spotsLeft,
+  subscribeStore,
   syncLabels,
   toggleExercise,
   toggleReminder,
@@ -111,14 +113,14 @@ export default function ClassBoard() {
   const [tick, setTick] = useState(0)
   const refresh = () => setTick((n) => n + 1)
 
+  // Signing out from the site nav mutates the store without going through this
+  // page, so re-read it whenever the store changes.
+  useEffect(() => subscribeStore(refresh), [])
+
   const role = getSessionRole()
   const session = getSessionUser()
   const staff = role === 'admin' || role === 'trainer'
 
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [loginError, setLoginError] = useState<string | null>(null)
-  const [signingIn, setSigningIn] = useState(false)
   const [tab, setTab] = useState<Tab>('schedule')
   const [selectedTypeId, setSelectedTypeId] = useState(getClassTypes()[0]?.id ?? 'sweat')
   const [selectedOccId, setSelectedOccId] = useState<string | null>(null)
@@ -281,6 +283,13 @@ export default function ClassBoard() {
   const tabs = ALL_TABS.filter((t) => !t.adminOnly || role === 'admin')
 
   if (!staff) {
+    /*
+     * Hiding the shell is not the protection — Firestore rules reject a token
+     * without a staff claim regardless — but a client who followed a link here
+     * has done nothing wrong, so they are sent to the app they can actually
+     * use rather than shown a failure.
+     */
+    const isMember = role === 'member'
     return (
       <div className="classboard-page theme-gbtt">
         <AppOutsideShell imageId="classboard" showBackLink={false} />
@@ -288,50 +297,40 @@ export default function ClassBoard() {
         <header className="classboard-top app-section">
           <div>
             <p className="app-badge">Staff admin</p>
-            <h1>Staff login</h1>
+            <h1>{isMember ? 'This is the staff console' : 'Sign in'}</h1>
             <p className="app-sub">
-              Trainers can run schedule and role-call without legal, notify, or site content tabs.
+              {isMember
+                ? 'Your account is a client account, so there is nothing for you in here — booking lives in the member app.'
+                : 'Trainers can run schedule and role-call without legal, notify, or site content tabs.'}
             </p>
           </div>
         </header>
         <section className="yacht-panel app-enter admin-login app-section">
-          <label className="field">
-            Email
-            <input value={email} onChange={(e) => setEmail(e.target.value)} />
-          </label>
-          <label className="field">
-            Password
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              autoComplete="current-password"
+          {isMember ? (
+            <div className="btn-row">
+              <Link className="btn primary" to="/fitness/studioflow">
+                Go to booking →
+              </Link>
+              <button
+                type="button"
+                className="btn ghost"
+                onClick={() => {
+                  void studioLogout().then(refresh)
+                }}
+              >
+                Sign in as someone else
+              </button>
+            </div>
+          ) : (
+            <StudioSignIn
+              onSignedIn={refresh}
+              extraActions={
+                <Link className="btn ghost" to="/fitness/studioflow">
+                  Member app →
+                </Link>
+              }
             />
-          </label>
-          {loginError ? <p className="form-error">{loginError}</p> : null}
-          <div className="btn-row">
-            <button
-              type="button"
-              className="btn primary"
-              disabled={signingIn}
-              onClick={() => {
-                setSigningIn(true)
-                setLoginError(null)
-                studioStaffLogin(email, password)
-                  .then(({ error }) => {
-                    if (error) setLoginError(error)
-                    else refresh()
-                  })
-                  .catch(() => setLoginError('Sign-in failed. Try again.'))
-                  .finally(() => setSigningIn(false))
-              }}
-            >
-              {signingIn ? 'Signing in…' : 'Sign in'}
-            </button>
-            <Link className="btn ghost" to="/fitness/studioflow">
-              Member app →
-            </Link>
-          </div>
+          )}
         </section>
         </div>
       </div>

@@ -5,12 +5,12 @@ import { WeekSessionCalendar } from '../../components/WeekSessionCalendar'
 import { useLiveSessions, useWeekNavigation, useWeeklyLocks } from '../../hooks/useLiveSessions'
 import { WeekNavigator } from '../../components/WeekNavigator'
 import { SeasonCost } from '../../components/SeasonCost'
+import { StudioSignIn } from '../../components/StudioSignIn'
 import {
   studioBookSession,
   studioEmailVerified,
   studioHasFirebaseUser,
   studioLockWeeklySlot,
-  studioLogin,
   studioRegisterMember,
   studioResendVerification,
   studioUnlockWeeklySlot,
@@ -37,6 +37,7 @@ import {
   sessionExercises,
   setShowNameToClassmates,
   spotsLeft,
+  subscribeStore,
   syncLabels,
   visibleRosterNames,
   type ClassOccurrence,
@@ -50,9 +51,11 @@ export default function StudioFlow() {
   const [tick, setTick] = useState(0)
   const refresh = () => setTick((n) => n + 1)
 
+  // Signing in or out from the site nav mutates the store without going
+  // through this page, so re-read it whenever the store changes.
+  useEffect(() => subscribeStore(refresh), [])
+
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [authEmail, setAuthEmail] = useState('alex@demo')
-  const [authPassword, setAuthPassword] = useState('demo')
   const [regName, setRegName] = useState('')
   const [regEmail, setRegEmail] = useState('')
   const [regPlan, setRegPlan] = useState<PlanId>('weekly2')
@@ -502,42 +505,24 @@ export default function StudioFlow() {
         {!member ? (
           <>
             {!showRegister ? (
-              <>
-                <label className="field">
-                  Email
-                  <input value={authEmail} onChange={(e) => setAuthEmail(e.target.value)} />
-                </label>
-                <label className="field">
-                  Password
-                  <input
-                    type="password"
-                    value={authPassword}
-                    onChange={(e) => setAuthPassword(e.target.value)}
-                  />
-                </label>
-                <div className="btn-row">
-                  <button
-                    type="button"
-                    className="btn primary"
-                    disabled={busy}
-                    onClick={async () => {
-                      setBusy(true)
-                      const err = await studioLogin(authEmail, authPassword)
-                      setBusy(false)
-                      flash(err ? null : 'Signed in — select a session on the calendar.', err)
-                    }}
-                  >
-                    Log in to book
-                  </button>
+              /*
+               * Same form as the admin console and /signin — staff who sign in
+               * here are routed to the console rather than being told this is
+               * the wrong page.
+               */
+              <StudioSignIn
+                onSignedIn={(role) => {
+                  if (role === 'member') {
+                    flash('Signed in — select a session on the calendar.', null)
+                  }
+                }}
+                extraActions={
                   <button type="button" className="btn ghost" onClick={() => setShowRegister(true)}>
                     Create an account
                   </button>
-                </div>
-                <p className="hint">
-                  Sign in with the password you set from your invitation email. Use “Forgot
-                  password” if you have not set one yet.
-                </p>
-              </>
+                }
+                hint="Sign in with the password you set from your invitation email. Use “Forgot password” if you have not set one yet."
+              />
             ) : (
               <>
                 <label className="field">

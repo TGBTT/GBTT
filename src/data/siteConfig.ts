@@ -90,7 +90,13 @@ export function appHref(path: string): string {
   return `${base}app/${path}`
 }
 
-/** Staff-only trainer admin — linked from the discreet navbar badge. */
-export function adminAppHref(): string {
-  return appHref('fitness/classboard/')
+/**
+ * Sign-in, linked from the navbar badge.
+ *
+ * One form for everyone: it reads the role off the account and sends staff to
+ * the console and clients to booking, so the marketing site does not need to
+ * know which kind of person is clicking.
+ */
+export function signInHref(): string {
+  return appHref('signin/')
 }

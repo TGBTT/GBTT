@@ -13,6 +13,7 @@ import { isFirebaseConfigured } from './firebase/config'
 import {
   bindMemberSession,
   bindStaffSession,
+  getSessionRole,
   login as localLogin,
   logout as localLogout,
 } from './fitnessStudio'
@@ -182,6 +183,53 @@ async function completeStaffSignIn(
   bindStaffSession(current?.email ?? fallbackEmail, current?.displayName ?? '', role)
 
   return { error: null, role }
+}
+
+/**
+ * Combined sign-in for the one shared form: authenticate once, read the role
+ * from the custom claim, then run whichever completion path that role needs.
+ *
+ * The resolved role comes back so the caller can route — staff to the admin
+ * console, members to the member app — without the person having to say up
+ * front which kind of account they hold.
+ */
+export async function studioSignIn(
+  email: string,
+  password: string,
+): Promise<{ error: string | null; role: StudioRole | null }> {
+  if (!isFirebaseConfigured()) {
+    if (import.meta.env.PROD) {
+      return { error: 'Sign-in is unavailable until Firebase is configured.', role: null }
+    }
+    // Seed sign-in binds the local session itself, so the role is read back
+    // from the store rather than from a token that does not exist here.
+    const error = localLogin(email, password)
+    if (error) return { error, role: null }
+    const seeded = getSessionRole()
+    return { error: null, role: seeded === 'public' ? null : seeded }
+  }
+
+  const auth = getFirebaseAuth()
+  if (!auth) return { error: 'Firebase not configured.', role: null }
+
+  let user: User
+  try {
+    const cred = await signInWithEmailAndPassword(auth, email.trim(), password)
+    user = cred.user
+  } catch {
+    return { error: 'Sign-in failed. Check email and password.', role: null }
+  }
+
+  try {
+    const role = await studioRole()
+    if (role === 'admin' || role === 'trainer') return await completeStaffSignIn(email)
+    // Anything without a staff claim is treated as a member, which keeps the
+    // existing behaviour for accounts minted before the claim was set.
+    const error = await completeMemberSignIn(user, email, false)
+    return { error, role: error ? null : 'member' }
+  } catch {
+    return { error: 'Sign-in failed. Try again.', role: null }
+  }
 }
 
 export async function studioLogout(): Promise<void> {

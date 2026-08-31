@@ -6,6 +6,7 @@ import { FirebaseConfigBanner } from './components/FirebaseConfigBanner'
 import Hub from './pages/Hub'
 import StudioFlow from './pages/fitness/StudioFlow'
 import ClassBoard from './pages/fitness/ClassBoard'
+import SignIn from './pages/fitness/SignIn'
 import './styles/app.css'
 import './styles/gbtt-theme.css'
 
@@ -22,6 +23,14 @@ export default function App() {
         <FirebaseConfigBanner />
         <Routes>
           <Route path="/" element={<Hub />} />
+          <Route
+            path="/signin"
+            element={
+              <AppRoute>
+                <SignIn />
+              </AppRoute>
+            }
+          />
           <Route
             path="/fitness/studioflow"
             element={

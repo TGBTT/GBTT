@@ -751,6 +751,13 @@ function loadState(): StoreState {
 
 let store: StoreState = typeof localStorage !== 'undefined' ? loadState() : seedState()
 
+/*
+ * Same-tab listeners. The `storage` event only fires in *other* tabs, so a
+ * component that is not the one calling the mutation (the site nav, for
+ * instance) would never hear about a sign-in or sign-out without this.
+ */
+const listeners = new Set<() => void>()
+
 function persist(): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(store))
@@ -758,6 +765,7 @@ function persist(): void {
     /* ignore quota */
   }
   store.lastFirebaseWrite = `localStorage · ${new Date().toISOString().slice(11, 19)}`
+  for (const listener of listeners) listener()
 }
 
 export function resetStudioData(): void {
@@ -775,9 +783,13 @@ export function reloadStore(): void {
   store = loadState()
 }
 
-/** Cross-tab sync when trainer admin or member app updates localStorage. */
+/**
+ * Subscribe to store changes, whether they came from this tab (a mutation
+ * calling `persist`) or another one (the `storage` event).
+ */
 export function subscribeStore(onChange: () => void): () => void {
-  if (typeof window === 'undefined') return () => undefined
+  listeners.add(onChange)
+  if (typeof window === 'undefined') return () => listeners.delete(onChange)
   const handler = (e: StorageEvent) => {
     if (e.key === STORAGE_KEY || e.key === null) {
       reloadStore()
@@ -785,7 +797,10 @@ export function subscribeStore(onChange: () => void): () => void {
     }
   }
   window.addEventListener('storage', handler)
-  return () => window.removeEventListener('storage', handler)
+  return () => {
+    listeners.delete(onChange)
+    window.removeEventListener('storage', handler)
+  }
 }
 
 export function getStoreSnapshot(): StoreState {

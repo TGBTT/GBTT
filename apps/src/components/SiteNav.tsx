@@ -1,6 +1,9 @@
-import { useState } from 'react'
+import { useEffect, useReducer, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { studioLogout } from '@gbtt/shared/studio/studioAuth'
 import { useAppPresentation } from '../context/AppPresentation'
+import { getSessionRole, getSessionUser, subscribeStore } from '../shared/fitnessStudio'
+import { SIGN_IN_PATH, homePathForRole } from './studioRoutes'
 
 function marketingHref(path: string): string {
   const base = import.meta.env.BASE_URL
@@ -21,6 +24,14 @@ const NAV = [
 export function SiteNav() {
   const { showShowcaseChrome } = useAppPresentation()
   const [open, setOpen] = useState(false)
+  // The store is mutated by the sign-in form and by the pages, not by the nav,
+  // so it has to be told when the session changes or it would stay stale.
+  const [, bumpSession] = useReducer((n: number) => n + 1, 0)
+  useEffect(() => subscribeStore(bumpSession), [])
+
+  const session = getSessionUser()
+  const role = getSessionRole()
+
   if (!showShowcaseChrome) return null
 
   const logoSrc = `${import.meta.env.BASE_URL}brand/gbtt-logo.png`
@@ -56,14 +67,37 @@ export function SiteNav() {
               </a>
             ))}
           </nav>
-          <Link
-            className="admin-nav-badge"
-            to="/fitness/classboard"
-            title="Staff login"
-            onClick={() => setOpen(false)}
-          >
-            Admin
-          </Link>
+          {session && role !== 'public' ? (
+            <div className="admin-nav-session">
+              <Link
+                className="admin-nav-badge"
+                to={homePathForRole(role)}
+                title={`Signed in as ${session.email}`}
+                onClick={() => setOpen(false)}
+              >
+                {session.name || session.email}
+              </Link>
+              <button
+                type="button"
+                className="admin-nav-signout"
+                onClick={() => {
+                  setOpen(false)
+                  void studioLogout()
+                }}
+              >
+                Sign out
+              </button>
+            </div>
+          ) : (
+            <Link
+              className="admin-nav-badge"
+              to={SIGN_IN_PATH}
+              title="Sign in"
+              onClick={() => setOpen(false)}
+            >
+              Sign in
+            </Link>
+          )}
         </div>
       </div>
     </header>
