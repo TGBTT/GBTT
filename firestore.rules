@@ -138,6 +138,13 @@ service cloud.firestore {
         allow write: if isAdmin();
       }
 
+      // The SEQUENCE counter behind a member's recurring calendar invite.
+      // Server-only: a client that could lower it could stop their own
+      // calendar accepting any further update to the series.
+      match /calendarSeries/{slotId} {
+        allow read, write: if false;
+      }
+
       match /bookings/{bookingId} {
         allow read: if isOwner(uid) || isStaff();
         allow write: if isStaff();

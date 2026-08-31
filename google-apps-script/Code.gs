@@ -713,11 +713,29 @@ function buildBookingIcs_(opts) {
   ]
 
   /*
-   * A weekly lock is one recurring event. Sending it as a series is what keeps
-   * a season-long lock to a single email instead of one per week.
+   * A weekly lock is one recurring event, listed as the exact dates the member
+   * actually holds a seat on rather than as FREQ=WEEKLY.
+   *
+   * A weekly rule is wrong here for two reasons the studio hits routinely: the
+   * term is broken up by holiday closures, so the real dates are not a
+   * contiguous run of weeks, and the season can be extended after the lock, so
+   * any fixed COUNT goes stale. RDATE says exactly which days, which is the
+   * same set the timetable generated, closures already removed.
    */
+  const rdates = (opts.occurrences || []).slice(1)
+  for (let i = 0; i < rdates.length; i += 10) {
+    lines.push(
+      'RDATE:' +
+        rdates
+          .slice(i, i + 10)
+          .map(icsStamp_)
+          .join(','),
+    )
+  }
+
+  // Older callers that predate the date list still get a weekly series.
   const weeklyCount = Number(opts.weeklyCount || 0)
-  if (weeklyCount > 1) {
+  if (!rdates.length && weeklyCount > 1) {
     lines.push('RRULE:FREQ=WEEKLY;COUNT=' + weeklyCount)
   }
 
@@ -756,6 +774,21 @@ function bookingIcsPayload_(data, method) {
   const time = String(data.time || '').trim()
   const weeklyCount = Number(data.weeklyCount || 0)
 
+  /*
+   * The exact days this member holds, as ISO instants worked out by the caller
+   * from the sessions themselves. Whatever is not in this list — a closed week,
+   * a cancelled class — is not on their calendar either.
+   */
+  const occurrences = (Array.isArray(data.occurrences) ? data.occurrences : [])
+    .map(function (iso) {
+      const date = new Date(String(iso))
+      return isNaN(date.getTime()) ? null : date
+    })
+    .filter(Boolean)
+    .sort(function (a, b) {
+      return a.getTime() - b.getTime()
+    })
+
   if (!memberEmail || (!sessionId && !slotId) || !weekStart || !dayLabel || !time) {
     return {
       error: 'memberEmail, sessionId or slotId, weekStart, dayLabel and time are required.',
@@ -767,7 +800,11 @@ function bookingIcsPayload_(data, method) {
   const instructor = String(data.instructor || 'Tom').trim()
   const durationMinutes = Number(data.durationMinutes || DEFAULT_SESSION_MINUTES)
 
-  const start = sessionStartDate_(weekStart, dayLabel, time)
+  // The series starts on the first day actually held, which is not necessarily
+  // the week the caller happened to quote.
+  const start = occurrences.length
+    ? occurrences[0]
+    : sessionStartDate_(weekStart, dayLabel, time)
   const end = new Date(start.getTime() + durationMinutes * 60 * 1000)
 
   const ics = buildBookingIcs_({
@@ -776,6 +813,7 @@ function bookingIcsPayload_(data, method) {
     sequence: Number(data.sequence || (method === 'CANCEL' ? 1 : 0)),
     start: start,
     end: end,
+    occurrences: slotId ? occurrences : [],
     weeklyCount: slotId ? weeklyCount : 0,
     summary: className + ' · GBTT',
     description:
@@ -794,7 +832,15 @@ function bookingIcsPayload_(data, method) {
     className: className,
     venue: venue,
     start: start,
-    when: dayLabel + ' ' + time + (slotId && weeklyCount > 1 ? ', weekly' : ''),
+    when:
+      dayLabel +
+      ' ' +
+      time +
+      (slotId && occurrences.length > 1
+        ? ', weekly · ' + occurrences.length + ' classes'
+        : slotId && weeklyCount > 1
+          ? ', weekly'
+          : ''),
   }
 }
 
@@ -934,6 +980,95 @@ function handleCalendarUpsertSession_(data) {
   })
 }
 
+/**
+ * Upsert a run of sessions in one request.
+ *
+ * Generating a season writes hundreds of sessions, and one web-app call per
+ * session runs into concurrent-execution limits long before it runs into the
+ * daily quota. The work per session is identical to the single upsert; only
+ * the calendar lookup is hoisted out of the loop.
+ *
+ * A failure on one session is reported against that session and the rest still
+ * go through: a part-built calendar the caller can retry beats none.
+ */
+function handleCalendarUpsertSessions_(data) {
+  const calResult = requireCalendar_()
+  if (calResult.error) return jsonResponse({ ok: false, error: calResult.error })
+
+  const sessions = Array.isArray(data.sessions) ? data.sessions : []
+  if (!sessions.length) {
+    return jsonResponse({ ok: false, error: 'sessions array required.' })
+  }
+
+  const results = []
+  let failed = 0
+
+  sessions.forEach(function (session) {
+    const sessionId = String(session.sessionId || '').trim()
+    const weekStart = String(session.weekStart || '').trim()
+    const dayLabel = String(session.dayLabel || '').trim()
+    const time = String(session.time || '').trim()
+
+    if (!sessionId || !weekStart || !dayLabel || !time) {
+      failed += 1
+      results.push({
+        sessionId: sessionId,
+        error: 'sessionId, weekStart, dayLabel, and time required.',
+      })
+      return
+    }
+
+    try {
+      const formatted = formatSessionEvent_(session)
+      const durationMinutes = Number(session.durationMinutes || DEFAULT_SESSION_MINUTES)
+      const start = sessionStartDate_(weekStart, dayLabel, time)
+      const end = new Date(start.getTime() + durationMinutes * 60 * 1000)
+      const calendarEventId = String(session.calendarEventId || '').trim()
+
+      let event = null
+      if (calendarEventId) {
+        try {
+          event = calResult.calendar.getEventById(calendarEventId)
+        } catch (err) {
+          event = null
+        }
+      }
+      if (!event) {
+        event = findEventBySessionId_(calResult.calendar, sessionId, weekStart)
+      }
+
+      if (event) {
+        event.setTitle(formatted.title)
+        event.setDescription(formatted.description)
+        event.setLocation(formatted.location)
+        event.setTime(start, end)
+      } else {
+        event = calResult.calendar.createEvent(formatted.title, start, end, {
+          description: formatted.description,
+          location: formatted.location,
+        })
+      }
+
+      results.push({ sessionId: sessionId, calendarEventId: event.getId() })
+      auditLog_(
+        SHEET_CALENDAR_UPSERTS,
+        ['Timestamp', 'SessionId', 'CalendarEventId', 'WeekStart', 'Title', 'Start'],
+        [stamp_(), sessionId, event.getId(), weekStart, formatted.title, start.toISOString()],
+      )
+    } catch (err) {
+      failed += 1
+      results.push({ sessionId: sessionId, error: String(err) })
+    }
+  })
+
+  return jsonResponse({
+    ok: true,
+    upserted: sessions.length - failed,
+    failed: failed,
+    results: results,
+  })
+}
+
 function handleCalendarDeleteSession_(data) {
   const calResult = requireCalendar_()
   if (calResult.error) return jsonResponse({ ok: false, error: calResult.error })
@@ -1055,6 +1190,7 @@ function doPost(e) {
     if (action === 'sendSlotInvite') return handleSendSlotInvite_(data)
     if (action === 'sendSlotCancellation') return handleSendSlotCancellation_(data)
     if (action === 'calendarUpsertSession') return handleCalendarUpsertSession_(data)
+    if (action === 'calendarUpsertSessions') return handleCalendarUpsertSessions_(data)
     if (action === 'calendarDeleteSession') return handleCalendarDeleteSession_(data)
     if (action === 'calendarGetSubscribeUrl') return handleCalendarGetSubscribeUrl_(data)
     if (action === 'calendarSyncMemberSlots') return handleCalendarSyncMemberSlots_(data)

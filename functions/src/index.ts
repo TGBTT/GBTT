@@ -541,6 +541,9 @@ async function deleteSharedCalendarEvent(
   sessionId: string,
   fields: Record<string, unknown>,
   source: string,
+  // Present when the session document survives the deletion — a cancelled
+  // session, as opposed to one that was deleted outright.
+  ref?: FirebaseFirestore.DocumentReference,
 ): Promise<void> {
   const result = await callAppsScript(
     {
@@ -556,6 +559,17 @@ async function deleteSharedCalendarEvent(
 
   if (!result.ok) {
     console.error('calendarDeleteSession failed', sessionId, result.error)
+    return
+  }
+
+  /*
+   * Forget the id along with the event. Keeping it would point a later
+   * un-cancelling of this session at an event that no longer exists; the
+   * upsert would fall back to scanning the week for it, find nothing, and
+   * create a second event while still holding the dead id.
+   */
+  if (ref && fields.calendarEventId) {
+    await ref.set({ calendarEventId: FieldValue.delete() }, { merge: true })
   }
 }
 
@@ -589,8 +603,24 @@ export const onSessionWrite = onDocumentWritten(
       // Only on the transition, so re-saving an already-cancelled session does
       // not spend a call trying to delete an event that is already gone.
       if (before?.cancelled !== true) {
-        await deleteSharedCalendarEvent(sessionId, after, 'onSessionWrite:cancelled')
+        await deleteSharedCalendarEvent(
+          sessionId,
+          after,
+          'onSessionWrite:cancelled',
+          event.data?.after.ref,
+        )
       }
+      return
+    }
+
+    /*
+     * Generating a season writes hundreds of sessions at once, and one Apps
+     * Script call each would run them straight into the concurrent-execution
+     * limit. Those writes carry a marker; the generator makes a single batched
+     * call for the lot and clears it. Clearing it lands here again, but by then
+     * no schedule field has changed, so the check below returns without a call.
+     */
+    if (after.calendarBatch === true) {
       return
     }
 
@@ -906,6 +936,165 @@ export const calculateBillingPeriod = onCall(async (request) => {
 })
 
 /**
+ * How many sessions go to Apps Script in one call.
+ *
+ * Small enough that a chunk finishes well inside the Apps Script execution
+ * limit, large enough that a full year is tens of calls rather than hundreds.
+ */
+const CALENDAR_BATCH_SIZE = 25
+
+/**
+ * Put freshly generated sessions on the shared calendar in batches.
+ *
+ * These sessions were written carrying `calendarBatch`, which holds the
+ * per-document trigger off them. The marker is cleared either way: a session
+ * left marked would never sync again, and a missing calendar entry is better
+ * repaired by the next edit than never.
+ */
+async function batchSyncSessionsToCalendar(
+  sessions: { id: string; data: Record<string, unknown> }[],
+): Promise<{ synced: number; failed: number }> {
+  let synced = 0
+  let failed = 0
+
+  for (let i = 0; i < sessions.length; i += CALENDAR_BATCH_SIZE) {
+    const chunk = sessions.slice(i, i + CALENDAR_BATCH_SIZE)
+    const result = await callAppsScript(
+      {
+        action: 'calendarUpsertSessions',
+        sessions: chunk.map((s) => ({
+          sessionId: s.id,
+          weekStart: String(s.data.weekStart ?? ''),
+          dayLabel: String(s.data.dayLabel ?? ''),
+          time: String(s.data.time ?? ''),
+          className: String(s.data.className ?? s.data.classTypeId ?? ''),
+          venue: String(s.data.venue ?? ''),
+          durationMinutes: Number(s.data.durationMinutes ?? 60),
+        })),
+        source: 'generateSeasonSessions',
+      },
+      webhookSecret.value(),
+      formEndpoint.value(),
+    )
+
+    const results = Array.isArray((result.data as { results?: unknown })?.results)
+      ? ((result.data as { results: { sessionId?: string; calendarEventId?: string }[] }).results)
+      : []
+    const eventIds = new Map(
+      results
+        .filter((r) => r.sessionId && r.calendarEventId)
+        .map((r) => [String(r.sessionId), String(r.calendarEventId)]),
+    )
+
+    if (!result.ok) {
+      console.error('calendarUpsertSessions failed', result.error)
+    }
+
+    const writer = db.batch()
+    for (const s of chunk) {
+      const eventId = eventIds.get(s.id)
+      if (eventId) synced += 1
+      else failed += 1
+      writer.set(
+        db.doc(`sessions/${s.id}`),
+        {
+          calendarBatch: FieldValue.delete(),
+          ...(eventId ? { calendarEventId: eventId } : {}),
+        },
+        { merge: true },
+      )
+    }
+    await writer.commit()
+  }
+
+  return { synced, failed }
+}
+
+/**
+ * Give members who hold a weekly slot their seats in newly generated sessions.
+ *
+ * A lock is sold as "the same day and time every week", but the fan-out that
+ * turns it into roster entries can only cover the weeks that exist when the
+ * member locks it. Generating a season creates later weeks, and without this
+ * the member holds a lock the roll call, capacity and billing cannot see, and
+ * their calendar stops at whatever the season looked like on the day they
+ * enrolled.
+ *
+ * Booking is idempotent — an existing entry reports `already-booked` — so this
+ * runs on every generate, not only the first.
+ */
+async function fanWeeklyLocksIntoSessions(
+  sessions: { id: string; data: Record<string, unknown> }[],
+): Promise<{ seats: number; full: string[]; members: number }> {
+  const currentWeek = currentWeekStartKey()
+  const upcoming = sessions.filter((s) => String(s.data.weekStart ?? '') >= currentWeek)
+  if (!upcoming.length) return { seats: 0, full: [], members: 0 }
+
+  const locksSnap = await db.collectionGroup('weeklyLocks').get()
+  if (locksSnap.empty) return { seats: 0, full: [], members: 0 }
+
+  const holders = new Map<string, string[]>()
+  for (const lock of locksSnap.docs) {
+    const uid = lock.ref.parent.parent?.id
+    if (!uid) continue
+    const slotId = String(lock.data()?.slotId ?? lock.id)
+    holders.set(slotId, [...(holders.get(slotId) ?? []), uid])
+  }
+
+  const uids = [...new Set([...holders.values()].flat())]
+  const userSnaps = await db.getAll(...uids.map((uid) => db.doc(`users/${uid}`)))
+  const members = new Map(
+    userSnaps
+      .filter((snap) => {
+        const profile = (snap.data()?.profile as Record<string, unknown>) ?? {}
+        // An archived member keeps their history but stops being enrolled.
+        return snap.exists && String(profile.status ?? '') === 'active'
+      })
+      .map((snap) => [snap.id, snap.data() ?? {}]),
+  )
+
+  let seats = 0
+  const full = new Set<string>()
+  const touched = new Set<string>()
+
+  for (const session of upcoming) {
+    const slotId = String(session.data.slotId ?? '')
+    for (const uid of holders.get(slotId) ?? []) {
+      const user = members.get(uid)
+      if (!user) continue
+
+      const result = await bookMemberIntoSession(
+        session.id,
+        uid,
+        (user.profile as Record<string, unknown>) ?? {},
+        (user.preferences as Record<string, unknown>) ?? {},
+        'self',
+        // Included: this seat is what the weekly allowance already pays for.
+        { dropIn: false, chargeRateCents: 0 },
+        true,
+      )
+
+      if (result === 'booked') {
+        seats += 1
+        touched.add(`${uid}|${slotId}`)
+      } else if (result === 'full') {
+        full.add(session.id)
+      }
+    }
+  }
+
+  // One re-issued invite per member per slot, covering every week they now
+  // hold, rather than one email per seat taken.
+  for (const pair of touched) {
+    const [uid, slotId] = pair.split('|')
+    const profile = (members.get(uid)?.profile as Record<string, unknown>) ?? {}
+    await refreshSlotSeries(uid, slotId, profile)
+  }
+
+  return { seats, full: [...full], members: touched.size }
+}
+
+/**
  * Create every session a season implies, from the recurring timetable slots.
  *
  * Idempotent: session ids are derived from the slot and the week, so re-running
@@ -918,7 +1107,12 @@ export const calculateBillingPeriod = onCall(async (request) => {
  * the same reason `removeSession` archives: a booked seat carries attendance
  * and billing history that must survive the class being called off.
  */
-export const generateSeasonSessions = onCall(async (request) => {
+// A year-long season is hundreds of session writes, a batched calendar sync and
+// a seat for every member holding a slot, so the default minute is not enough.
+// The secret is for the calendar and invite calls generation now makes.
+const GENERATE_OPTIONS = { secrets: [webhookSecret], timeoutSeconds: 540 }
+
+export const generateSeasonSessions = onCall(GENERATE_OPTIONS, async (request) => {
   const authCtx = requireAdmin(request)
 
   const seasonId = String(request.data?.seasonId ?? '').trim()
@@ -1002,8 +1196,8 @@ export const generateSeasonSessions = onCall(async (request) => {
     }
   }
 
-  let created = 0
   let updated = 0
+  const createdSessions: { id: string; data: Record<string, unknown> }[] = []
 
   for (const session of planned) {
     const ref = db.doc(`sessions/${session.id}`)
@@ -1012,10 +1206,15 @@ export const generateSeasonSessions = onCall(async (request) => {
       await ref.set(session.data, { merge: true })
       updated += 1
     } else {
-      await ref.set({ ...session.data, bookedCount: 0 })
-      created += 1
+      // `calendarBatch` holds off the per-session calendar trigger; the batched
+      // call below does the work and clears it.
+      await ref.set({ ...session.data, bookedCount: 0, calendarBatch: true })
+      createdSessions.push(session)
     }
   }
+
+  const created = createdSessions.length
+  const calendar = await batchSyncSessionsToCalendar(createdSessions)
 
   for (const doc of toArchive) {
     await doc.ref.set(
@@ -1029,12 +1228,21 @@ export const generateSeasonSessions = onCall(async (request) => {
     )
   }
 
+  /*
+   * Run after archiving, so a member is never given a seat in a week that this
+   * same call is about to close, and the re-issued invites are built from what
+   * survives rather than from what was planned.
+   */
+  const enrolment = await fanWeeklyLocksIntoSessions(planned)
+
   await db.collection('audit').add({
     type: 'generateSeasonSessions',
     seasonId: season.id,
     created,
     updated,
     archived: toArchive.length,
+    seatsFilled: enrolment.seats,
+    calendarFailed: calendar.failed,
     by: authCtx.uid,
     at: FieldValue.serverTimestamp(),
   })
@@ -1046,6 +1254,11 @@ export const generateSeasonSessions = onCall(async (request) => {
     updated,
     archived: toArchive.length,
     teachingDays: days.length,
+    calendarSynced: calendar.synced,
+    calendarFailed: calendar.failed,
+    seatsFilled: enrolment.seats,
+    membersUpdated: enrolment.members,
+    fullSessions: enrolment.full,
   }
 })
 
@@ -1268,13 +1481,25 @@ export const createGuestPass = onCall({ secrets: [webhookSecret] }, async (reque
     createdAt: FieldValue.serverTimestamp(),
   })
 
+  /*
+   * Apps Script names the class in the email, so it needs a label rather than
+   * an id. Falling back to the id keeps the pass sending for a session that has
+   * since been removed, which is better than swallowing the invitation.
+   */
+  const passSession = (await db.doc(`sessions/${sessionId}`).get()).data() ?? {}
+  const sessionLabel =
+    [passSession.className, passSession.dayLabel, passSession.time].filter(Boolean).join(' · ') ||
+    sessionId
+
   const scriptResult = await callAppsScript(
     {
       action: 'sendGuestPass',
+      passCode: code,
       code,
       guestName,
       guestEmail,
       sessionId,
+      sessionLabel,
       expiresAt: expiresTs.toDate().toISOString(),
       source: 'cloud-function',
     },
@@ -1772,13 +1997,84 @@ export const addMemberToSession = onCall(async (request) => {
  * repeating event for their own class, keyed on the slot so the release
  * cancels exactly what the lock created.
  */
+/**
+ * The next SEQUENCE for a member's recurring invite for one slot.
+ *
+ * Calendars ignore an update whose sequence is not higher than the copy they
+ * already hold, so this has to keep climbing for the life of the address —
+ * including across a release and a re-lock, which is why it is not kept on the
+ * lock document that unlocking deletes.
+ */
+async function nextSeriesSequence(uid: string, slotId: string): Promise<number> {
+  const ref = db.doc(`users/${uid}/calendarSeries/${slotId}`)
+  return db.runTransaction(async (tx) => {
+    const next = Number((await tx.get(ref)).data()?.sequence ?? 0) + 1
+    tx.set(
+      ref,
+      { slotId, sequence: next, updatedAt: FieldValue.serverTimestamp() },
+      { merge: true },
+    )
+    return next
+  })
+}
+
+/**
+ * The upcoming classes a member actually holds a seat on for one slot.
+ *
+ * This is the set their calendar should show, and it is deliberately read back
+ * from the sessions rather than counted as "every week from here": closures
+ * and cancellations have already been taken out of the timetable, so a date
+ * missing here is a date the studio is not running.
+ */
+async function memberSlotOccurrences(
+  uid: string,
+  slotId: string,
+): Promise<{ startsAt: Date; session: Record<string, unknown> }[]> {
+  const sessionsSnap = await db
+    .collection('sessions')
+    .where('slotId', '==', slotId)
+    .where('weekStart', '>=', currentWeekStartKey())
+    .get()
+
+  const live = sessionsSnap.docs.filter((d) => d.data()?.cancelled !== true)
+  if (!live.length) return []
+
+  // One read for the whole series rather than one per week.
+  const entries = await db.getAll(...live.map((d) => d.ref.collection('roster').doc(uid)))
+
+  const held: { startsAt: Date; session: Record<string, unknown> }[] = []
+  live.forEach((doc, i) => {
+    if (!entries[i]?.exists) return
+    try {
+      held.push({ startsAt: sessionStartsAt(doc.data() ?? {}), session: doc.data() ?? {} })
+    } catch {
+      // A session with an unreadable start cannot go on a calendar; the rest still can.
+    }
+  })
+
+  return held.sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime())
+}
+
+/**
+ * Cover a whole weekly slot with one calendar email.
+ *
+ * The roster trigger is deliberately silent for these seats, so this is the
+ * only notice the member gets for locking or releasing a slot: a single
+ * repeating event for their own class, keyed on the slot so a later update or
+ * release lands on exactly what the lock created.
+ *
+ * The event carries the exact dates held rather than a weekly rule. Re-sending
+ * it with a fresh sequence is therefore how a member's diary is brought up to
+ * date after the timetable grows or a closure removes a week.
+ */
 async function sendSlotCalendarEmail(
   action: 'sendSlotInvite' | 'sendSlotCancellation',
   opts: {
     slotId: string
+    uid: string
     profile: Record<string, unknown>
     session: Record<string, unknown>
-    weeklyCount: number
+    occurrences: Date[]
   },
 ): Promise<void> {
   const memberEmail = String(opts.profile.email ?? '')
@@ -1797,7 +2093,9 @@ async function sendSlotCalendarEmail(
       memberEmail,
       memberName: String(opts.profile.name ?? ''),
       slotId: opts.slotId,
-      weeklyCount: opts.weeklyCount,
+      sequence: await nextSeriesSequence(opts.uid, opts.slotId),
+      occurrences: opts.occurrences.map((d) => d.toISOString()),
+      weeklyCount: opts.occurrences.length,
       weekStart: String(session.weekStart ?? ''),
       dayLabel: String(session.dayLabel ?? ''),
       time: String(session.time ?? ''),
@@ -1813,6 +2111,30 @@ async function sendSlotCalendarEmail(
   if (!result.ok) {
     console.error('slot calendar email failed', action, opts.slotId, result.error)
   }
+}
+
+/**
+ * Re-issue a member's recurring invite for a slot from whatever they now hold.
+ *
+ * Used wherever the set of weeks behind a lock changes without the member
+ * doing anything — chiefly generating a season, which is what extends their
+ * seats into weeks that did not exist when they locked the slot.
+ */
+async function refreshSlotSeries(
+  uid: string,
+  slotId: string,
+  profile: Record<string, unknown>,
+): Promise<void> {
+  const held = await memberSlotOccurrences(uid, slotId)
+  if (!held.length) return
+
+  await sendSlotCalendarEmail('sendSlotInvite', {
+    slotId,
+    uid,
+    profile,
+    session: held[0].session,
+    occurrences: held.map((h) => h.startsAt),
+  })
 }
 
 /**
@@ -1866,9 +2188,6 @@ export const lockWeeklySlot = onCall({ secrets: [webhookSecret] }, async (reques
   const booked: string[] = []
   const full: string[] = []
   const skipped: string[] = []
-  // The series has to start somewhere: the earliest seat actually taken is the
-  // DTSTART the recurring invite repeats from.
-  let firstBooked: QueryDocumentSnapshot | null = null
   for (const doc of sessionsSnap.docs) {
     /*
      * A session already past its transfer cutoff is not claimable: the seat
@@ -1899,7 +2218,6 @@ export const lockWeeklySlot = onCall({ secrets: [webhookSecret] }, async (reques
     )
     if (result === 'booked') {
       booked.push(doc.id)
-      if (!firstBooked) firstBooked = doc
     } else if (result === 'full') {
       full.push(doc.id)
     }
@@ -1910,13 +2228,10 @@ export const lockWeeklySlot = onCall({ secrets: [webhookSecret] }, async (reques
     { merge: true },
   )
 
-  if (firstBooked) {
-    await sendSlotCalendarEmail('sendSlotInvite', {
-      slotId,
-      profile,
-      session: firstBooked.data() ?? {},
-      weeklyCount: booked.length,
-    })
+  // Sent from the seats the member now holds rather than from the ones this
+  // call happened to take, so a re-lock repairs a series instead of shortening it.
+  if (booked.length) {
+    await refreshSlotSeries(authCtx.uid, slotId, profile)
   }
 
   return {
@@ -2017,12 +2332,21 @@ export const unlockWeeklySlot = onCall({ secrets: [webhookSecret] }, async (requ
     await db.doc(`users/${authCtx.uid}/weeklyLocks/${slotId}`).delete()
   }
 
-  if (firstReleased) {
+  /*
+   * A release that had to keep some seats is not a cancellation. Sending one
+   * would clear the whole series from the member's diary, including the weeks
+   * inside the transfer window that they are still expected at — and still
+   * being charged for. Those weeks are re-sent as the series instead.
+   */
+  if (kept > 0) {
+    await refreshSlotSeries(authCtx.uid, slotId, profile)
+  } else if (firstReleased) {
     await sendSlotCalendarEmail('sendSlotCancellation', {
       slotId,
+      uid: authCtx.uid,
       profile,
       session: firstReleased.data() ?? {},
-      weeklyCount: released,
+      occurrences: [],
     })
   }
 

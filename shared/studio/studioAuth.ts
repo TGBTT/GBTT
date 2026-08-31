@@ -476,6 +476,12 @@ export interface GenerateSeasonResult {
   updated: number
   archived: number
   teachingDays: number
+  /** Seats given to members holding a weekly slot in the new sessions. */
+  seatsFilled: number
+  /** Members whose recurring calendar invite was re-issued as a result. */
+  membersUpdated: number
+  /** New sessions the shared calendar would not take; they need a retry. */
+  calendarFailed: number
 }
 
 /**
@@ -490,7 +496,15 @@ export async function studioGenerateSeasonSessions(
   dryRun = false,
 ): Promise<GenerateSeasonResult> {
   const functions = getFirebaseFunctions()
-  const empty = { created: 0, updated: 0, archived: 0, teachingDays: 0 }
+  const empty = {
+    created: 0,
+    updated: 0,
+    archived: 0,
+    teachingDays: 0,
+    seatsFilled: 0,
+    membersUpdated: 0,
+    calendarFailed: 0,
+  }
   if (!functions) return { error: 'Firebase not configured.', ...empty }
   try {
     const res = await httpsCallable(functions, 'generateSeasonSessions')({ seasonId, dryRun })
@@ -501,6 +515,9 @@ export async function studioGenerateSeasonSessions(
       updated: Number(d.updated ?? 0),
       archived: Number(d.archived ?? d.toArchive ?? 0),
       teachingDays: Number(d.teachingDays ?? 0),
+      seatsFilled: Number(d.seatsFilled ?? 0),
+      membersUpdated: Number(d.membersUpdated ?? 0),
+      calendarFailed: Number(d.calendarFailed ?? 0),
     }
   } catch (e) {
     return { error: e instanceof Error ? e.message : 'Could not generate sessions.', ...empty }
