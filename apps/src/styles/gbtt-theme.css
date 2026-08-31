@@ -31,29 +31,6 @@
   color: #fff;
 }
 
-/* Google sign-in: the same flat, squared shape as the other buttons, marked
-   only by the wordmark letter, so it reads as one of this app's controls
-   rather than a pasted-in third-party badge. */
-.theme-gbtt .btn.google {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  border: 1px solid var(--ink);
-  background: #fff;
-  color: var(--ink);
-}
-
-.theme-gbtt .btn.google:hover:not(:disabled) {
-  background: var(--accent-soft);
-}
-
-.theme-gbtt .btn.google .google-mark {
-  font-family: var(--font-display);
-  font-size: 1.1em;
-  line-height: 1;
-  color: #4285f4;
-}
-
 .theme-gbtt .chip {
   border: 1px solid var(--ink);
   background: #fff;
@@ -1064,12 +1041,6 @@
     border-color: rgba(245, 245, 243, 0.65);
     color: var(--paper);
     background: transparent;
-  }
-
-  .theme-gbtt .app-sections > .app-section:nth-child(even) .btn.google {
-    background: var(--paper);
-    color: var(--ink);
-    border-color: var(--paper);
   }
 
   .theme-gbtt .app-sections > .app-section:nth-child(even) .btn.primary {

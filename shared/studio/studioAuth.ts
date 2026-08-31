@@ -1,8 +1,6 @@
 import {
-  GoogleAuthProvider,
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
-  signInWithPopup,
   signOut,
   sendEmailVerification,
   sendPasswordResetEmail,
@@ -23,34 +21,7 @@ export type StudioRole = 'member' | 'admin' | 'trainer'
 export type StudioStatus = 'pending' | 'active' | 'suspended'
 
 /**
- * Turn a Firebase sign-in error into something a member can act on.
- *
- * The one worth naming is `account-exists-with-different-credential`: with
- * Firebase's "one account per email address" setting, a Google sign-in for an
- * address already held by another provider is refused rather than linked, and
- * the raw message tells the member nothing they can do about it.
- */
-function signInErrorMessage(err: unknown, fallback: string): string {
-  const code = (err as { code?: string })?.code ?? ''
-  if (code === 'auth/account-exists-with-different-credential') {
-    return 'That email address is already registered with a password. Sign in with your email and password, or ask the studio to link your Google account.'
-  }
-  if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
-    return 'Google sign-in was cancelled.'
-  }
-  if (code === 'auth/popup-blocked') {
-    return 'Your browser blocked the Google sign-in window. Allow pop-ups for this site and try again.'
-  }
-  if (code === 'auth/operation-not-allowed') {
-    return 'Google sign-in is not enabled for this studio yet. Use your email and password, or contact the studio.'
-  }
-  return fallback
-}
-
-/**
- * Apply the member checks a sign-in has to pass, whatever provider was used.
- *
- * Both the password and the Google path land here: read the `users/{uid}`
+ * Apply the member checks a sign-in has to pass: read the `users/{uid}`
  * profile, refuse a subscription still waiting on approval, and bind the local
  * UI session. Nothing here grants anything — Firestore rules and the callables
  * check the token — it decides what the member app renders.
@@ -67,9 +38,6 @@ async function completeMemberSignIn(
 
   const profile = await getDoc(doc(db, 'users', user.uid))
   if (!profile.exists()) {
-    // Never create a profile here. A Google sign-in with no profile is someone
-    // who was never invited, and silently enrolling them would hand out an
-    // account the studio never agreed to.
     if (signOutWhenUninvited && auth) await signOut(auth)
     return 'No studio account is linked to this sign-in. Ask the studio to send you an invitation.'
   }
@@ -120,37 +88,11 @@ export async function studioLogin(email: string, password: string): Promise<stri
     return 'Sign-in failed. Check email and password.'
   }
   try {
-    // The password path keeps the session on a missing profile, as it always
-    // has: the account provably belongs to whoever typed the password.
+    // The password path keeps the session on a missing profile: the account
+    // provably belongs to whoever typed the password.
     return await completeMemberSignIn(user, email, false)
-  } catch (e) {
-    return signInErrorMessage(e, 'Sign-in failed. Try again.')
-  }
-}
-
-/**
- * Member sign-in with a Google account.
- *
- * Offered alongside email and password rather than instead of it — plenty of
- * clients have no Google account, and an invited client can only ever have the
- * password the invite email set.
- *
- * An invited client whose Google address matches the one `createMemberAccount`
- * used keeps the same uid, so their existing `users/{uid}` profile still
- * matches. Where Firebase refuses to link the two instead, the error is
- * translated into something the member can act on.
- */
-export async function studioLoginWithGoogle(): Promise<string | null> {
-  if (!isFirebaseConfigured()) {
-    return 'Google sign-in is unavailable until Firebase is configured.'
-  }
-  const auth = getFirebaseAuth()
-  if (!auth) return 'Firebase not configured.'
-  try {
-    const cred = await signInWithPopup(auth, new GoogleAuthProvider())
-    return await completeMemberSignIn(cred.user, cred.user.email ?? '', true)
-  } catch (e) {
-    return signInErrorMessage(e, 'Google sign-in failed. Try again.')
+  } catch {
+    return 'Sign-in failed. Try again.'
   }
 }
 
@@ -204,7 +146,7 @@ export async function studioStaffLogin(
 }
 
 /**
- * Apply the staff checks, whatever provider signed the user in.
+ * Apply the staff checks after a successful sign-in.
  *
  * Hiding the admin shell is not the protection — Firestore rules and the
  * callables reject a token without the claim regardless — but rendering it for
@@ -240,30 +182,6 @@ async function completeStaffSignIn(
   bindStaffSession(current?.email ?? fallbackEmail, current?.displayName ?? '', role)
 
   return { error: null, role }
-}
-
-/**
- * Staff sign-in with a Google account — how Tom signs in, since the Google
- * account that owns Firebase, Gmail and the studio calendar is the same one.
- *
- * The role still comes from the custom claim, so a Google account with no
- * `admin` or `trainer` claim gets no further than a password one would.
- */
-export async function studioStaffLoginWithGoogle(): Promise<{
-  error: string | null
-  role: StudioRole | null
-}> {
-  if (!isFirebaseConfigured()) {
-    return { error: 'Staff sign-in is unavailable until Firebase is configured.', role: null }
-  }
-  const auth = getFirebaseAuth()
-  if (!auth) return { error: 'Firebase not configured.', role: null }
-  try {
-    const cred = await signInWithPopup(auth, new GoogleAuthProvider())
-    return await completeStaffSignIn(cred.user.email ?? '')
-  } catch (e) {
-    return { error: signInErrorMessage(e, 'Google sign-in failed. Try again.'), role: null }
-  }
 }
 
 export async function studioLogout(): Promise<void> {

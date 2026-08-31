@@ -6,7 +6,6 @@ import {
   studioMarkAttendance,
   studioRemoveSession,
   studioStaffLogin,
-  studioStaffLoginWithGoogle,
 } from '@gbtt/shared/studio/studioAuth'
 import { createLiveSession } from '@gbtt/shared/studio/firebase/liveSessions'
 import { savePricingPlan } from '@gbtt/shared/studio/firebase/livePricing'
@@ -328,27 +327,6 @@ export default function ClassBoard() {
               }}
             >
               {signingIn ? 'Signing in…' : 'Sign in'}
-            </button>
-            <button
-              type="button"
-              className="btn google"
-              disabled={signingIn}
-              onClick={() => {
-                setSigningIn(true)
-                setLoginError(null)
-                studioStaffLoginWithGoogle()
-                  .then(({ error }) => {
-                    if (error) setLoginError(error)
-                    else refresh()
-                  })
-                  .catch(() => setLoginError('Google sign-in failed. Try again.'))
-                  .finally(() => setSigningIn(false))
-              }}
-            >
-              <span className="google-mark" aria-hidden="true">
-                G
-              </span>
-              Continue with Google
             </button>
             <Link className="btn ghost" to="/fitness/studioflow">
               Member app →

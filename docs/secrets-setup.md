@@ -13,13 +13,12 @@ Firebase project: **`gbtt-c1130`**
 | Rules hardened (billing, roster, signup gating, session deletes) | done — 32 tests in `firestore-tests/` |
 | Web app registered (client config exists) | done |
 | App reads timetable/attendance from Firestore | done — code committed, never yet run against live data |
-| **Blaze plan + Cloud Functions deployed** | **todo — blocks everything below** |
+| Blaze plan + Cloud Functions deployed | done — all 17 functions live in `australia-southeast1` |
+| Apps Script deployed → `VITE_FORM_ENDPOINT` | done — signed request verified end to end |
+| GitHub repository secrets | done — all five set |
 | Timetable seeded into Firestore | **todo** — `functions/scripts/seed-timetable.mjs` |
-| GitHub repository secrets | **todo** — run `scripts/sync-github-secrets.ps1` |
-| Email/Password sign-in enabled | **todo** — console only |
-| Google sign-in enabled | **todo** — console only; required for Tom's own login |
+| Email/Password sign-in enabled | **todo** — console only; the only sign-in method |
 | First admin custom claim | **todo** — `functions/scripts/set-admin-claim.mjs` |
-| Apps Script deployed → `VITE_FORM_ENDPOINT` | **todo** |
 | DNS for `gbtt.co.nz` → GitHub Pages | **todo** |
 | App Check + API key referrer restriction | **todo** — hardening, not required to go live |
 
@@ -47,16 +46,19 @@ failure, but it is a failure.
 renders an empty week rather than inventing numbers, so the timetable stays
 blank until this runs.
 
-**4. Enable Email/Password *and* Google sign-in** in the console, then
-**bootstrap the first admin** with `functions/scripts/set-admin-claim.mjs`.
+**4. Enable Email/Password sign-in** in the console, then **bootstrap the first
+admin**:
 
-Both providers are needed. Tom signs in to the admin console with the Google
-account that already owns Firebase, Gmail and the studio calendar
-(`tom.gbtt@gmail.com`), and clients may use Google too — but an invited client
-who has no Google account can only ever use the password they set from their
-invitation email, so Email/Password cannot be turned off. The `role` claim cannot be
-set from the console, and staff sign-in checks it, so the admin console is
-unreachable until this is done.
+```bash
+node functions/scripts/set-admin-claim.mjs --key ./sa.json \
+  --email tom.gbtt@gmail.com --name "Thomas Lake" --create
+```
+
+That creates the Auth user, sets the `admin` claim and prints a set-password
+link Tom opens to choose his own password — nobody ever types a password on his
+behalf. The `role` claim cannot be set from the console and staff sign-in checks
+it, so the admin console is unreachable until this runs. Re-run with `--invite`
+to mint a fresh link if the first expires.
 
 **5. Set the GitHub secrets** with `scripts/sync-github-secrets.ps1`. Without
 them the deployed site builds without Firebase config and falls back to local
@@ -116,37 +118,30 @@ and `studioRole()` in `shared/studio/studioAuth.ts` each still accept a legacy
 working. Each carries a comment; the fallback can be deleted once no legacy
 claims exist.
 
-### Google sign-in and invited clients
+### Sign-in is email and password only
 
-Both the admin console (`studioStaffLoginWithGoogle`) and the member app
-(`studioLoginWithGoogle`) offer Google alongside email and password. A Google
-sign-in is held to exactly the same checks as a password one: the role comes
-from the custom claim, the `users/{uid}` profile must exist, and a suspended
-profile is refused.
+Google sign-in was built and then removed. Publishing it would have meant taking
+the studio's Google Cloud project through OAuth app verification, which is a
+review process with a real waiting period — disproportionate for a studio whose
+clients are all invited by hand anyway. Email and password is the only method,
+for staff and clients alike. Do not enable the Google provider in the console;
+nothing in the app calls it.
 
-Two cases are handled deliberately:
+Nobody ever has a password chosen for them. Both routes into an account issue a
+Firebase link that the recipient follows to set their own:
 
-- **Never invited.** A Google sign-in with no `users/{uid}` profile is signed
-  straight back out and told to ask the studio for an invitation. No profile is
-  created, so signing in with Google is not a back door to self-enrolment.
-- **Invited, then signs in with Google.** `createMemberAccount` creates an Auth
-  user with an email and no password, so the account exists before its owner
-  first signs in. Google sign-in on that same address adopts the existing uid,
-  which is what keeps their `users/{uid}` profile matching.
+- **Clients** are created by `createMemberAccount` with an email and no
+  password. It generates the link and emails it through the Apps Script
+  `sendInvite` action, so the account exists before its owner first signs in and
+  the studio never learns their password.
+- **The first admin** comes from `set-admin-claim.mjs --create`, which prints
+  the same kind of link for Tom to open himself.
 
-  Checked against the Auth emulator (`accounts:signInWithIdp` with a Google
-  assertion for an address an admin-created user already holds): the uid was
-  preserved, `google.com` was linked to that same account, and no error was
-  raised. The same held for an account that already had a password. One thing to
-  watch in that second case: after the Google sign-in the account listed
-  `google.com` as its *only* provider, so a client who signs in with Google may
-  find their password no longer works and have to use “forgot password”. Worth
-  confirming on the live project before telling clients otherwise.
+Reset links expire. Re-running `set-admin-claim.mjs --invite`, or
+`adminResetPassword` from the console for a client, mints a fresh one.
 
-  Where Firebase refuses to link the two instead —
-  `auth/account-exists-with-different-credential`, which the "one account per
-  email address" setting can produce — the client is told to use their email and
-  password or ask the studio, rather than being shown a raw Firebase error.
+A sign-in that succeeds but has no `users/{uid}` profile is refused rather than
+enrolled, so an Auth account alone is never a way in.
 
 ### Security model
 
@@ -182,12 +177,9 @@ Nothing below is destructive; steps can be re-run safely.
 ## 1. Firebase console (Tom’s Google account)
 
 1. Create a Firebase project (Blaze plan required for Cloud Functions).
-2. **Authentication** → Sign-in method → enable **Email/Password** *and* **Google**.
-   Both are required: Google is how Tom signs in, and Email/Password is the only
-   route for a client who has no Google account. For the Google provider, set the
-   project support email to Tom's address; no client secret is needed for the web
-   SDK. Leave **one account per email address** at its default — see “Google
-   sign-in and invited clients” below for why that matters.
+2. **Authentication** → Sign-in method → enable **Email/Password**. That is the
+   only provider the app uses; leave Google disabled — see “Sign-in is email and
+   password only” below.
 3. **Firestore** → Create database → **production mode** (rules deploy from `firestore.rules` in this repo).
 4. **Project settings** → Your apps → Add **Web app** → copy the client config:
    - `apiKey`

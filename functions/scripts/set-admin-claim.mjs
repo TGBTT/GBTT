@@ -12,6 +12,10 @@
  *   node functions/scripts/set-admin-claim.mjs --key ./sa.json --uid AbC123 --role trainer
  *   node functions/scripts/set-admin-claim.mjs --key ./sa.json --email tom@example.com --show
  *
+ * Creating the first admin, who then sets their own password from the link:
+ *   node functions/scripts/set-admin-claim.mjs --key ./sa.json \
+ *     --email tom.gbtt@gmail.com --name "Thomas Lake" --create
+ *
  * The service-account key is a full-project credential: keep it out of the
  * repo and delete it once the claim is set.
  */
@@ -25,7 +29,7 @@ import { FieldValue, getFirestore } from 'firebase-admin/firestore'
 const VALID_ROLES = ['admin', 'trainer', 'member']
 
 function parseArgs(argv) {
-  const args = { role: 'admin', show: false, create: false }
+  const args = { role: 'admin', show: false, create: false, invite: false }
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i]
     switch (arg) {
@@ -41,6 +45,9 @@ function parseArgs(argv) {
         break
       case '--create':
         args.create = true
+        break
+      case '--invite':
+        args.invite = true
         break
       case '--help':
       case '-h':
@@ -63,6 +70,7 @@ Grant a staff role via Firebase custom claims.
   --role <role>   ${VALID_ROLES.join(' | ')}   (default: admin)
   --name <name>   Display name used when --create makes a new user.
   --create        Create the Auth user if it does not exist.
+  --invite        Print a set-password link for the user (implied by --create).
   --show          Print current claims and exit without changing anything.
 `)
 }
@@ -127,7 +135,10 @@ async function main() {
   if (args.show) return
 
   if (current.role === args.role) {
-    console.log(`\nAlready has role "${args.role}" — nothing to do.`)
+    console.log(`\nAlready has role "${args.role}" — no claim change needed.`)
+    // Still worth a link: re-running to recover a lost password is the whole
+    // reason someone would invoke this against an existing admin.
+    await printInviteLink(auth, user, args)
     return
   }
 
@@ -152,6 +163,29 @@ async function main() {
     'The claim is baked into the ID token, so this user must sign out and back in\n' +
       '(or wait up to an hour for refresh) before admin screens unlock.',
   )
+
+  await printInviteLink(auth, user, args)
+}
+
+/**
+ * Print a link the user follows to choose their own password.
+ *
+ * A user created here has no password at all, so without this there is no way
+ * in: the sign-in form would reject them and "forgot password" is the only
+ * other route. Firebase's reset flow doubles as a set-password flow, so the
+ * same link works whether or not one was ever set. It expires, so generate a
+ * fresh one rather than reusing an old link.
+ */
+async function printInviteLink(auth, user, args) {
+  if (!args.invite && !args.create) return
+  if (!user.email) {
+    console.log('\nNo email on this account, so no set-password link can be generated.')
+    return
+  }
+
+  const link = await auth.generatePasswordResetLink(user.email)
+  console.log(`\nSet-password link for ${user.email}:\n\n${link}\n`)
+  console.log('Send it to them, or open it yourself if this is your own account.')
 }
 
 main().catch((err) => {
