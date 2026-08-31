@@ -26,11 +26,13 @@ import {
   type DocumentData,
 } from 'firebase/firestore'
 import { getFirestoreDb } from './init'
+import { WEEKDAYS } from '../fitnessStudio'
 import type {
   ClassOccurrence,
   ExerciseDisplay,
   RosterEntry,
   RosterStatus,
+  Weekday,
 } from '../fitnessStudio'
 
 export type LiveStatus = 'unavailable' | 'loading' | 'ready' | 'error'
@@ -39,6 +41,25 @@ export interface LiveSessionsState {
   status: LiveStatus
   occurrences: ClassOccurrence[]
   error?: string
+}
+
+/**
+ * Group a week's sessions into calendar columns.
+ *
+ * Lives here rather than in the admin hook because the public timetable needs
+ * the same shape, and the marketing site has no reason to import a hook.
+ */
+export function groupByWeekday(
+  occurrences: ClassOccurrence[],
+): Record<Weekday, ClassOccurrence[]> {
+  const grouped = {} as Record<Weekday, ClassOccurrence[]>
+  for (const day of WEEKDAYS) grouped[day] = []
+  for (const occ of occurrences) {
+    const day = WEEKDAYS.find((d) => d === occ.dayLabel)
+    if (day) grouped[day].push(occ)
+  }
+  for (const day of WEEKDAYS) grouped[day].sort((a, b) => a.time.localeCompare(b.time))
+  return grouped
 }
 
 export interface LiveRosterState {
@@ -145,6 +166,7 @@ function mapSession(id: string, data: DocumentData): ClassOccurrence {
     cap: data.cap == null ? undefined : Number(data.cap),
     cancelled: data.cancelled === true,
     slotId: data.slotId == null ? undefined : String(data.slotId),
+    startsAt: data.startsAt instanceof Timestamp ? data.startsAt.toDate().toISOString() : undefined,
     roster: [],
     calendarEventId: String(data.calendarEventId ?? ''),
     instructorId: String(data.instructorId ?? ''),

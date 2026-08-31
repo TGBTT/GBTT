@@ -1,7 +1,6 @@
 import { Fragment, useMemo } from 'react'
 import {
   WEEKDAYS,
-  classTypeById,
   formatSessionAttending,
   formatTimetableTime,
   sessionIsFull,
@@ -12,6 +11,14 @@ import {
 
 export interface WeekSessionCalendarProps {
   byDay: Record<Weekday, ClassOccurrence[]>
+  /**
+   * Class names, keyed by class type id.
+   *
+   * Passed in rather than looked up: the catalogue is a Firestore
+   * subscription, and this component is shared with the marketing site, which
+   * should not be opening its own listener per badge.
+   */
+  classNames?: Record<string, string>
   selectedId?: string | null
   heldIds?: string[]
   onSelect?: (id: string) => void
@@ -22,26 +29,27 @@ export interface WeekSessionCalendarProps {
 
 function SessionBadge({
   occ,
+  name,
   mode,
   selected,
   held,
   onSelect,
 }: {
   occ: ClassOccurrence
+  name: string
   mode: 'public' | 'member' | 'admin'
   selected: boolean
   held: boolean
   onSelect?: (id: string) => void
 }) {
-  const type = classTypeById(occ.classTypeId)
   const full = sessionIsFull(occ)
   const attending = formatSessionAttending(occ)
   const className = `week-cal__badge${selected ? ' is-selected' : ''}${held ? ' is-held is-locked' : ''}${full ? ' is-full' : ''}`
-  const title = `${type?.name ?? 'Class'} · ${formatTimetableTime(occ.time)}${held ? ' (weekly locked)' : ''}${full ? ' (full)' : ` · ${attending}`}`
+  const title = `${name} · ${formatTimetableTime(occ.time)}${held ? ' (weekly locked)' : ''}${full ? ' (full)' : ` · ${attending}`}`
 
   const body = (
     <>
-      <span className="week-cal__name">{type?.name ?? 'Class'}</span>
+      <span className="week-cal__name">{name}</span>
       {mode !== 'public' ? <span className="week-cal__fill">{attending}</span> : null}
       {mode === 'public' && full ? <span className="week-cal__fill">Full</span> : null}
     </>
@@ -71,6 +79,7 @@ function SessionBadge({
 /** Mon–Fri timetable — days across the top, ascending times down the left. */
 export function WeekSessionCalendar({
   byDay,
+  classNames = {},
   selectedId,
   heldIds = [],
   onSelect,
@@ -113,6 +122,7 @@ export function WeekSessionCalendar({
                     {occ ? (
                       <SessionBadge
                         occ={occ}
+                        name={classNames[occ.classTypeId] ?? 'Class'}
                         mode={mode}
                         selected={selectedId === occ.id}
                         held={heldIds.includes(occ.id)}

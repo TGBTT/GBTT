@@ -202,6 +202,21 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    /*
+     * The transfer window is the one setting members are held to: it decides
+     * when a cancellation closes and when a weekly slot is committed for the
+     * week. The member app has to show them that deadline before they act, so
+     * a signed-in read is granted here rather than leaving the client guessing
+     * with a hardcoded default that an admin has since changed.
+     *
+     * Only this document. Everything else under meta stays staff-only, so bank
+     * details added later are not exposed by this.
+     */
+    match /meta/settings {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
     // —— Guest passes: server creates; staff reads ——
     match /guestPasses/{code} {
       allow read: if isStaff();

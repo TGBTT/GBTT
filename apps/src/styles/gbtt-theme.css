@@ -60,12 +60,6 @@
   color: var(--muted);
 }
 
-.theme-gbtt .sync-chip {
-  background: var(--accent-soft);
-  color: var(--ink);
-  border: 1px solid var(--line);
-}
-
 .theme-gbtt .fill-bar {
   background: #e4e4e0;
 }
@@ -266,7 +260,7 @@
   }
 }
 
-.sim-banner {
+.status-banner {
   max-width: 960px;
   margin: 0 auto 0.75rem;
   padding: 0 1rem;
@@ -640,10 +634,13 @@
   }
 }
 
-.theme-gbtt .field input,
+.theme-gbtt .field input:not([type='checkbox']):not([type='radio']),
 .theme-gbtt .field textarea,
-.theme-gbtt .add-exercise-row input,
-.theme-gbtt .occ-detail input {
+.theme-gbtt .field select,
+.theme-gbtt .add-exercise-row input:not([type='checkbox']):not([type='radio']),
+.theme-gbtt .add-exercise-row select,
+.theme-gbtt .occ-detail input:not([type='checkbox']):not([type='radio']),
+.theme-gbtt .occ-detail select {
   font: inherit;
   padding: 0.5rem 0.6rem;
   border: 1px solid #d4d4d0;
@@ -651,6 +648,38 @@
   color: #0a0a0a;
   width: 100%;
   box-sizing: border-box;
+}
+
+/* Role-call lives inside .occ-detail, so the text-field rule above used to
+   stretch every checkbox to full width. Keep the ticks a fixed square and
+   let names wrap beside them. */
+.role-call-panel {
+  margin: 0.85rem 0 1rem;
+}
+
+.role-call-panel h3 {
+  margin: 0 0 0.5rem;
+  font-family: var(--font-display);
+  font-size: 0.82rem;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.role-call-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 0.75rem;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.role-call-list .exercise-check {
+  width: 100%;
+}
+
+.role-call-panel .add-exercise-row {
+  align-items: stretch;
 }
 
 .form-success {
@@ -1128,12 +1157,6 @@
 
   .theme-gbtt .app-sections > .app-section:nth-child(even) .pkg-card.selected {
     outline-color: var(--paper);
-  }
-
-  .theme-gbtt .app-sections > .app-section:nth-child(even) .sync-chip {
-    background: #2a2a2a;
-    color: var(--paper);
-    border-color: #444;
   }
 
   .theme-gbtt .app-sections > .app-section:nth-child(even) .class-type-desc__text,

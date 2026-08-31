@@ -23,7 +23,7 @@
   --ease-spring: cubic-bezier(0.34, 1.45, 0.64, 1);
 }
 
-@keyframes demo-fade-up {
+@keyframes motion-fade-up {
   from {
     opacity: 0;
     transform: translateY(12px);
@@ -34,7 +34,7 @@
   }
 }
 
-@keyframes demo-fade-in {
+@keyframes motion-fade-in {
   from {
     opacity: 0;
   }
@@ -43,7 +43,7 @@
   }
 }
 
-@keyframes demo-pop {
+@keyframes motion-pop {
   from {
     opacity: 0;
     transform: translateY(10px) scale(0.97);
@@ -54,7 +54,7 @@
   }
 }
 
-@keyframes demo-soft-pulse {
+@keyframes motion-soft-pulse {
   0% {
     box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent, #0b1f33) 35%, transparent);
   }
@@ -63,7 +63,7 @@
   }
 }
 
-@keyframes demo-tile-in {
+@keyframes motion-tile-in {
   from {
     opacity: 0;
     transform: scale(0.94);
@@ -74,7 +74,7 @@
   }
 }
 
-@keyframes demo-step-pop {
+@keyframes motion-step-pop {
   from {
     transform: scale(0.85);
   }
@@ -84,19 +84,19 @@
 }
 
 .app-enter {
-  animation: demo-fade-up var(--motion-med) var(--ease-out) both;
+  animation: motion-fade-up var(--motion-med) var(--ease-out) both;
 }
 
 .app-enter-success {
-  animation: demo-pop var(--motion-slow) var(--ease-spring) both;
+  animation: motion-pop var(--motion-slow) var(--ease-spring) both;
 }
 
 .app-enter-soft {
-  animation: demo-fade-in var(--motion-fast) var(--ease-out) both;
+  animation: motion-fade-in var(--motion-fast) var(--ease-out) both;
 }
 
 .app-live-tick {
-  animation: demo-fade-in var(--motion-fast) var(--ease-out) both;
+  animation: motion-fade-in var(--motion-fast) var(--ease-out) both;
 }
 
 *,
@@ -263,7 +263,7 @@ textarea {
 
 .map-route-wrap {
   margin: 0.75rem 0;
-  animation: demo-fade-in var(--motion-med) var(--ease-out) both;
+  animation: motion-fade-in var(--motion-med) var(--ease-out) both;
 }
 
 .map-route-wrap.map-fill {
@@ -342,7 +342,7 @@ textarea {
     transform var(--motion-med) var(--ease-out),
     box-shadow var(--motion-med) var(--ease-out);
   color: inherit;
-  animation: demo-fade-up var(--motion-slow) var(--ease-out) both;
+  animation: motion-fade-up var(--motion-slow) var(--ease-out) both;
 }
 
 .hub-card:nth-child(1) {
@@ -464,7 +464,7 @@ textarea {
   aspect-ratio: 1;
   object-fit: cover;
   border-radius: 10px;
-  animation: demo-tile-in var(--motion-med) var(--ease-out) both;
+  animation: motion-tile-in var(--motion-med) var(--ease-out) both;
 }
 
 .app-image-tiles picture:nth-child(1) .app-image-tile {
@@ -560,7 +560,7 @@ textarea {
 .wizard-steps li.active {
   background: var(--accent, #0b1f33);
   color: #fff;
-  animation: demo-step-pop var(--motion-med) var(--ease-spring);
+  animation: motion-step-pop var(--motion-med) var(--ease-spring);
 }
 
 .wizard-steps li.done {
@@ -606,7 +606,7 @@ textarea {
 .pkg-card.selected {
   border-color: var(--accent, #0b1f33);
   box-shadow: 0 0 0 1px var(--accent, #0b1f33);
-  animation: demo-soft-pulse 0.55s var(--ease-out);
+  animation: motion-soft-pulse 0.55s var(--ease-out);
 }
 
 .pkg-card strong {
@@ -665,7 +665,7 @@ textarea {
 
 .cal-day.is-selected-day {
   outline: 2px solid var(--accent, #0b1f33);
-  animation: demo-soft-pulse 0.5s var(--ease-out);
+  animation: motion-soft-pulse 0.5s var(--ease-out);
 }
 
 .cal-day-label {
@@ -879,7 +879,7 @@ textarea {
   color: #fff;
   overflow: hidden;
   box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35);
-  animation: demo-pop var(--motion-slow) var(--ease-spring) both;
+  animation: motion-pop var(--motion-slow) var(--ease-spring) both;
 }
 
 /* Inside tablet showcase: drop nested phone bezel (all PhoneShell apps) */
@@ -1131,7 +1131,7 @@ textarea {
 
 .theme-mohua .btn.primary {
   background: var(--accent, #d3993c);
-  color: var(--demo-accent-ink, #4b0d1c);
+  color: var(--accent-ink, #4b0d1c);
 }
 
 .theme-bayhop {
@@ -1162,7 +1162,7 @@ textarea {
 
 .theme-bayhop .btn.primary {
   background: var(--accent, #c8f542);
-  color: var(--demo-accent-ink, #111);
+  color: var(--accent-ink, #111);
 }
 
 .theme-bayhop .tier.on {
@@ -1505,7 +1505,7 @@ textarea {
 
 .theme-adventure .btn.primary {
   background: var(--accent, #e85a4f);
-  color: var(--demo-accent-ink, #fff);
+  color: var(--accent-ink, #fff);
 }
 
 .adventure-launch-ok,
@@ -1814,7 +1814,7 @@ textarea {
 
 .theme-bayhop .btn.primary {
   background: var(--accent, #c8f542);
-  color: var(--demo-accent-ink, #111);
+  color: var(--accent-ink, #111);
 }
 
 .bayhop-done {
@@ -1836,14 +1836,14 @@ textarea {
 
 .theme-bayfix .btn.primary {
   background: var(--accent, #c47a1a);
-  color: var(--demo-accent-ink, #fff);
+  color: var(--accent-ink, #fff);
 }
 
 .theme-bayfix .day-pill.on,
 .theme-bayfix .time-chip.on {
   background: var(--accent, #c47a1a);
   border-color: var(--accent, #c47a1a);
-  color: var(--demo-accent-ink, #fff);
+  color: var(--accent-ink, #fff);
 }
 
 .job-check-list {
@@ -1915,7 +1915,7 @@ textarea {
 
 .theme-tradeboard .btn.primary {
   background: var(--accent, #ff8c42);
-  color: var(--demo-accent-ink, #111);
+  color: var(--accent-ink, #111);
 }
 
 .theme-tradeboard .day-pill {
@@ -1928,7 +1928,7 @@ textarea {
 .theme-tradeboard .time-chip.on {
   background: var(--accent, #ff8c42);
   border-color: var(--accent, #ff8c42);
-  color: var(--demo-accent-ink, #111);
+  color: var(--accent-ink, #111);
 }
 
 .theme-tradeboard .time-chip {
@@ -2026,7 +2026,7 @@ textarea {
 .job-chip.on {
   border-color: transparent;
   background: var(--accent, #ff8c42);
-  color: var(--demo-accent-ink, #111);
+  color: var(--accent-ink, #111);
 }
 
 .tradeboard-side {
@@ -2075,7 +2075,7 @@ textarea {
 
 .theme-canopy .btn.primary {
   background: var(--accent, #2d5a37);
-  color: var(--demo-accent-ink, #fff);
+  color: var(--accent-ink, #fff);
 }
 
 .theme-canopy .crew-stepper button {
@@ -2086,7 +2086,7 @@ textarea {
 .theme-canopy .time-chip.on {
   background: var(--accent, #2d5a37);
   border-color: var(--accent, #2d5a37);
-  color: var(--demo-accent-ink, #fff);
+  color: var(--accent-ink, #fff);
 }
 
 .prune-catalog {
@@ -2181,14 +2181,14 @@ textarea {
 
 .theme-orchard .btn.primary {
   background: var(--accent, #4a6b2f);
-  color: var(--demo-accent-ink, #fff);
+  color: var(--accent-ink, #fff);
 }
 
 .theme-orchard .day-pill.on,
 .theme-orchard .time-chip.on {
   background: var(--accent, #4a6b2f);
   border-color: var(--accent, #4a6b2f);
-  color: var(--demo-accent-ink, #fff);
+  color: var(--accent-ink, #fff);
 }
 
 .orchard-top {
@@ -2521,14 +2521,14 @@ textarea {
 
 .theme-paintboard {
   --accent: #e8b923;
-  --demo-accent-ink: #1a1e24;
+  --accent-ink: #1a1e24;
   background: #14181e;
   color: #f2f2f2;
 }
 
 .theme-paintboard .btn.primary {
   background: var(--accent);
-  color: var(--demo-accent-ink);
+  color: var(--accent-ink);
 }
 
 .theme-paintboard .btn.ghost {
@@ -2546,7 +2546,7 @@ textarea {
 .theme-paintboard .time-chip.on {
   background: var(--accent);
   border-color: var(--accent);
-  color: var(--demo-accent-ink);
+  color: var(--accent-ink);
 }
 
 .theme-paintboard .time-chip {
@@ -2563,7 +2563,7 @@ textarea {
 
 .theme-paintboard .chip.selected {
   background: var(--accent);
-  color: var(--demo-accent-ink);
+  color: var(--accent-ink);
 }
 
 .theme-paintboard .field select,
@@ -3015,7 +3015,7 @@ textarea {
 }
 
 .mission-recap.app-live-tick {
-  animation: demo-fade-in var(--motion-fast) var(--ease-out) both;
+  animation: motion-fade-in var(--motion-fast) var(--ease-out) both;
 }
 
 .mission-recap-kicker {
@@ -3198,23 +3198,16 @@ textarea {
   color: inherit;
 }
 
-.sync-chip {
-  margin: 0.35rem 0;
-  font-size: 0.78rem;
-  letter-spacing: 0.02em;
-  opacity: 0.8;
-}
-
 .theme-classboard {
   --accent: #b6e34a;
-  --demo-accent-ink: #121614;
+  --accent-ink: #121614;
   background: #121614;
   color: #f2f2f2;
 }
 
 .theme-classboard .btn.primary {
   background: var(--accent);
-  color: var(--demo-accent-ink);
+  color: var(--accent-ink);
 }
 
 .theme-classboard .btn.ghost {
@@ -3230,7 +3223,7 @@ textarea {
 
 .theme-classboard .chip.selected {
   background: var(--accent);
-  color: var(--demo-accent-ink);
+  color: var(--accent-ink);
 }
 
 .theme-classboard .field input,
@@ -3393,13 +3386,33 @@ textarea {
 
 .exercise-check {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 0.5rem;
   padding: 0.45rem 0.55rem;
   border-radius: 8px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   background: rgba(0, 0, 0, 0.18);
   cursor: pointer;
+}
+
+.exercise-check > span {
+  min-width: 0;
+  flex: 1 1 auto;
+  line-height: 1.35;
+}
+
+.exercise-check input[type='checkbox'] {
+  flex: 0 0 auto;
+  align-self: flex-start;
+  width: 1.05rem;
+  height: 1.05rem;
+  min-width: 1.05rem;
+  min-height: 1.05rem;
+  max-width: 1.05rem;
+  max-height: 1.05rem;
+  margin: 0.12rem 0 0;
+  padding: 0;
+  accent-color: currentColor;
 }
 
 .exercise-check.on {
@@ -3465,11 +3478,13 @@ textarea {
 
 .add-exercise-row {
   display: flex;
+  align-items: stretch;
   gap: 0.45rem;
   flex-wrap: wrap;
 }
 
-.add-exercise-row input {
+.add-exercise-row input,
+.add-exercise-row select {
   flex: 1 1 10rem;
   min-width: 0;
   padding: 0.45rem 0.6rem;
@@ -3581,7 +3596,7 @@ textarea {
 
 .theme-yardboard {
   --accent: #d4b56a;
-  --demo-accent-ink: #1a1512;
+  --accent-ink: #1a1512;
   background: #1a1512;
   color: #f2f2f2;
 }
@@ -3700,7 +3715,7 @@ textarea {
 
 .theme-yardboard .btn.primary {
   background: var(--accent);
-  color: var(--demo-accent-ink);
+  color: var(--accent-ink);
 }
 
 .theme-yardboard .btn.ghost {
@@ -3716,7 +3731,7 @@ textarea {
 
 .theme-yardboard .chip.selected {
   background: var(--accent);
-  color: var(--demo-accent-ink);
+  color: var(--accent-ink);
 }
 
 .theme-yardboard .field input,
@@ -5613,7 +5628,7 @@ table.hall-time-grid {
 .pipeline-chip.on {
   background: var(--accent, #c9a227);
   border-color: var(--accent, #c9a227);
-  color: var(--demo-accent-ink, #1a1a1a);
+  color: var(--accent-ink, #1a1a1a);
 }
 
 .theme-tradeboard .job-pipeline-block {
@@ -5834,7 +5849,7 @@ table.hall-time-grid {
 .admin-tab-shell__tab.on {
   background: var(--accent, #d4b56a);
   border-color: var(--accent, #d4b56a);
-  color: var(--demo-accent-ink, #1a1a1a);
+  color: var(--accent-ink, #1a1a1a);
 }
 
 .week-cal-nav {

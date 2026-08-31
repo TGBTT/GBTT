@@ -1,5 +1,7 @@
-import type { ClassType } from '@gbtt/shared/studio/fitnessStudio'
-import { exercisesForClassType } from '@gbtt/shared/studio/fitnessStudio'
+import type {
+  LiveClassType,
+  LiveExercise,
+} from '@gbtt/shared/studio/firebase/liveClassTypes'
 import { ClassTypePhoto } from '@gbtt/shared/studio/ClassTypePhoto'
 
 function DetailBlock({ label, text }: { label: string; text: string }) {
@@ -16,11 +18,16 @@ function DetailBlock({ label, text }: { label: string; text: string }) {
 export function ClassTypeAccordion({
   classType,
   baseUrl,
+  exercises = [],
 }: {
-  classType: ClassType
+  classType: LiveClassType
   baseUrl: string
+  /** The full exercise catalogue; this filters it to the class's own list. */
+  exercises?: LiveExercise[]
 }) {
-  const exercises = exercisesForClassType(classType)
+  const listed = classType.exerciseIds
+    .map((id) => exercises.find((e) => e.id === id))
+    .filter((e): e is LiveExercise => Boolean(e))
 
   return (
     <details className="class-type-accordion">
@@ -41,11 +48,11 @@ export function ClassTypeAccordion({
         <DetailBlock label="Restrictions" text={classType.restrictions} />
         <DetailBlock label="Recommendations" text={classType.recommendations} />
         <DetailBlock label="What to bring" text={classType.whatToBring} />
-        {exercises.length > 0 ? (
+        {listed.length > 0 ? (
           <div className="class-type-accordion__block">
             <h4>Typical exercises</h4>
             <ul className="class-type-accordion__exercises">
-              {exercises.map((ex) => (
+              {listed.map((ex) => (
                 <li key={ex.id}>{ex.name}</li>
               ))}
             </ul>

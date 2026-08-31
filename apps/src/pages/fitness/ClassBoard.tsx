@@ -6,6 +6,7 @@ import {
   studioMarkAttendance,
   studioLogout,
   studioRemoveSession,
+  studioSendBroadcast,
   studioSetMemberRole,
 } from '@gbtt/shared/studio/studioAuth'
 import {
@@ -41,6 +42,7 @@ import {
   renameExercise,
   saveClassType,
   toggleExercise,
+  type LiveClassType,
 } from '@gbtt/shared/studio/firebase/liveClassTypes'
 import { saveSiteContent } from '@gbtt/shared/studio/firebase/liveSiteContent'
 import { saveSettings } from '@gbtt/shared/studio/firebase/liveSettings'
@@ -150,11 +152,11 @@ const ALL_TABS: { id: Tab; label: string; adminOnly?: boolean }[] = [
 ]
 
 /**
- * Admin console —  login; a trainer gets restricted tabs.
+ * Admin console. A trainer signs in here too, and gets a restricted set of tabs.
  */
 export default function ClassBoard() {
-  const [tick, setTick] = useState(0)
-  const refresh = () => setTick((n) => n + 1)
+  const [, bumpSession] = useState(0)
+  const refresh = () => bumpSession((n) => n + 1)
 
   // Signing out from the site nav mutates the store without going through this
   // page, so re-read it whenever the store changes.
@@ -194,6 +196,35 @@ export default function ClassBoard() {
   const [outbox, setOutbox] = useState<LiveOutboxMessage[]>([])
   useEffect(() => subscribeOutbox(setOutbox), [])
 
+  /**
+   * Send the broadcast for real, or only to Tom.
+   *
+   * Confirmed before the real send because there is no way to unsend it and
+   * the recipient list is the whole membership.
+   */
+  const sendBroadcast = async (testMode: boolean) => {
+    if (
+      !testMode &&
+      !window.confirm(`Email every active member "${mailSubject.trim()}"? This cannot be undone.`)
+    ) {
+      return
+    }
+    setBusy(true)
+    setActionError(null)
+    setActionNote(null)
+    const res = await studioSendBroadcast(mailSubject, mailBody, testMode)
+    setBusy(false)
+    if (res.error) {
+      setActionError(res.error)
+      return
+    }
+    setActionNote(
+      testMode
+        ? 'Test sent to your inbox.'
+        : `Sent to ${res.recipientCount} member${res.recipientCount === 1 ? '' : 's'}.`,
+    )
+  }
+
   /** Ignores a blank name rather than letting an unnamed exercise through. */
   const commitRename = async (exerciseId: string) => {
     const name = renameExerciseName.trim()
@@ -206,6 +237,8 @@ export default function ClassBoard() {
   // not offered for new ones.
   const classes = catalog.classTypes.filter((c) => c.active)
   const classTypeById = (id: string) => catalog.classTypes.find((c) => c.id === id)
+  // Archived classes are included: a session run under one still needs its name.
+  const classNames = Object.fromEntries(catalog.classTypes.map((c) => [c.id, c.name]))
 
   // The catalogue arrives after first render, so the detail panel adopts the
   // first class once it does. Selecting again is left to the admin.
@@ -251,7 +284,7 @@ export default function ClassBoard() {
   const classField = (key: ClassTextField) => ({
     value: String(classDraft[key] ?? selected?.[key] ?? ''),
     onChange: (e: { target: { value: string } }) =>
-      setClassDraft((draft) => ({ ...draft, [key]: e.target.value })),
+      setClassDraft((draft: Partial<LiveClassType>) => ({ ...draft, [key]: e.target.value })),
     onBlur: async () => {
       const next = classDraft[key]
       if (!selected || next === undefined || next === selected[key]) return
@@ -658,6 +691,7 @@ export default function ClassBoard() {
             ) : (
               <WeekSessionCalendar
                 byDay={byDay}
+                classNames={classNames}
                 selectedId={selectedOccId}
                 onSelect={(id) => {
                   setSelectedOccId(id)
@@ -698,7 +732,7 @@ export default function ClassBoard() {
                   <ul className="role-call-list">
                     {selectedOcc.roster.map((r) => (
                       <li key={`${r.memberId ?? r.displayName}`}>
-                        <label className="exercise-check">
+                        <label className={`exercise-check${r.status === 'attended' ? ' on' : ''}`}>
                           <input
                             type="checkbox"
                             checked={r.status === 'attended'}
@@ -711,8 +745,11 @@ export default function ClassBoard() {
                               )
                             }}
                           />
-                          {r.displayName}
-                          {r.bookedBy === 'admin' ? ' (admin added)' : ''}
+                          <span>
+                            {r.displayName}
+                            {r.kind === 'guest' ? ' *' : ''}
+                            {r.bookedBy === 'admin' ? ' (admin added)' : ''}
+                          </span>
                         </label>
                       </li>
                     ))}
@@ -1169,6 +1206,7 @@ export default function ClassBoard() {
             ) : (
               <WeekSessionCalendar
                 byDay={byDay}
+                classNames={classNames}
                 selectedId={selectedOccId}
                 onSelect={(id) => {
                   setSelectedOccId(id)
@@ -1581,22 +1619,36 @@ export default function ClassBoard() {
             Body
             <textarea rows={5} value={mailBody} onChange={(e) => setMailBody(e.target.value)} />
           </label>
-          <button
-            type="button"
-            className="btn primary"
-            onClick={() => {
-              sendSubscriberEmail(mailSubject, mailBody)
-              refresh()
-            }}
-          >
-            Send to subscribers
-          </button>
-          <h3>Outbox</h3>
+          <p className="hint">
+            Goes to every active member. Send yourself a test first — there is no recall.
+          </p>
+          <div className="btn-row">
+            <button
+              type="button"
+              className="btn ghost"
+              disabled={busy || !mailSubject.trim() || !mailBody.trim()}
+              onClick={() => void sendBroadcast(true)}
+            >
+              Send test to me
+            </button>
+            <button
+              type="button"
+              className="btn primary"
+              disabled={busy || !mailSubject.trim() || !mailBody.trim()}
+              onClick={() => void sendBroadcast(false)}
+            >
+              Send to subscribers
+            </button>
+          </div>
+          <h3>Sent</h3>
           <ul>
-            {outbox.length === 0 ? <li>Empty</li> : null}
+            {outbox.length === 0 ? <li className="hint">Nothing sent yet.</li> : null}
             {outbox.map((m) => (
               <li key={m.id}>
-                <strong>{m.subject}</strong> · {m.sentAt} · {m.recipientCount} recipients
+                <strong>{m.subject}</strong> ·{' '}
+                {m.sentAt ? m.sentAt.toLocaleString('en-NZ') : 'sending…'} · {m.recipientCount}{' '}
+                recipient{m.recipientCount === 1 ? '' : 's'}
+                {m.testMode ? ' (test)' : ''}
                 <p className="hint">{m.body}</p>
               </li>
             ))}

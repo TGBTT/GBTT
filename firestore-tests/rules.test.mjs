@@ -223,6 +223,47 @@ describe('booking cannot bypass the server', () => {
   })
 })
 
+/*
+ * A weekly slot is committed for the week once its class is inside the transfer
+ * window, so releasing it would hand out a second included class. That rule is
+ * enforced by the unlockWeeklySlot callable, which only holds if the member
+ * cannot reach the two documents it decides from: the lock itself, and the
+ * window it is measured against.
+ */
+describe('weekly slot commitment cannot be bypassed', () => {
+  it('member cannot delete their own weekly lock to free the allowance', async () => {
+    await assertFails(deleteDoc(doc(memberDb(), `users/${MEMBER}/weeklyLocks`, 'slot-wed-0700')))
+  })
+
+  it('member cannot forge a weekly lock', async () => {
+    await assertFails(
+      setDoc(doc(memberDb(), `users/${MEMBER}/weeklyLocks`, 'slot-fri-0700'), {
+        slotId: 'slot-fri-0700',
+      }),
+    )
+  })
+
+  it('member can read the transfer window they are held to', async () => {
+    await assertSucceeds(getDoc(doc(memberDb(), 'meta', 'settings')))
+  })
+
+  it('member cannot widen the transfer window to escape a commitment', async () => {
+    await assertFails(
+      setDoc(doc(memberDb(), 'meta', 'settings'), { transferWindowHours: 0 }, { merge: true }),
+    )
+  })
+
+  it('member cannot move a session start time to escape a commitment', async () => {
+    await assertFails(
+      updateDoc(doc(memberDb(), 'sessions', 'sess-1'), { startsAt: new Date('2099-01-01') }),
+    )
+  })
+
+  it('member cannot cancel a session to keep the week', async () => {
+    await assertFails(updateDoc(doc(memberDb(), 'sessions', 'sess-1'), { cancelled: true }))
+  })
+})
+
 describe('self-registration is gated', () => {
   it('new signup must be pending', async () => {
     const uid = 'fresh-uid'
@@ -356,8 +397,12 @@ describe('cross-member and anonymous access', () => {
     await assertFails(getDoc(doc(anonDb(), 'users', MEMBER)))
   })
 
-  it('anonymous cannot read bank details in meta', async () => {
+  it('anonymous cannot read the transfer window', async () => {
     await assertFails(getDoc(doc(anonDb(), 'meta', 'settings')))
+  })
+
+  it('anonymous cannot read bank details in meta', async () => {
+    await assertFails(getDoc(doc(anonDb(), 'meta', 'bank')))
   })
 
   it('anonymous can still read the public timetable', async () => {
@@ -565,6 +610,48 @@ describe('admin retains control', () => {
 
   it('admin can approve a member', async () => {
     await assertSucceeds(updateDoc(doc(adminDb(), 'users', MEMBER), { 'profile.status': 'active' }))
+  })
+})
+
+describe('class catalogue', () => {
+  // The marketing timetable renders for visitors who never sign in, so the
+  // catalogue it names classes from has to be readable anonymously.
+  it('anyone can read class types', async () => {
+    await assertSucceeds(getDoc(doc(anonDb(), 'classTypes', 'sweat')))
+  })
+
+  it('anyone can read exercises', async () => {
+    await assertSucceeds(getDoc(doc(anonDb(), 'exercises', 'squat')))
+  })
+
+  it('admin can write an exercise', async () => {
+    await assertSucceeds(setDoc(doc(adminDb(), 'exercises', 'squat'), { name: 'Squat' }))
+  })
+
+  // Capacity and the warnings members read before booking are admin copy, so a
+  // trainer covering the schedule may not rewrite them.
+  it('trainer cannot write a class type', async () => {
+    await assertFails(setDoc(doc(trainerDb(), 'classTypes', 'sweat'), { cap: 99 }))
+  })
+
+  it('member cannot write an exercise', async () => {
+    await assertFails(setDoc(doc(memberDb(), 'exercises', 'squat'), { name: 'Forged' }))
+  })
+})
+
+describe('broadcast outbox', () => {
+  // Written by the sendBroadcast callable after Apps Script confirms delivery,
+  // so a row here always means mail actually went out.
+  it('admin can read the outbox', async () => {
+    await assertSucceeds(getDoc(doc(adminDb(), 'outbox', 'msg1')))
+  })
+
+  it('admin cannot forge a sent record', async () => {
+    await assertFails(setDoc(doc(adminDb(), 'outbox', 'msg1'), { subject: 'Never sent' }))
+  })
+
+  it('member cannot read the outbox', async () => {
+    await assertFails(getDoc(doc(memberDb(), 'outbox', 'msg1')))
   })
 })
 

@@ -6,6 +6,13 @@ import { defineSecret, defineString } from 'firebase-functions/params'
 import { onDocumentWritten } from 'firebase-functions/v2/firestore'
 import { onCall, HttpsError } from 'firebase-functions/v2/https'
 import { setGlobalOptions } from 'firebase-functions/v2/options'
+import {
+  commitmentFromSessions,
+  isPastTransferCutoff,
+  weekStartKeyInZone,
+  zoneOffsetMs,
+  type TimedSession,
+} from './weeklyCommitment'
 
 initializeApp()
 
@@ -149,33 +156,6 @@ function pad2(n: number): string {
 
 function dateKey(d: Date): string {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
-}
-
-/** Offset of `timeZone` from UTC, in ms, at the given instant. */
-function zoneOffsetMs(utcMs: number, timeZone: string): number {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    hour12: false,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  })
-    .formatToParts(new Date(utcMs))
-    .reduce<Record<string, string>>((acc, p) => ({ ...acc, [p.type]: p.value }), {})
-
-  return (
-    Date.UTC(
-      Number(parts.year),
-      Number(parts.month) - 1,
-      Number(parts.day),
-      Number(parts.hour) % 24,
-      Number(parts.minute),
-      Number(parts.second),
-    ) - utcMs
-  )
 }
 
 /**
@@ -1197,6 +1177,45 @@ function sessionStartsAt(session: FirebaseFirestore.DocumentData): Date {
   )
 }
 
+/**
+ * A weekly allowance buys one session per week, not one seat that can be moved
+ * around after the fact. So once this week's session for a slot passes the
+ * transfer-window cutoff the member is assumed to be attending it and the week
+ * is spent: releasing the slot then locking another would hand out a second
+ * included class in the same week.
+ *
+ * Commitment is derived on demand rather than recorded, so there is no ledger
+ * to keep in sync and a corrected `startsAt` or a cancelled class takes effect
+ * immediately.
+ *
+ * The timing rules themselves are in `weeklyCommitment`; this reads the week's
+ * sessions and hands them over.
+ */
+async function slotCommitmentThisWeek(
+  slotId: string,
+  windowHours: number,
+  now: Date = new Date(),
+) {
+  const weekStart = currentWeekStartKey(now)
+
+  const snap = await db
+    .collection('sessions')
+    .where('slotId', '==', slotId)
+    .where('weekStart', '==', weekStart)
+    .get()
+
+  const sessions: TimedSession[] = snap.docs.map((doc) => {
+    const data = doc.data() ?? {}
+    return {
+      id: doc.id,
+      cancelled: data.cancelled === true,
+      startsAt: data.startsAt instanceof Timestamp ? data.startsAt.toDate() : null,
+    }
+  })
+
+  return { weekStart, ...commitmentFromSessions(sessions, windowHours, now) }
+}
+
 async function requireActiveMember(uid: string) {
   const snap = await db.doc(`users/${uid}`).get()
   if (!snap.exists) {
@@ -1394,9 +1413,8 @@ export const cancelBooking = onCall(async (request) => {
 
   const startsAt = sessionStartsAt(sessionSnap.data() ?? {})
   const windowHours = await transferWindowHours()
-  const cutoff = new Date(startsAt.getTime() - windowHours * 60 * 60 * 1000)
 
-  if (new Date() > cutoff) {
+  if (isPastTransferCutoff(startsAt, windowHours, new Date())) {
     throw new HttpsError(
       'failed-precondition',
       `Cancellations close ${windowHours} hours before the class. Contact the studio to request an exception.`,
@@ -1540,11 +1558,18 @@ async function bookMemberIntoSession(
 }
 
 /** Monday of the current week, matching the `weekStart` key sessions are filed under. */
+/**
+ * Monday of the studio's current week, as the `weekStart` key sessions carry.
+ *
+ * Resolved in `TIME_ZONE` rather than the function instance's clock, which is
+ * UTC in production: on a Monday morning in NZ, UTC is still on Sunday, so a
+ * UTC-derived key would name the previous week. That key decides which session
+ * commits a member's allowance and when the rollover frees them to change
+ * slots, so naming the wrong week either strands them for an extra day or
+ * hands them a second included class.
+ */
 function currentWeekStartKey(now: Date = new Date()): string {
-  const d = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-  d.setDate(d.getDate() + (d.getDay() === 0 ? -6 : 1 - d.getDay()))
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+  return weekStartKeyInZone(now, TIME_ZONE)
 }
 
 /**
@@ -1633,9 +1658,30 @@ export const lockWeeklySlot = onCall(async (request) => {
     throw new HttpsError('not-found', 'No upcoming sessions are scheduled for that slot.')
   }
 
+  const windowHours = await transferWindowHours()
+  const now = new Date()
+
   const booked: string[] = []
   const full: string[] = []
+  const skipped: string[] = []
   for (const doc of sessionsSnap.docs) {
+    /*
+     * A session already past its transfer cutoff is not claimable: the seat
+     * could no longer be released, so taking it would spend a week the member
+     * had not agreed to spend, and on a slot they had not held when the class
+     * became final. They book it as a drop-in if they want it.
+     */
+    let startsAt: Date | null = null
+    try {
+      startsAt = sessionStartsAt(doc.data() ?? {})
+    } catch {
+      startsAt = null
+    }
+    if (startsAt && isPastTransferCutoff(startsAt, windowHours, now)) {
+      skipped.push(doc.id)
+      continue
+    }
+
     const result = await bookMemberIntoSession(
       doc.id,
       authCtx.uid,
@@ -1654,7 +1700,14 @@ export const lockWeeklySlot = onCall(async (request) => {
     { merge: true },
   )
 
-  return { ok: true, slotId, booked: booked.length, full: full.length, fullSessions: full }
+  return {
+    ok: true,
+    slotId,
+    booked: booked.length,
+    full: full.length,
+    fullSessions: full,
+    skipped: skipped.length,
+  }
 })
 
 /**
@@ -1663,6 +1716,12 @@ export const lockWeeklySlot = onCall(async (request) => {
  * Sessions already inside the transfer window are kept rather than released:
  * the terms members accept on join make those non-refundable because the seat
  * is still holding their place, and only an admin can grant an exception.
+ *
+ * If this week's session for the slot is itself inside that window, the whole
+ * release is refused rather than partially applied. Releasing the lock while
+ * its seat is still held would free the weekly allowance for another slot, so
+ * the member would attend twice on one included session. The slot can be
+ * changed once the week rolls over.
  */
 export const unlockWeeklySlot = onCall(async (request) => {
   const authCtx = requireAuth(request)
@@ -1675,6 +1734,20 @@ export const unlockWeeklySlot = onCall(async (request) => {
 
   const windowHours = await transferWindowHours()
   const now = new Date()
+
+  const commitment = await slotCommitmentThisWeek(slotId, windowHours, now)
+  if (commitment.committed) {
+    throw new HttpsError(
+      'failed-precondition',
+      `This week's class is already locked in, so your included session for this week counts as attended. You can change this slot from next week.`,
+      {
+        reason: 'slot-committed-this-week',
+        slotId,
+        weekStart: commitment.weekStart,
+        startsAt: commitment.startsAt?.toISOString(),
+      },
+    )
+  }
 
   const sessionsSnap = await db
     .collection('sessions')
@@ -1692,7 +1765,7 @@ export const unlockWeeklySlot = onCall(async (request) => {
     } catch {
       continue
     }
-    if (now > new Date(startsAt.getTime() - windowHours * 60 * 60 * 1000)) {
+    if (isPastTransferCutoff(startsAt, windowHours, now)) {
       kept += 1
       continue
     }
@@ -1710,9 +1783,17 @@ export const unlockWeeklySlot = onCall(async (request) => {
     if (removed) released += 1
   }
 
-  await db.doc(`users/${authCtx.uid}/weeklyLocks/${slotId}`).delete()
+  /*
+   * The lock is what the allowance check counts, so it only goes once every
+   * seat it was holding is back. A kept seat with no lock behind it is the
+   * exploit: the allowance would read as free while the member is still on a
+   * roster.
+   */
+  if (kept === 0) {
+    await db.doc(`users/${authCtx.uid}/weeklyLocks/${slotId}`).delete()
+  }
 
-  return { ok: true, slotId, released, kept }
+  return { ok: true, slotId, released, kept, lockReleased: kept === 0 }
 })
 
 /**

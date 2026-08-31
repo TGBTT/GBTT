@@ -1,4 +1,4 @@
-import type { ClassType } from '@gbtt/shared/studio/fitnessStudio'
+import type { LiveClassType } from '@gbtt/shared/studio/firebase/liveClassTypes'
 import { ClassTypePhoto } from '@gbtt/shared/studio/ClassTypePhoto'
 
 export function ClassTypeDescription({
@@ -8,7 +8,7 @@ export function ClassTypeDescription({
   showBlurb = true,
   showLongDescription = true,
 }: {
-  classType: ClassType
+  classType: LiveClassType
   baseUrl: string
   title?: string
   showBlurb?: boolean

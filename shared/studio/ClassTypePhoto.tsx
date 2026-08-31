@@ -1,4 +1,4 @@
-import type { ClassType } from '@gbtt/shared/studio/fitnessStudio'
+import type { LiveClassType } from '@gbtt/shared/studio/firebase/liveClassTypes'
 import { classImageSources } from '@gbtt/shared/studio/fitnessStudio'
 
 export function ClassTypePhoto({
@@ -6,7 +6,7 @@ export function ClassTypePhoto({
   baseUrl,
   variant = 'card',
 }: {
-  classType: ClassType
+  classType: LiveClassType
   baseUrl: string
   variant?: 'card' | 'thumb'
 }) {

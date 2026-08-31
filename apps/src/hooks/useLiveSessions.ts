@@ -1,16 +1,16 @@
 /**
- * Live timetable + roster for the admin console.
+ * Live timetable + roster.
  *
- * When Firebase is configured these read Firestore, which is the only place
- * counts and attendance are authoritative. Without Firebase they report
- * `unavailable` and callers fall back to the local seed store, which keeps the
- * app usable offline in development without ever showing invented numbers in
- * production.
+ * Firestore is the only place counts and attendance are authoritative, so
+ * these read it directly. Without Firebase configured they report
+ * `unavailable` and the UI shows an empty week, which is honest — the previous
+ * fallback to a local seed store showed invented numbers instead.
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   currentWeekStart,
+  groupByWeekday,
   shiftWeekStart,
   subscribeLiveSessions,
   subscribeSessionRoster,
@@ -24,23 +24,12 @@ import {
   type LiveProfileState,
 } from '@gbtt/shared/studio/firebase/liveMembers'
 import { getFirebaseUser } from '@gbtt/shared/studio/studioAuth'
-import { WEEKDAYS, type ClassOccurrence, type Weekday } from '../shared/fitnessStudio'
-
 export function useLiveSessions(weekStart: string = currentWeekStart()) {
   const [state, setState] = useState<LiveSessionsState>({ status: 'loading', occurrences: [] })
 
   useEffect(() => subscribeLiveSessions(weekStart, setState), [weekStart])
 
-  const byDay = useMemo(() => {
-    const grouped = {} as Record<Weekday, ClassOccurrence[]>
-    for (const day of WEEKDAYS) grouped[day] = []
-    for (const occ of state.occurrences) {
-      const day = WEEKDAYS.find((d) => d === occ.dayLabel)
-      if (day) grouped[day].push(occ)
-    }
-    for (const day of WEEKDAYS) grouped[day].sort((a, b) => a.time.localeCompare(b.time))
-    return grouped
-  }, [state.occurrences])
+  const byDay = useMemo(() => groupByWeekday(state.occurrences), [state.occurrences])
 
   return { ...state, byDay, weekStart }
 }

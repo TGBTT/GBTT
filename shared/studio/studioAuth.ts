@@ -399,37 +399,64 @@ export async function studioAddMemberToSession(
  */
 export async function studioLockWeeklySlot(
   slotId: string,
-): Promise<{ error: string | null; booked: number; full: number }> {
+): Promise<{ error: string | null; booked: number; full: number; skipped: number }> {
   const functions = getFirebaseFunctions()
-  if (!functions) return { error: 'Firebase not configured.', booked: 0, full: 0 }
+  if (!functions) return { error: 'Firebase not configured.', booked: 0, full: 0, skipped: 0 }
   try {
     const res = await httpsCallable(functions, 'lockWeeklySlot')({ slotId })
-    const data = (res.data ?? {}) as { booked?: number; full?: number }
-    return { error: null, booked: Number(data.booked ?? 0), full: Number(data.full ?? 0) }
+    const data = (res.data ?? {}) as { booked?: number; full?: number; skipped?: number }
+    return {
+      error: null,
+      booked: Number(data.booked ?? 0),
+      full: Number(data.full ?? 0),
+      // Sessions already past their transfer cutoff, which the lock cannot claim.
+      skipped: Number(data.skipped ?? 0),
+    }
   } catch (e) {
     return {
       error: e instanceof Error ? e.message : 'Could not lock this slot.',
       booked: 0,
       full: 0,
+      skipped: 0,
     }
   }
 }
 
+export interface UnlockSlotResult {
+  error: string | null
+  released: number
+  kept: number
+  /**
+   * True when the slot is spent for this week: its class is inside the
+   * transfer window, so the member counts as attending it and nothing was
+   * released. Distinguished from a plain error so the UI can explain that the
+   * slot can be changed once the week rolls over.
+   */
+  committedThisWeek: boolean
+}
+
 /** Release a weekly lock; seats inside the transfer window are kept. */
-export async function studioUnlockWeeklySlot(
-  slotId: string,
-): Promise<{ error: string | null; released: number; kept: number }> {
+export async function studioUnlockWeeklySlot(slotId: string): Promise<UnlockSlotResult> {
   const functions = getFirebaseFunctions()
-  if (!functions) return { error: 'Firebase not configured.', released: 0, kept: 0 }
+  if (!functions) {
+    return { error: 'Firebase not configured.', released: 0, kept: 0, committedThisWeek: false }
+  }
   try {
     const res = await httpsCallable(functions, 'unlockWeeklySlot')({ slotId })
     const data = (res.data ?? {}) as { released?: number; kept?: number }
-    return { error: null, released: Number(data.released ?? 0), kept: Number(data.kept ?? 0) }
+    return {
+      error: null,
+      released: Number(data.released ?? 0),
+      kept: Number(data.kept ?? 0),
+      committedThisWeek: false,
+    }
   } catch (e) {
+    const details = (e as { details?: { reason?: string } })?.details
     return {
       error: e instanceof Error ? e.message : 'Could not unlock this slot.',
       released: 0,
       kept: 0,
+      committedThisWeek: details?.reason === 'slot-committed-this-week',
     }
   }
 }

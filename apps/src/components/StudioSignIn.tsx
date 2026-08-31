@@ -25,13 +25,6 @@ interface StudioSignInProps {
   redirectOnSuccess?: boolean
 }
 
-/*
- * Seed credentials are only useful against the local development store, and
- * they are compiled into the bundle, so they are never prefilled in a build.
- */
-const SEED_EMAIL = import.meta.env.DEV ? 'alex@demo' : ''
-const SEED_PASSWORD = import.meta.env.DEV ? 'demo' : ''
-
 /**
  * The single sign-in form. Nobody says up front whether they are staff or a
  * client: the role comes from the token's custom claim and decides where they
@@ -46,8 +39,8 @@ export function StudioSignIn({
   redirectOnSuccess = true,
 }: StudioSignInProps) {
   const navigate = useNavigate()
-  const [email, setEmail] = useState(SEED_EMAIL)
-  const [password, setPassword] = useState(SEED_PASSWORD)
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)

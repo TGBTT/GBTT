@@ -117,6 +117,12 @@ jobs:
           test -f _site/images/classes/sweat/card-480.jpg
           test -f _site/app/images/classes/sweat/card-480.jpg
           test -f _site/.nojekyll
+          echo "--- crawler files (copied from public/ by the Vite build) ---"
+          test -f _site/robots.txt
+          test -f _site/sitemap.xml
+          test -f _site/llms.txt
+          echo "--- og:image must be absolute or crawlers will not resolve it ---"
+          grep -q 'property="og:image" content="https://gbtt.co.nz/og-image.png"' _site/index.html
           echo "--- built assets (styles/scripts must exist) ---"
           ls -1 _site/assets/*.css _site/assets/*.js
           ls -1 _site/app/assets/*.css _site/app/assets/*.js

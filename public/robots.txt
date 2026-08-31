@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+
+# The booking app and the sign-in form are behind an account and render
+# nothing useful to a crawler, so they are kept out of the index.
+Disallow: /app/
+
+Sitemap: https://gbtt.co.nz/sitemap.xml

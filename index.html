@@ -11,25 +11,94 @@
     <meta name="theme-color" content="#0a0a0a" />
     <meta name="geo.region" content="NZ-TAS" />
     <meta name="geo.placename" content="Tākaka, Golden Bay, New Zealand" />
+    <meta name="geo.position" content="-40.86996;172.81699" />
+    <meta name="ICBM" content="-40.86996, 172.81699" />
+    <!--
+      Fixed rather than per-route: this is a client-rendered SPA, so a crawler
+      that does not run scripts sees this same head on every URL. A canonical
+      pointing at the home page is the honest answer for the one indexable
+      document that actually gets served.
+    -->
+    <link rel="canonical" href="https://gbtt.co.nz/" />
     <link rel="icon" href="favicon.ico" sizes="any" />
     <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png" />
     <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png" />
     <link rel="apple-touch-icon" href="apple-touch-icon.png" />
     <link rel="manifest" href="site.webmanifest" />
     <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Golden Bay Team Training" />
+    <meta property="og:locale" content="en_NZ" />
+    <meta property="og:url" content="https://gbtt.co.nz/" />
     <meta property="og:title" content="Golden Bay Team Training" />
     <meta
       property="og:description"
       content="Group fitness at Rec Park Centre, Tākaka — all levels, kids and teens welcome."
     />
-    <meta property="og:image" content="og-image.png" />
+    <!-- Absolute: relative og:image paths are not resolved by most crawlers. -->
+    <meta property="og:image" content="https://gbtt.co.nz/og-image.png" />
+    <meta property="og:image:alt" content="Golden Bay Team Training — Fit for Life" />
     <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Golden Bay Team Training" />
+    <meta
+      name="twitter:description"
+      content="Group fitness at Rec Park Centre, Tākaka — all levels, kids and teens welcome."
+    />
+    <meta name="twitter:image" content="https://gbtt.co.nz/og-image.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
       href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,600;0,9..40,700;1,9..40,400&display=swap"
       rel="stylesheet"
     />
+    <!--
+      Static rather than injected at runtime: a local business is exactly the
+      case where the crawler that matters most may not execute JavaScript, so
+      the markup has to be in the served HTML.
+    -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "HealthAndBeautyBusiness",
+        "additionalType": "https://schema.org/ExerciseGym",
+        "@id": "https://gbtt.co.nz/#business",
+        "name": "Golden Bay Team Training",
+        "alternateName": "GBTT",
+        "slogan": "Fit for Life",
+        "url": "https://gbtt.co.nz/",
+        "image": "https://gbtt.co.nz/og-image.png",
+        "logo": "https://gbtt.co.nz/android-chrome-512x512.png",
+        "description": "Group workout classes with Tom at Rec Park Centre, Tākaka. Sweat, Strong, Circuits, Mobility, Womens Fit, Youth Fit, Kids Fit, Sculpt & Strength and Les Mills BodyBalance, scaled for all fitness levels.",
+        "telephone": "+64 21 089 28057",
+        "email": "Tom.GBTT@gmail.com",
+        "sameAs": [
+          "https://www.facebook.com/people/Golden-Bay-Team-Training/100077092552576/"
+        ],
+        "address": {
+          "@type": "PostalAddress",
+          "streetAddress": "Rec Park Centre, 2032 Takaka Valley Highway",
+          "addressLocality": "Tākaka",
+          "addressRegion": "Tasman",
+          "postalCode": "7110",
+          "addressCountry": "NZ"
+        },
+        "geo": {
+          "@type": "GeoCoordinates",
+          "latitude": -40.86996,
+          "longitude": 172.81699
+        },
+        "areaServed": {
+          "@type": "Place",
+          "name": "Golden Bay, New Zealand"
+        },
+        "openingHoursSpecification": [
+          {
+            "@type": "OpeningHoursSpecification",
+            "dayOfWeek": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
+            "description": "Class times vary by term — see the timetable on the home page."
+          }
+        ]
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>
