@@ -118,6 +118,14 @@ button.week-cal__badge {
   outline-offset: 1px;
 }
 
+.week-cal__badge.is-week-only {
+  outline-style: dashed;
+}
+
+.week-cal__badge.is-locked.is-held {
+  outline-style: solid;
+}
+
 .week-cal__badge.is-full {
   opacity: 0.72;
   background: #ddd;

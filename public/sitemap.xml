@@ -3,16 +3,15 @@
   Only the two real pages are listed. /classes, /locations, /apps and /future
   redirect to anchors on the home page, so listing them would offer crawlers
   four URLs that resolve to one.
+
+  loc values are the URLs that return 200 (GitHub Pages 301s /contact → /contact/).
+  changefreq and priority are omitted: Google ignores both.
 -->
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
     <loc>https://gbtt.co.nz/</loc>
-    <changefreq>weekly</changefreq>
-    <priority>1.0</priority>
   </url>
   <url>
-    <loc>https://gbtt.co.nz/contact</loc>
-    <changefreq>monthly</changefreq>
-    <priority>0.7</priority>
+    <loc>https://gbtt.co.nz/contact/</loc>
   </url>
 </urlset>

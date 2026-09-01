@@ -96,10 +96,11 @@ jobs:
           cp _site/app/index.html _site/app/signin/index.html
           cp _site/app/index.html _site/app/fitness/studioflow/index.html
           cp _site/app/index.html _site/app/fitness/classboard/index.html
-          for path in contact; do
+          for path in contact classes locations apps future; do
             mkdir -p "_site/$path"
             cp _site/index.html "_site/$path/index.html"
           done
+          node scripts/patch-contact-html.mjs _site/contact/index.html
 
           # Custom domain + bypass Jekyll
           echo "gbtt.co.nz" > _site/CNAME
@@ -114,6 +115,8 @@ jobs:
           test -f _site/index.html
           test -f _site/app/index.html
           test -f _site/app/signin/index.html
+          test -f _site/classes/index.html
+          test -f _site/apps/index.html
           test -f _site/images/classes/sweat/card-480.jpg
           test -f _site/app/images/classes/sweat/card-480.jpg
           test -f _site/.nojekyll
@@ -121,8 +124,25 @@ jobs:
           test -f _site/robots.txt
           test -f _site/sitemap.xml
           test -f _site/llms.txt
-          echo "--- og:image must be absolute or crawlers will not resolve it ---"
+          grep -q 'https://gbtt.co.nz/contact/' _site/sitemap.xml
+          echo "--- og:image must exist and be an absolute URL ---"
+          test -f _site/og-image.png
           grep -q 'property="og:image" content="https://gbtt.co.nz/og-image.png"' _site/index.html
+          grep -q 'property="og:image:width" content="1200"' _site/index.html
+          echo "--- contact page must have its own canonical, not the home page ---"
+          grep -q 'rel="canonical" href="https://gbtt.co.nz/contact/"' _site/contact/index.html
+          grep -q '<title>Contact Tom | Golden Bay Team Training</title>' _site/contact/index.html
+          grep -q 'rel="canonical" href="https://gbtt.co.nz/"' _site/index.html
+          echo "--- favicons must be base-absolute so nested SPA copies still resolve ---"
+          test -f _site/favicon.ico
+          test -f _site/favicon-32x32.png
+          test -f _site/apple-touch-icon.png
+          test -f _site/app/favicon.ico
+          grep -q 'rel="icon" href="/favicon.ico"' _site/index.html
+          grep -q 'rel="icon" href="/favicon.ico"' _site/contact/index.html
+          grep -q 'rel="icon" href="/app/favicon.ico"' _site/app/index.html
+          grep -q 'rel="icon" href="/app/favicon.ico"' _site/app/fitness/studioflow/index.html
+          grep -q 'rel="icon" href="/app/favicon.ico"' _site/app/signin/index.html
           echo "--- built assets (styles/scripts must exist) ---"
           ls -1 _site/assets/*.css _site/assets/*.js
           ls -1 _site/app/assets/*.css _site/app/assets/*.js

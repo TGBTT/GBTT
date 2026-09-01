@@ -82,7 +82,7 @@ export function AppChrome({
     return (
       <header className="app-app-bar">
         <a href={marketingHomeHref()} className="app-back">
-          ← GBTT apps
+          ← GBTT
         </a>
         <div className="app-app-bar__title">
           <span className="app-theme-tag">{theme}</span>

@@ -243,6 +243,20 @@ describe('weekly slot commitment cannot be bypassed', () => {
     )
   })
 
+  it('member cannot write a skipped week to bypass season fan-out', async () => {
+    await assertFails(
+      setDoc(doc(memberDb(), `users/${MEMBER}/weeklyLocks/slot-wed-0700/skippedWeeks`, '2026-08-24'), {
+        skippedAt: new Date(),
+      }),
+    )
+  })
+
+  it('member can read their own skipped weeks', async () => {
+    await assertSucceeds(
+      getDoc(doc(memberDb(), `users/${MEMBER}/weeklyLocks/slot-wed-0700/skippedWeeks`, '2026-08-24')),
+    )
+  })
+
   it('member can read the transfer window they are held to', async () => {
     await assertSucceeds(getDoc(doc(memberDb(), 'meta', 'settings')))
   })

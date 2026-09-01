@@ -400,11 +400,14 @@ export async function studioAddMemberToSession(
  */
 export async function studioLockWeeklySlot(
   slotId: string,
+  seasonId?: string,
 ): Promise<{ error: string | null; booked: number; full: number; skipped: number }> {
   const functions = getFirebaseFunctions()
   if (!functions) return { error: 'Firebase not configured.', booked: 0, full: 0, skipped: 0 }
   try {
-    const res = await httpsCallable(functions, 'lockWeeklySlot')({ slotId })
+    const payload: { slotId: string; seasonId?: string } = { slotId }
+    if (seasonId) payload.seasonId = seasonId
+    const res = await httpsCallable(functions, 'lockWeeklySlot')(payload)
     const data = (res.data ?? {}) as { booked?: number; full?: number; skipped?: number }
     return {
       error: null,
@@ -419,6 +422,42 @@ export async function studioLockWeeklySlot(
       booked: 0,
       full: 0,
       skipped: 0,
+    }
+  }
+}
+
+/** Lock one included session for the displayed week only. */
+export async function studioLockSessionWeek(
+  sessionId: string,
+): Promise<{ error: string | null; weekStart: string | null }> {
+  const functions = getFirebaseFunctions()
+  if (!functions) return { error: 'Firebase not configured.', weekStart: null }
+  try {
+    const res = await httpsCallable(functions, 'lockSessionWeek')({ sessionId })
+    const data = (res.data ?? {}) as { weekStart?: string }
+    return { error: null, weekStart: String(data.weekStart ?? '') || null }
+  } catch (e) {
+    return {
+      error: e instanceof Error ? e.message : 'Could not lock this session.',
+      weekStart: null,
+    }
+  }
+}
+
+/** Release one week's seat; records a skip when a season lock is behind it. */
+export async function studioReleaseSessionWeek(
+  sessionId: string,
+): Promise<{ error: string | null; hadSeasonLock: boolean }> {
+  const functions = getFirebaseFunctions()
+  if (!functions) return { error: 'Firebase not configured.', hadSeasonLock: false }
+  try {
+    const res = await httpsCallable(functions, 'releaseSessionWeek')({ sessionId })
+    const data = (res.data ?? {}) as { hadSeasonLock?: boolean }
+    return { error: null, hadSeasonLock: data.hadSeasonLock === true }
+  } catch (e) {
+    return {
+      error: e instanceof Error ? e.message : 'Could not free this session.',
+      hadSeasonLock: false,
     }
   }
 }

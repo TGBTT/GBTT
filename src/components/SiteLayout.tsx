@@ -1,6 +1,11 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, Outlet, useLocation } from 'react-router-dom'
 import { NAV, SITE, signInHref } from '../data/siteConfig'
+
+const PAGE_TITLES: Record<string, string> = {
+  '/': 'Golden Bay Team Training | Group fitness in Tākaka',
+  '/contact': 'Contact Tom | Golden Bay Team Training',
+}
 
 function navIsActive(to: string, pathname: string, hash: string): boolean {
   if (to === '/') return pathname === '/' && !hash
@@ -14,6 +19,10 @@ function navIsActive(to: string, pathname: string, hash: string): boolean {
 export function SiteLayout() {
   const [open, setOpen] = useState(false)
   const { pathname, hash } = useLocation()
+
+  useEffect(() => {
+    document.title = PAGE_TITLES[pathname] ?? PAGE_TITLES['/']
+  }, [pathname])
 
   return (
     <div className="site">

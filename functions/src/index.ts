@@ -18,6 +18,7 @@ import {
   zoneOffsetMs,
   type TimedSession,
 } from './weeklyCommitment'
+import { shouldFanBookSession, skipWeekKey, weeklyAllowanceRemaining } from './sessionLockHelpers'
 
 initializeApp()
 
@@ -1035,11 +1036,25 @@ async function fanWeeklyLocksIntoSessions(
   if (locksSnap.empty) return { seats: 0, full: [], members: 0 }
 
   const holders = new Map<string, string[]>()
+  const lockSeasonBySlot = new Map<string, string | null>()
   for (const lock of locksSnap.docs) {
     const uid = lock.ref.parent.parent?.id
     if (!uid) continue
     const slotId = String(lock.data()?.slotId ?? lock.id)
     holders.set(slotId, [...(holders.get(slotId) ?? []), uid])
+    const rawSeason = lock.data()?.seasonId
+    lockSeasonBySlot.set(`${uid}|${slotId}`, rawSeason ? String(rawSeason) : null)
+  }
+
+  const skippedWeeks = new Set<string>()
+  for (const lock of locksSnap.docs) {
+    const uid = lock.ref.parent.parent?.id
+    if (!uid) continue
+    const slotId = lock.id
+    const skipsSnap = await db.collection(`users/${uid}/weeklyLocks/${slotId}/skippedWeeks`).get()
+    for (const skip of skipsSnap.docs) {
+      skippedWeeks.add(skipWeekKey(uid, slotId, skip.id))
+    }
   }
 
   const uids = [...new Set([...holders.values()].flat())]
@@ -1060,9 +1075,25 @@ async function fanWeeklyLocksIntoSessions(
 
   for (const session of upcoming) {
     const slotId = String(session.data.slotId ?? '')
+    const weekStart = String(session.data.weekStart ?? '')
+    const sessionSeasonId = String(session.data.seasonId ?? '')
     for (const uid of holders.get(slotId) ?? []) {
       const user = members.get(uid)
       if (!user) continue
+
+      const lockSeasonId = lockSeasonBySlot.get(`${uid}|${slotId}`) ?? null
+      if (
+        !shouldFanBookSession({
+          lockSeasonId,
+          sessionSeasonId,
+          skippedWeeks,
+          uid,
+          slotId,
+          weekStart,
+        })
+      ) {
+        continue
+      }
 
       const result = await bookMemberIntoSession(
         session.id,
@@ -1321,9 +1352,25 @@ export const projectSeasonInvoice = onCall(async (request) => {
   // Count from the sessions that actually exist for the season rather than
   // from the season length, so a closure or a cancelled class is reflected.
   const sessionsSnap = await db.collection('sessions').where('seasonId', '==', season.id).get()
+
+  const skippedBySlot = new Map<string, Set<string>>()
+  for (const lockDoc of locksSnap.docs) {
+    const slotId = lockDoc.id
+    const skipsSnap = await db
+      .collection(`users/${uid}/weeklyLocks/${slotId}/skippedWeeks`)
+      .get()
+    skippedBySlot.set(
+      slotId,
+      new Set(skipsSnap.docs.map((d) => d.id)),
+    )
+  }
+
   const sessionCount = sessionsSnap.docs.filter((d) => {
     const data = d.data()
-    return data.cancelled !== true && lockedSlotIds.includes(String(data.slotId ?? ''))
+    const slotId = String(data.slotId ?? '')
+    if (data.cancelled === true || !lockedSlotIds.includes(slotId)) return false
+    const weekStart = String(data.weekStart ?? '')
+    return !skippedBySlot.get(slotId)?.has(weekStart)
   }).length
 
   const totalCents = Math.round(ratePerClass * 100) * sessionCount
@@ -2032,6 +2079,184 @@ async function nextSeriesSequence(uid: string, slotId: string): Promise<number> 
   })
 }
 
+/** Included roster seats the member holds in one calendar week. */
+async function countIncludedSessionsForWeek(uid: string, weekStart: string): Promise<number> {
+  const sessionsSnap = await db.collection('sessions').where('weekStart', '==', weekStart).get()
+  if (sessionsSnap.empty) return 0
+
+  const entries = await db.getAll(
+    ...sessionsSnap.docs.map((d) => d.ref.collection('roster').doc(uid)),
+  )
+
+  let count = 0
+  for (const entry of entries) {
+    if (!entry.exists) continue
+    if (entry.data()?.dropIn !== true) count += 1
+  }
+  return count
+}
+
+async function isWeekSkippedForSlot(
+  uid: string,
+  slotId: string,
+  weekStart: string,
+): Promise<boolean> {
+  const skip = await db.doc(`users/${uid}/weeklyLocks/${slotId}/skippedWeeks/${weekStart}`).get()
+  return skip.exists
+}
+
+/**
+ * Lock a single included session for one week — uses plan allowance without
+ * creating a recurring weekly lock.
+ */
+export const lockSessionWeek = onCall({ secrets: [webhookSecret] }, async (request) => {
+  const authCtx = requireAuth(request)
+  const sessionId = String(request.data?.sessionId ?? '').trim()
+  if (!sessionId) {
+    throw new HttpsError('invalid-argument', 'sessionId is required.')
+  }
+
+  const userSnap = await requireActiveMember(authCtx.uid)
+  const data = userSnap.data() ?? {}
+  const profile = (data.profile as Record<string, unknown>) ?? {}
+  const preferences = (data.preferences as Record<string, unknown>) ?? {}
+  const membership = (data.membership as Record<string, unknown>) ?? {}
+  const allowance = Number(membership.classesPerWeek ?? 0)
+
+  if (allowance <= 0) {
+    throw new HttpsError(
+      'failed-precondition',
+      'Your plan has no included weekly sessions. Book this as a drop-in instead.',
+    )
+  }
+
+  const sessionRef = db.doc(`sessions/${sessionId}`)
+  const sessionSnap = await sessionRef.get()
+  if (!sessionSnap.exists) {
+    throw new HttpsError('not-found', 'Session not found.')
+  }
+  const session = sessionSnap.data() ?? {}
+  if (session.cancelled === true) {
+    throw new HttpsError('failed-precondition', 'This session has been cancelled.')
+  }
+
+  const weekStart = String(session.weekStart ?? '')
+  if (!weekStart) {
+    throw new HttpsError('failed-precondition', 'Session is missing a week.')
+  }
+
+  const windowHours = await transferWindowHours()
+  const startsAt = sessionStartsAt(session)
+  if (isPastTransferCutoff(startsAt, windowHours, new Date())) {
+    throw new HttpsError(
+      'failed-precondition',
+      `This class is inside the ${windowHours}-hour transfer window and can no longer be changed.`,
+    )
+  }
+
+  const held = await countIncludedSessionsForWeek(authCtx.uid, weekStart)
+  const entryRef = sessionRef.collection('roster').doc(authCtx.uid)
+  const alreadyBooked = (await entryRef.get()).exists
+  if (!alreadyBooked && !weeklyAllowanceRemaining(allowance, held)) {
+    throw new HttpsError(
+      'resource-exhausted',
+      `Your plan includes ${allowance} session${allowance === 1 ? '' : 's'} a week and you already hold ${held}. Free one up before locking another.`,
+    )
+  }
+
+  const slotId = String(session.slotId ?? '')
+  const result = await bookMemberIntoSession(
+    sessionId,
+    authCtx.uid,
+    profile,
+    preferences,
+    'self',
+    { dropIn: false, chargeRateCents: 0 },
+    false,
+  )
+
+  if (result === 'already-booked') {
+    return { ok: true, sessionId, weekStart, alreadyBooked: true }
+  }
+  if (result === 'full') {
+    throw new HttpsError('resource-exhausted', 'This session is full.')
+  }
+  if (result !== 'booked') {
+    throw new HttpsError('failed-precondition', 'Could not lock this session.')
+  }
+
+  if (slotId) {
+    const lockSnap = await db.doc(`users/${authCtx.uid}/weeklyLocks/${slotId}`).get()
+    if (lockSnap.exists) {
+      await db.doc(`users/${authCtx.uid}/weeklyLocks/${slotId}/skippedWeeks/${weekStart}`).delete()
+      await refreshSlotSeries(authCtx.uid, slotId, profile)
+    }
+  }
+
+  return { ok: true, sessionId, weekStart, alreadyBooked: false }
+})
+
+/**
+ * Release one week's seat. When the session comes from a season lock, record a
+ * skip so fan-out does not re-book it.
+ */
+export const releaseSessionWeek = onCall({ secrets: [webhookSecret] }, async (request) => {
+  const authCtx = requireAuth(request)
+  const sessionId = String(request.data?.sessionId ?? '').trim()
+  if (!sessionId) {
+    throw new HttpsError('invalid-argument', 'sessionId is required.')
+  }
+
+  const userSnap = await requireActiveMember(authCtx.uid)
+  const profile = (userSnap.data()?.profile as Record<string, unknown>) ?? {}
+
+  const sessionRef = db.doc(`sessions/${sessionId}`)
+  const sessionSnap = await sessionRef.get()
+  if (!sessionSnap.exists) {
+    throw new HttpsError('not-found', 'Session not found.')
+  }
+  const session = sessionSnap.data() ?? {}
+
+  const startsAt = sessionStartsAt(session)
+  const windowHours = await transferWindowHours()
+  if (isPastTransferCutoff(startsAt, windowHours, new Date())) {
+    throw new HttpsError(
+      'failed-precondition',
+      `Cancellations close ${windowHours} hours before the class. Contact the studio to request an exception.`,
+    )
+  }
+
+  const entryRef = sessionRef.collection('roster').doc(authCtx.uid)
+  const entrySnap = await entryRef.get()
+  if (!entrySnap.exists) {
+    throw new HttpsError('not-found', 'You are not booked into this session.')
+  }
+
+  await db.runTransaction(async (tx) => {
+    const entry = await tx.get(entryRef)
+    if (!entry.exists) return
+    const rosterSnap = await tx.get(sessionRef.collection('roster'))
+    tx.delete(entryRef)
+    tx.update(sessionRef, { bookedCount: Math.max(0, rosterSnap.size - 1) })
+  })
+
+  const slotId = String(session.slotId ?? '')
+  const weekStart = String(session.weekStart ?? '')
+  let hadSeasonLock = false
+  if (slotId && weekStart) {
+    const lockSnap = await db.doc(`users/${authCtx.uid}/weeklyLocks/${slotId}`).get()
+    hadSeasonLock = lockSnap.exists
+    if (hadSeasonLock) {
+      await db.doc(`users/${authCtx.uid}/weeklyLocks/${slotId}/skippedWeeks/${weekStart}`).set({
+        skippedAt: FieldValue.serverTimestamp(),
+      })
+      await refreshSlotSeries(authCtx.uid, slotId, profile)
+    }
+  }
+
+  return { ok: true, sessionId, hadSeasonLock }
+})
+
 /**
  * The upcoming classes a member actually holds a seat on for one slot.
  *
@@ -2164,6 +2389,7 @@ async function refreshSlotSeries(
 export const lockWeeklySlot = onCall({ secrets: [webhookSecret] }, async (request) => {
   const authCtx = requireAuth(request)
   const slotId = String(request.data?.slotId ?? '').trim()
+  const requestedSeasonId = String(request.data?.seasonId ?? '').trim()
   if (!slotId) {
     throw new HttpsError('invalid-argument', 'slotId is required.')
   }
@@ -2192,8 +2418,18 @@ export const lockWeeklySlot = onCall({ secrets: [webhookSecret] }, async (reques
     .where('weekStart', '>=', currentWeekStartKey())
     .get()
 
-  if (sessionsSnap.empty) {
+  let sessionDocs = sessionsSnap.docs.filter((d) => d.data()?.cancelled !== true)
+  if (!sessionDocs.length) {
     throw new HttpsError('not-found', 'No upcoming sessions are scheduled for that slot.')
+  }
+
+  const seasonId =
+    requestedSeasonId || String(sessionDocs[0].data()?.seasonId ?? '').trim() || null
+  if (seasonId) {
+    sessionDocs = sessionDocs.filter((d) => String(d.data()?.seasonId ?? '') === seasonId)
+    if (!sessionDocs.length) {
+      throw new HttpsError('not-found', 'No upcoming sessions are scheduled for that slot in this season.')
+    }
   }
 
   const windowHours = await transferWindowHours()
@@ -2202,7 +2438,12 @@ export const lockWeeklySlot = onCall({ secrets: [webhookSecret] }, async (reques
   const booked: string[] = []
   const full: string[] = []
   const skipped: string[] = []
-  for (const doc of sessionsSnap.docs) {
+  for (const doc of sessionDocs) {
+    const weekStart = String(doc.data()?.weekStart ?? '')
+    if (weekStart && (await isWeekSkippedForSlot(authCtx.uid, slotId, weekStart))) {
+      continue
+    }
+
     /*
      * A session already past its transfer cutoff is not claimable: the seat
      * could no longer be released, so taking it would spend a week the member
@@ -2237,10 +2478,14 @@ export const lockWeeklySlot = onCall({ secrets: [webhookSecret] }, async (reques
     }
   }
 
-  await locksRef.doc(slotId).set(
-    { slotId, lockedAt: FieldValue.serverTimestamp(), classesPerWeek: allowance },
-    { merge: true },
-  )
+  const lockData: Record<string, unknown> = {
+    slotId,
+    lockedAt: FieldValue.serverTimestamp(),
+    classesPerWeek: allowance,
+  }
+  if (seasonId) lockData.seasonId = seasonId
+
+  await locksRef.doc(slotId).set(lockData, { merge: true })
 
   // Sent from the seats the member now holds rather than from the ones this
   // call happened to take, so a re-lock repairs a series instead of shortening it.

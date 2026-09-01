@@ -2,9 +2,11 @@ import { useEffect, useMemo, useState } from 'react'
 import { ClassTypeDescription } from '@gbtt/shared/studio/ClassTypeDescription'
 import { AppChrome } from '../../components/AppChrome'
 import { WeekSessionCalendar } from '../../components/WeekSessionCalendar'
+import { WorkingOverlay, useWorkingOverlay } from '../../components/WorkingOverlay'
 import {
   useLiveSessions,
   useMyProfile,
+  useMyWeekBookings,
   useWeekNavigation,
   useWeeklyLocks,
 } from '../../hooks/useLiveSessions'
@@ -18,8 +20,10 @@ import {
   studioBookSession,
   studioEmailVerified,
   studioHasFirebaseUser,
+  studioLockSessionWeek,
   studioLockWeeklySlot,
   studioRegisterMember,
+  studioReleaseSessionWeek,
   studioRequestPlanChange,
   studioResendVerification,
   studioSetShowName,
@@ -94,13 +98,17 @@ export default function StudioFlow() {
   const week = useWeekNavigation()
   const live = useLiveSessions(week.weekStart)
   const lockedSlotIds = useWeeklyLocks(!!member)
+  const sessionIds = useMemo(() => live.occurrences.map((o) => o.id), [live.occurrences])
+  const myBookedIds = useMyWeekBookings(member?.id ?? null, sessionIds)
   const myProfile = useMyProfile(!!member).profile
   const byDay = live.byDay
   const selected = selectedId
     ? live.occurrences.find((o) => o.id === selectedId)
     : undefined
   const selectedType = selected ? classTypeById(selected.classTypeId) : undefined
+  const { run: runWithOverlay, overlayProps, busy: overlayBusy } = useWorkingOverlay()
   const [busy, setBusy] = useState(false)
+  const actionBusy = busy || overlayBusy
   const [dropIn, setDropIn] = useState<{ prompt: DropInPrompt; occ: ClassOccurrence } | null>(null)
   const [calendarLinks, setCalendarLinks] = useState<CalendarSubscribeLinks | null>(null)
   const [calendarCopied, setCalendarCopied] = useState(false)
@@ -145,12 +153,24 @@ export default function StudioFlow() {
     return `${classTypeById(occ.classTypeId)?.name ?? occ.classTypeId} · ${occ.dayLabel} ${occ.time}`
   }
 
-  // A lock is stored against the recurring slot, so every session generated
-  // from that slot shows as held.
-  const heldIds = live.occurrences
-    .filter((o) => o.slotId && lockedSlotIds.includes(o.slotId))
-    .map((o) => o.id)
-  const selectedIsLocked = selected ? heldIds.includes(selected.id) : false
+  // Bookings the member holds this week, split by whether a season lock is behind them.
+  const { seasonLockedIds, weekOnlyHeldIds, heldIds } = useMemo(() => {
+    const season = myBookedIds.filter((id) => {
+      const occ = live.occurrences.find((o) => o.id === id)
+      return occ?.slotId && lockedSlotIds.includes(occ.slotId)
+    })
+    const weekOnly = myBookedIds.filter((id) => !season.includes(id))
+    return {
+      seasonLockedIds: season,
+      weekOnlyHeldIds: weekOnly,
+      heldIds: myBookedIds,
+    }
+  }, [myBookedIds, live.occurrences, lockedSlotIds])
+
+  const selectedIsBooked = selected ? heldIds.includes(selected.id) : false
+  const selectedIsSeasonLocked =
+    selectedIsBooked && selected?.slotId ? lockedSlotIds.includes(selected.slotId) : false
+  const hasIncludedPlan = (member?.classesPerWeek ?? 0) > 0
 
   /*
    * Whether a slot is spent for this week is a property of this week, not of
@@ -193,10 +213,17 @@ export default function StudioFlow() {
   const slotIsCommitted = (slotId: string | undefined) =>
     !!slotId && committedSlotIds.has(slotId)
 
-  const selectedSlotCommitted = slotIsCommitted(selected?.slotId)
+  const sessionIsCommitted = (occ: ClassOccurrence | undefined) => {
+    if (!occ?.startsAt) return false
+    const windowMs = transferWindowHours * 60 * 60 * 1000
+    return nowMs > new Date(occ.startsAt).getTime() - windowMs
+  }
+
+  const selectedSlotCommitted = sessionIsCommitted(selected)
+  const selectedCurrentWeekCommitted = slotIsCommitted(selected?.slotId)
 
   const COMMITTED_NOTE =
-    'This week’s class is locked in, so it counts as your included session for the week. You can change this slot from next week.'
+    'This class is inside the transfer window, so it counts as your included session for the week. You can change it from a later week.'
 
   // Sessions belong to a single week, so a selection left over from the
   // previous week would leave the detail panel offering actions on a class
@@ -234,50 +261,71 @@ export default function StudioFlow() {
     refresh()
   }
 
-  const lockSlot = async (slotId: string | undefined) => {
-    if (!slotId) {
-      flash(null, 'This session is not part of a recurring slot, so it cannot be locked weekly.')
-      return
-    }
-    setBusy(true)
-    const { error: err, booked, full, skipped } = await studioLockWeeklySlot(slotId)
-    setBusy(false)
-    flash(
-      err
-        ? null
-        : `Weekly slot locked — ${booked} upcoming session${booked === 1 ? '' : 's'} booked` +
-          (full ? `, ${full} already full` : '') +
-          // A class already inside the transfer window cannot be claimed by a
-          // new lock, so it starts from the following week. Said plainly rather
-          // than leaving them to notice one week short.
-          (skipped
-            ? `. This week's class is already inside the transfer window, so the lock starts next week.`
-            : '.'),
-      err,
-    )
+  const lockWeek = async (sessionId: string) => {
+    const res = await runWithOverlay(() => studioLockSessionWeek(sessionId), {
+      working: 'Locking in your session…',
+      success: 'Session locked in!',
+    })
+    if (res.error) flash(null, res.error)
   }
 
-  const unlockSlot = async (slotId: string | undefined) => {
+  const lockSeason = async (slotId: string | undefined, seasonId?: string) => {
+    if (!slotId) {
+      flash(null, 'This session is not part of a recurring slot, so it cannot be locked every week.')
+      return
+    }
+    const res = await runWithOverlay(() => studioLockWeeklySlot(slotId, seasonId), {
+      working: 'Locking in your session…',
+      success: 'Session locked in!',
+    })
+    if (res.error) {
+      flash(null, res.error)
+      return
+    }
+    if (res.skipped) {
+      flash(
+        `Locked every week this season — ${res.booked} session${res.booked === 1 ? '' : 's'} booked. This week's class is already inside the transfer window, so the lock starts next week.`,
+        null,
+      )
+    } else if (res.full) {
+      flash(
+        `Locked every week this season — ${res.booked} session${res.booked === 1 ? '' : 's'} booked, ${res.full} already full.`,
+        null,
+      )
+    }
+  }
+
+  const releaseWeek = async (sessionId: string) => {
+    const res = await runWithOverlay(() => studioReleaseSessionWeek(sessionId), {
+      working: 'Freeing up your session…',
+      success: 'Session freed up!',
+    })
+    if (res.error) flash(null, res.error)
+  }
+
+  const unlockSeason = async (slotId: string | undefined) => {
     if (!slotId) {
       flash(null, 'This session is not part of a recurring slot.')
       return
     }
-    setBusy(true)
-    const res = await studioUnlockWeeklySlot(slotId)
-    setBusy(false)
+    const res = await runWithOverlay(() => studioUnlockWeeklySlot(slotId), {
+      working: 'Updating your weekly lock…',
+      success: 'Session freed up!',
+    })
     if (res.committedThisWeek) {
       flash(null, COMMITTED_NOTE)
       return
     }
-    flash(
-      res.error
-        ? null
-        : `Weekly slot unlocked — ${res.released} seat${res.released === 1 ? '' : 's'} released` +
-          // Seats inside the transfer window stay booked and chargeable, so say so
-          // rather than letting the member assume they were refunded.
-          (res.kept ? `, ${res.kept} kept inside the transfer window.` : '.'),
-      res.error,
-    )
+    if (res.error) {
+      flash(null, res.error)
+      return
+    }
+    if (res.kept) {
+      flash(
+        `Stopped locking every week — ${res.released} seat${res.released === 1 ? '' : 's'} released, ${res.kept} kept inside the transfer window.`,
+        null,
+      )
+    }
   }
 
   /**
@@ -329,23 +377,53 @@ export default function StudioFlow() {
     flash(err ? null : 'Swapped — this session now uses your included allowance.', err)
   }
 
+  const moveWeekBooking = async (fromOccurrenceId: string, toOcc: ClassOccurrence) => {
+    const released = await runWithOverlay(() => studioReleaseSessionWeek(fromOccurrenceId), {
+      working: 'Freeing up your session…',
+      success: 'Session freed up!',
+    })
+    if (released.error) {
+      flash(null, released.error)
+      setReshuffleFrom(null)
+      return
+    }
+    const locked = await runWithOverlay(() => studioLockSessionWeek(toOcc.id), {
+      working: 'Locking in your session…',
+      success: 'Session locked in!',
+    })
+    setReshuffleFrom(null)
+    flash(locked.error ? null : 'This week’s session changed.', locked.error)
+  }
+
   const moveLock = async (fromOccurrenceId: string, toOcc: ClassOccurrence) => {
     const fromSlotId = live.occurrences.find((o) => o.id === fromOccurrenceId)?.slotId
     if (!fromSlotId || !toOcc.slotId) {
-      flash(null, 'Both sessions must belong to a recurring slot to move a lock.')
+      flash(null, 'Both sessions must belong to a recurring slot to move a season lock.')
       return
     }
-    setBusy(true)
-    const unlocked = await studioUnlockWeeklySlot(fromSlotId)
-    const locked = unlocked.error ? null : await studioLockWeeklySlot(toOcc.slotId)
-    setBusy(false)
-    setReshuffleFrom(null)
+    const unlocked = await runWithOverlay(() => studioUnlockWeeklySlot(fromSlotId), {
+      working: 'Updating your weekly lock…',
+      success: 'Session freed up!',
+    })
     if (unlocked.committedThisWeek) {
       flash(null, COMMITTED_NOTE)
+      setReshuffleFrom(null)
       return
     }
-    const err = unlocked.error ?? locked?.error ?? null
-    flash(err ? null : 'Weekly lock moved.', err)
+    if (unlocked.error) {
+      flash(null, unlocked.error)
+      setReshuffleFrom(null)
+      return
+    }
+    const locked = await runWithOverlay(
+      () => studioLockWeeklySlot(toOcc.slotId!, toOcc.seasonId),
+      {
+        working: 'Locking in your session…',
+        success: 'Session locked in!',
+      },
+    )
+    setReshuffleFrom(null)
+    flash(locked.error ? null : 'Season lock moved.', locked.error)
   }
 
   return (
@@ -361,8 +439,8 @@ export default function StudioFlow() {
       <section className="yacht-panel cal-panel app-enter app-section">
         <h2>Mon–Fri sessions</h2>
         <p className="hint">
-          Weekly memberships lock recurring slots on this timetable — the same day and time every
-          week. Move or unlock within your plan allowance.
+          Lock a session for this week only, or every week of the season. Step through upcoming
+          weeks to free a season-locked week and pick another.
         </p>
         <WeekNavigator
           label={week.label}
@@ -371,7 +449,7 @@ export default function StudioFlow() {
           onPrevious={week.previousWeek}
           onNext={week.nextWeek}
           onReset={week.resetWeek}
-          disabled={busy || live.status === 'loading'}
+          disabled={actionBusy || live.status === 'loading'}
         />
         {live.status === 'loading' ? (
           <p className="hint">Loading sessions for {week.label}…</p>
@@ -393,6 +471,8 @@ export default function StudioFlow() {
             classNames={classNames}
             selectedId={selectedId}
             heldIds={heldIds}
+            seasonLockedIds={seasonLockedIds}
+            weekOnlyHeldIds={weekOnlyHeldIds}
             onSelect={setSelectedId}
             mode="member"
           />
@@ -440,73 +520,122 @@ export default function StudioFlow() {
 
             {member ? (
               <div className="btn-row">
-                {selectedIsLocked ? (
+                {selectedIsBooked ? (
                   <>
                     <button
                       type="button"
                       className="btn ghost"
-                      disabled={busy || selectedSlotCommitted}
-                      onClick={() => {
-                        setReshuffleFrom(selected.id)
-                        flash('Pick another session on the calendar to move this weekly lock.', null)
-                      }}
+                      disabled={actionBusy || selectedSlotCommitted}
+                      onClick={() => void releaseWeek(selected.id)}
                     >
-                      Move weekly lock
+                      Free up this week
                     </button>
-                    <button
-                      type="button"
-                      className="btn ghost"
-                      disabled={busy || selectedSlotCommitted}
-                      onClick={() => unlockSlot(selected.slotId)}
-                    >
-                      Unlock slot
-                    </button>
+                    {selectedIsSeasonLocked ? (
+                      <>
+                        <button
+                          type="button"
+                          className="btn ghost"
+                          disabled={actionBusy || selectedCurrentWeekCommitted}
+                          onClick={() => {
+                            setReshuffleFrom(selected.id)
+                            flash(
+                              'Pick another session on the calendar to change this week, or move the whole season lock.',
+                              null,
+                            )
+                          }}
+                        >
+                          Change this week
+                        </button>
+                        <button
+                          type="button"
+                          className="btn ghost"
+                          disabled={actionBusy || selectedCurrentWeekCommitted}
+                          onClick={() => void unlockSeason(selected.slotId)}
+                        >
+                          Stop locking every week
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        className="btn ghost"
+                        disabled={actionBusy || selectedSlotCommitted}
+                        onClick={() => {
+                          setReshuffleFrom(selected.id)
+                          flash('Pick another session on the calendar for this week.', null)
+                        }}
+                      >
+                        Change this week
+                      </button>
+                    )}
                   </>
                 ) : reshuffleFrom ? (
                   <button
                     type="button"
                     className="btn primary"
                     disabled={
-                      busy ||
-                      // The move releases the slot being moved from, which this
-                      // week's allowance is already spent on.
-                      slotIsCommitted(
-                        live.occurrences.find((o) => o.id === reshuffleFrom)?.slotId,
+                      actionBusy ||
+                      spotsLeft(selected) === 0 ||
+                      sessionIsCommitted(
+                        live.occurrences.find((o) => o.id === reshuffleFrom),
                       )
                     }
-                    onClick={() => moveLock(reshuffleFrom, selected)}
+                    onClick={() => {
+                      const from = live.occurrences.find((o) => o.id === reshuffleFrom)
+                      const fromSeason =
+                        from?.slotId && lockedSlotIds.includes(from.slotId)
+                      if (fromSeason) void moveLock(reshuffleFrom, selected)
+                      else void moveWeekBooking(reshuffleFrom, selected)
+                    }}
                   >
-                    Move lock here
+                    Lock in here instead
                   </button>
-                ) : (
+                ) : hasIncludedPlan ? (
                   <>
                     <button
                       type="button"
                       className="btn primary"
-                      disabled={busy || spotsLeft(selected) === 0}
-                      onClick={() => lockSlot(selected.slotId)}
+                      disabled={actionBusy || spotsLeft(selected) === 0}
+                      onClick={() => void lockWeek(selected.id)}
                     >
-                      Lock weekly slot
+                      Lock in this session for this week
                     </button>
                     <button
                       type="button"
                       className="btn ghost"
-                      disabled={busy || spotsLeft(selected) === 0}
+                      disabled={actionBusy || spotsLeft(selected) === 0 || !selected.slotId}
+                      onClick={() => void lockSeason(selected.slotId, selected.seasonId)}
+                    >
+                      Lock in this session every week of this season
+                    </button>
+                    <button
+                      type="button"
+                      className="btn ghost"
+                      disabled={actionBusy || spotsLeft(selected) === 0}
                       onClick={() => startDropIn(selected)}
                     >
                       Book one-off drop-in
                     </button>
                   </>
+                ) : (
+                  <button
+                    type="button"
+                    className="btn primary"
+                    disabled={actionBusy || spotsLeft(selected) === 0}
+                    onClick={() => startDropIn(selected)}
+                  >
+                    Book one-off drop-in
+                  </button>
                 )}
                 {reshuffleFrom ? (
                   <button type="button" className="btn ghost" onClick={() => setReshuffleFrom(null)}>
-                    Cancel move
+                    Cancel change
                   </button>
                 ) : null}
               </div>
             ) : null}
 
-            {member && selectedIsLocked && selectedSlotCommitted ? (
+            {member && selectedIsBooked && selectedSlotCommitted ? (
               <p className="hint">{COMMITTED_NOTE}</p>
             ) : null}
 
@@ -804,13 +933,13 @@ export default function StudioFlow() {
                 ))}
             </div>
 
-            <h3>Your weekly locked slots</h3>
+            <h3>Your season locks</h3>
             {/* The locks themselves are the `weeklyLocks` documents, so they are
                 listed from those rather than from any one week's sessions — a
                 lock exists even in a week whose sessions are not generated yet. */}
             <ul className="held-list">
               {lockedSlotIds.length === 0 ? (
-                <li>None yet — lock a slot on the calendar (repeats every week).</li>
+                <li>None yet — lock a session every week of the season from the calendar above.</li>
               ) : null}
               {lockedSlotIds.map((id) => (
                 <li key={id}>{slotLabel(id)}</li>
@@ -886,6 +1015,7 @@ export default function StudioFlow() {
 
       {member ? <SeasonCost /> : null}
       </div>
+      <WorkingOverlay {...overlayProps} />
     </div>
   )
 }

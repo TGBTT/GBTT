@@ -26,6 +26,7 @@ import {
   updateDoc,
   where,
   type DocumentData,
+  type Unsubscribe,
 } from 'firebase/firestore'
 import { getFirestoreDb } from './init'
 import { seasonTeachingDays, type LiveSeason } from './liveSeasons'
@@ -171,6 +172,7 @@ function mapSession(id: string, data: DocumentData): ClassOccurrence {
     cap: data.cap == null ? undefined : Number(data.cap),
     cancelled: data.cancelled === true,
     slotId: data.slotId == null ? undefined : String(data.slotId),
+    seasonId: data.seasonId == null ? undefined : String(data.seasonId),
     startsAt: data.startsAt instanceof Timestamp ? data.startsAt.toDate().toISOString() : undefined,
     roster: [],
     calendarEventId: String(data.calendarEventId ?? ''),
@@ -266,6 +268,104 @@ function sessionTiming(
       zonedToUtc(date.getFullYear(), date.getMonth() + 1, date.getDate(), hour, minute),
     ),
   }
+}
+
+/**
+ * Milliseconds for a session start. `startsAt` is preferred; older documents
+ * without one are reconstructed from the week, day and time in studio TZ.
+ */
+export function sessionStartMs(occ: ClassOccurrence, weekStart: string): number {
+  if (occ.startsAt) {
+    const t = Date.parse(occ.startsAt)
+    if (Number.isFinite(t)) return t
+  }
+  const timing = sessionTiming(weekStart, occ.dayLabel, occ.time, occ.classTypeId)
+  if ('startsAt' in timing) return timing.startsAt.toMillis()
+  return Number.NaN
+}
+
+export function chronologicalSessions(
+  occurrences: ClassOccurrence[],
+  weekStart: string,
+): ClassOccurrence[] {
+  return [...occurrences].sort((a, b) => {
+    const da = sessionStartMs(a, weekStart)
+    const db = sessionStartMs(b, weekStart)
+    if (da !== db) {
+      if (!Number.isFinite(da)) return 1
+      if (!Number.isFinite(db)) return -1
+      return da - db
+    }
+    return a.time.localeCompare(b.time) || a.id.localeCompare(b.id)
+  })
+}
+
+/** Arrive early / linger after, so back-to-back and memory roll calls land right. */
+const CURRENT_LEAD_MS = 15 * 60 * 1000
+const CURRENT_TAIL_MS = 90 * 60 * 1000
+
+/**
+ * Session a trainer is most likely taking roll for: underway (or still in the
+ * post-class window), else about to start, else the most recent past class this
+ * week — so Friday evening and weekend catch-up open last class, not Monday's.
+ */
+export function pickCurrentSession(
+  occurrences: ClassOccurrence[],
+  weekStart: string,
+  now: Date = new Date(),
+): ClassOccurrence | null {
+  const sorted = chronologicalSessions(occurrences, weekStart)
+  if (!sorted.length) return null
+  const nowMs = now.getTime()
+  const start = (o: ClassOccurrence) => sessionStartMs(o, weekStart)
+
+  const underway = [...sorted].reverse().find((o) => {
+    const t = start(o)
+    return Number.isFinite(t) && t <= nowMs && nowMs <= t + CURRENT_TAIL_MS
+  })
+  if (underway) return underway
+
+  const soon = sorted.find((o) => {
+    const t = start(o)
+    return Number.isFinite(t) && t > nowMs && t - nowMs <= CURRENT_LEAD_MS
+  })
+  if (soon) return soon
+
+  const past = [...sorted].reverse().find((o) => {
+    const t = start(o)
+    return Number.isFinite(t) && t <= nowMs
+  })
+  if (past) return past
+
+  return (
+    sorted.find((o) => {
+      const t = start(o)
+      return Number.isFinite(t) && t > nowMs
+    }) ?? sorted[0]
+  )
+}
+
+export type SessionWhen = 'now' | 'soon' | 'earlier' | 'upcoming'
+
+export function sessionWhen(
+  occ: ClassOccurrence,
+  weekStart: string,
+  now: Date = new Date(),
+): SessionWhen {
+  const t = sessionStartMs(occ, weekStart)
+  const nowMs = now.getTime()
+  if (!Number.isFinite(t)) return 'upcoming'
+  if (t <= nowMs && nowMs <= t + CURRENT_TAIL_MS) return 'now'
+  if (t > nowMs && t - nowMs <= CURRENT_LEAD_MS) return 'soon'
+  if (t <= nowMs) return 'earlier'
+  return 'upcoming'
+}
+
+export function sessionWhenLabel(when: SessionWhen): string {
+  if (when === 'now') return 'This session'
+  if (when === 'soon') return 'Starting soon'
+  if (when === 'earlier') return 'Earlier'
+  return 'Upcoming'
 }
 
 /** Calendar date the session falls on, as `YYYY-MM-DD` in studio local time. */
@@ -669,6 +769,47 @@ export function subscribeWeeklyLocks(
     (snap) => onChange(snap.docs.map((d) => d.id)),
     () => onChange([]),
   )
+}
+
+/**
+ * Subscribe to which sessions in a week the member holds a seat on.
+ * One listener per session roster doc; rules allow members to read their own entry.
+ */
+export function subscribeMyWeekBookings(
+  uid: string | null,
+  sessionIds: string[],
+  onChange: (bookedSessionIds: string[]) => void,
+): () => void {
+  const db = getFirestoreDb()
+  if (!db || !uid || !sessionIds.length) {
+    onChange([])
+    return noop
+  }
+
+  const held = new Set<string>()
+  const unsubs: Unsubscribe[] = []
+
+  const emit = () => onChange([...held])
+
+  for (const sessionId of sessionIds) {
+    const unsub = onSnapshot(
+      doc(db, 'sessions', sessionId, 'roster', uid),
+      (snap) => {
+        if (snap.exists()) held.add(sessionId)
+        else held.delete(sessionId)
+        emit()
+      },
+      () => {
+        held.delete(sessionId)
+        emit()
+      },
+    )
+    unsubs.push(unsub)
+  }
+
+  return () => {
+    for (const unsub of unsubs) unsub()
+  }
 }
 
 /** Subscribe to a single session's roster — used by the admin roll call. */

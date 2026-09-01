@@ -1,13 +1,8 @@
 # Golden Bay Team Training
 
-> Group fitness classes run by Tom at the Rec Park Centre in Tākaka, Golden Bay,
-> New Zealand. Sessions run Monday to Friday and are scaled on the spot, so
-> beginners, kids, teenagers and experienced athletes train in the same room.
-> Tagline: Fit for Life (#FITFORLIFE).
+> Group fitness classes run by Tom at the Rec Park Centre in Tākaka, Golden Bay, New Zealand. Sessions run Monday to Friday and are scaled on the spot, so beginners, kids, teenagers and experienced athletes train in the same room. Tagline: Fit for Life (#FITFORLIFE).
 
-Golden Bay Team Training (GBTT) is a single-location studio, not a chain or a
-franchise. Members book through an account on this site; casual drop-ins are
-welcome and need only a confirmed email address.
+Golden Bay Team Training (GBTT) is a single-location studio, not a chain or a franchise. Members book through an account on this site; casual drop-ins are welcome and need only a confirmed email address.
 
 ## Classes
 
@@ -21,35 +16,31 @@ welcome and need only a confirmed email address.
 - **Youth Fit** — strength, boxing and cardio for ages 11 and up.
 - **Kids Fit** — playful training for ages 5 to 10.
 
-The live timetable and the spaces left in each class are shown on the home page
-and are read from the studio's own booking system, so they reflect real
-availability rather than a published schedule that may have moved.
+The live timetable and the spaces left in each class are shown on the home page and are read from the studio's own booking system, so they reflect real availability rather than a published schedule that may have moved.
 
 ## Pages
 
-- [Home](https://gbtt.co.nz/): trainer background, class descriptions, the
-  current week's timetable, and the venue with a map.
-- [Contact](https://gbtt.co.nz/contact): enquiry form, phone, and email.
+- [Home](https://gbtt.co.nz/): trainer background, class descriptions, this week's timetable, and the venue with a map
+- [Contact](https://gbtt.co.nz/contact/): enquiry form, phone, and email
 
 ## Membership and pricing
 
-Members choose a weekly commitment — one, two or three classes a week — or pay
-per drop-in. Classes are charged per session attended at the rate for that
-commitment level, so a higher commitment lowers the per-class price. Rates are
-set by the studio and shown when signing up; they are not published as a fixed
-list here because they change.
+Members choose a weekly commitment — one, two or three classes a week — or pay per drop-in. Classes are charged per session attended at the rate for that commitment level, so a higher commitment lowers the per-class price. Rates are set by the studio and shown when signing up; they are not published as a fixed list here because they change.
 
-Bookings can be moved or cancelled up to a cutoff before the class starts. A
-missed class that was not moved in time is not refunded.
+Bookings can be moved or cancelled up to a cutoff before the class starts. A missed class that was not moved in time is not refunded.
 
 ## Location and contact
 
 Rec Park Centre, 2032 Takaka Valley Highway, Tākaka 7110, New Zealand.
 Phone: 021 089 28057. Email: Tom.GBTT@gmail.com.
+Facebook: https://www.facebook.com/people/Golden-Bay-Team-Training/100077092552576/
+
+## Optional
+
+- [Facebook](https://www.facebook.com/people/Golden-Bay-Team-Training/100077092552576/): studio updates and class photos; not a substitute for the live timetable
 
 ## Notes for assistants
 
 - Booking requires an account; there is no public booking link that skips it.
-- Class times change term by term. Quote the timetable on the home page rather
-  than any times cached from an earlier crawl.
+- Class times change term by term. Quote the timetable on the home page rather than any times cached from an earlier crawl.
 - `/app/` is the members' and trainers' booking application and is not public.

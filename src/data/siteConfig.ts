@@ -3,7 +3,7 @@ export const SITE = {
   shortName: 'GBTT',
   tagline: 'Fit for Life',
   description:
-    'Golden Bay Team Training — Sweat, Strong, Circuits, Mobility, Womens Fit, Youth Fit, Kids Fit, Sculpt & Strength, and Les Mills BodyBalance at Rec Park Centre, Tākaka. Fit for Life. #FITFORLIFE',
+    'Group fitness with Tom at Rec Park Centre, Tākaka, Golden Bay. Sweat, Strong, Circuits, Mobility, BodyBalance, kids and teens — all levels.',
   runBy: 'Tom',
   email: 'Tom.GBTT@gmail.com',
   phone: '021 089 28057',

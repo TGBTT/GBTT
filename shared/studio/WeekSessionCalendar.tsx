@@ -21,6 +21,10 @@ export interface WeekSessionCalendarProps {
   classNames?: Record<string, string>
   selectedId?: string | null
   heldIds?: string[]
+  /** Held via a recurring season lock on the slot. */
+  seasonLockedIds?: string[]
+  /** Held for this week only (included allowance, no recurring lock). */
+  weekOnlyHeldIds?: string[]
   onSelect?: (id: string) => void
   /** public = read-only on marketing site; member/admin = interactive booking or editing */
   mode?: 'public' | 'member' | 'admin'
@@ -33,6 +37,8 @@ function SessionBadge({
   mode,
   selected,
   held,
+  seasonLocked,
+  weekOnly,
   onSelect,
 }: {
   occ: ClassOccurrence
@@ -40,12 +46,21 @@ function SessionBadge({
   mode: 'public' | 'member' | 'admin'
   selected: boolean
   held: boolean
+  seasonLocked: boolean
+  weekOnly: boolean
   onSelect?: (id: string) => void
 }) {
   const full = sessionIsFull(occ)
   const attending = formatSessionAttending(occ)
-  const className = `week-cal__badge${selected ? ' is-selected' : ''}${held ? ' is-held is-locked' : ''}${full ? ' is-full' : ''}`
-  const title = `${name} · ${formatTimetableTime(occ.time)}${held ? ' (weekly locked)' : ''}${full ? ' (full)' : ` · ${attending}`}`
+  const heldNote = seasonLocked
+    ? ' (every week this season)'
+    : weekOnly
+      ? ' (this week)'
+      : held
+        ? ' (held)'
+        : ''
+  const className = `week-cal__badge${selected ? ' is-selected' : ''}${held ? ' is-held' : ''}${seasonLocked ? ' is-locked' : ''}${weekOnly ? ' is-week-only' : ''}${full ? ' is-full' : ''}`
+  const title = `${name} · ${formatTimetableTime(occ.time)}${heldNote}${full ? ' (full)' : ` · ${attending}`}`
 
   const body = (
     <>
@@ -82,6 +97,8 @@ export function WeekSessionCalendar({
   classNames = {},
   selectedId,
   heldIds = [],
+  seasonLockedIds = [],
+  weekOnlyHeldIds = [],
   onSelect,
   mode = 'member',
   className,
@@ -126,6 +143,8 @@ export function WeekSessionCalendar({
                         mode={mode}
                         selected={selectedId === occ.id}
                         held={heldIds.includes(occ.id)}
+                        seasonLocked={seasonLockedIds.includes(occ.id)}
+                        weekOnly={weekOnlyHeldIds.includes(occ.id)}
                         onSelect={onSelect}
                       />
                     ) : null}

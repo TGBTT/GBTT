@@ -7,7 +7,7 @@
  * things at once: which sessions exist, and what a member is billed for.
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   countTeachingDays,
   deleteSeason,
@@ -26,8 +26,9 @@ import {
 import { DateField } from '@gbtt/shared/studio/DateField'
 import {
   NZ_TERM_SOURCE,
-  NZ_TERM_YEARS,
+  isEstimatedTermYear,
   nzSchoolTermSeasons,
+  nzTermYearOptions,
   type NzTermProposal,
 } from '@gbtt/shared/studio/nzSchoolTerms'
 
@@ -63,13 +64,10 @@ export function SeasonsPanel() {
   const [note, setNote] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
-  // Default to the first published year the studio has not already run out of,
-  // which is the one Tom is most likely to be setting up.
-  const [termYear, setTermYear] = useState(
-    () =>
-      NZ_TERM_YEARS.find((y) => y >= new Date().getFullYear()) ??
-      NZ_TERM_YEARS[NZ_TERM_YEARS.length - 1],
-  )
+  // Published years first, then a few estimated ones. The default is the
+  // earliest still ahead of us, which is the year most likely being set up.
+  const termYears = useMemo(() => nzTermYearOptions(), [])
+  const [termYear, setTermYear] = useState(() => termYears[0]?.year ?? new Date().getFullYear())
   const [termMode, setTermMode] = useState<SeasonBillingMode>('arrears')
   const [proposal, setProposal] = useState<NzTermProposal[] | null>(null)
   const [excluded, setExcluded] = useState<string[]>([])
@@ -165,8 +163,11 @@ export function SeasonsPanel() {
   const previewSchoolTerms = () => {
     setError(null)
     setNote(null)
-    setExcluded([])
-    setProposal(nzSchoolTermSeasons(termYear, termMode))
+    const next = nzSchoolTermSeasons(termYear, termMode)
+    // Summer arrives unticked: whether the studio trades through it is Tom's
+    // call, and the school calendar cannot answer it.
+    setExcluded(next.filter((p) => p.optional).map((p) => p.season.id))
+    setProposal(next)
   }
 
   const editProposal = (id: string, patch: Partial<LiveSeason>) => {
@@ -283,8 +284,10 @@ export function SeasonsPanel() {
         <p className="hint">
           The studio year follows the school year, so a whole year can be drawn up from the
           published term dates and then edited. Public holidays that fall mid-term come through as
-          closures; the school holidays between terms need none, since they sit outside every
-          season. Nothing is saved until you confirm.
+          closures; the shorter school holidays between terms need none, since they sit outside
+          every term. The long summer gap is offered as a fifth season, unticked — sessions are
+          only generated inside a season, so leaving it off is how the studio closes for summer.
+          Nothing is saved until you confirm.
         </p>
 
         <div className="season-terms__controls">
@@ -298,9 +301,10 @@ export function SeasonsPanel() {
                 setProposal(null)
               }}
             >
-              {NZ_TERM_YEARS.map((y) => (
-                <option key={y} value={y}>
-                  {y}
+              {termYears.map((y) => (
+                <option key={y.year} value={y.year}>
+                  {y.year}
+                  {y.estimated ? ' (estimated)' : ''}
                 </option>
               ))}
             </select>
@@ -329,6 +333,16 @@ export function SeasonsPanel() {
             {proposal ? 'Start again' : `Draw up ${termYear}`}
           </button>
         </div>
+
+        {proposal && isEstimatedTermYear(termYear) ? (
+          <p className="hint season-terms__estimate">
+            <strong>{termYear} has not been gazetted yet.</strong> These dates are worked out from
+            the shape of the last published year, so treat the term boundaries as a starting point
+            and check them against education.govt.nz before generating sessions. The public
+            holidays are exact — Easter, Anzac, Labour Day and the rest follow fixed rules, and
+            Matariki is legislated years ahead.
+          </p>
+        ) : null}
 
         {proposal ? (
           <>

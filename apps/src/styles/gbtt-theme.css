@@ -661,6 +661,14 @@
   opacity: 0.55;
 }
 
+/* An estimated year has to look different from a gazetted one at a glance. */
+.season-terms__estimate {
+  padding: 0.6rem 0.8rem;
+  margin: 0 0 0.9rem;
+  border-left: 3px solid rgba(255, 255, 255, 0.45);
+  background: rgba(255, 255, 255, 0.06);
+}
+
 .season-term__dates {
   display: flex;
   flex-wrap: wrap;
@@ -984,6 +992,10 @@
 
 .theme-gbtt .app-sections > .classboard-top.app-section {
   padding: 1.25rem 0 0.75rem;
+}
+
+.theme-gbtt .classboard-top .btn-row {
+  margin-top: 0;
 }
 
 .theme-gbtt .app-sections > .admin-tabs.app-section {
@@ -1647,5 +1659,157 @@
     background: transparent;
     border: none;
     border-radius: 0;
+  }
+}
+
+/* Working overlay — lock/unlock and other server actions */
+.working-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(10, 10, 10, 0.45);
+  backdrop-filter: blur(4px);
+}
+
+.working-overlay__card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  min-width: min(20rem, 90vw);
+  padding: 1.75rem 2rem;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+}
+
+.working-overlay__spinner {
+  width: 2.25rem;
+  height: 2.25rem;
+  border: 3px solid var(--line);
+  border-top-color: var(--ink);
+  border-radius: 50%;
+  animation: working-overlay-spin 0.75s linear infinite;
+}
+
+@keyframes working-overlay-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.working-overlay__message {
+  margin: 0;
+  font-size: 1rem;
+  text-align: center;
+  color: var(--ink);
+}
+
+/* Role call — current session, with previous/next for back-to-back or memory */
+.role-call-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 180;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: rgba(10, 10, 10, 0.45);
+  backdrop-filter: blur(4px);
+  padding: 0.75rem;
+}
+
+.role-call-overlay__card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  width: min(34rem, 100%);
+  max-height: min(92vh, 52rem);
+  overflow: auto;
+  padding: 1.15rem 1.2rem 1.35rem;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 0.85rem 0.85rem 0 0;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+  color: var(--ink);
+}
+
+.role-call-overlay__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.role-call-overlay__top h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.65rem;
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.role-call-overlay__nav {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.6rem;
+}
+
+.role-call-overlay__step {
+  min-height: 2.75rem;
+}
+
+.role-call-overlay__session {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.role-call-overlay__class {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+
+.role-call-overlay__session .hint,
+.role-call-overlay__hint {
+  margin: 0;
+}
+
+.role-call-overlay .link-button {
+  align-self: start;
+}
+
+.role-call-overlay .role-call-panel {
+  margin: 0.25rem 0 0;
+}
+
+.role-call-overlay .exercise-check {
+  padding: 0.7rem 0.75rem;
+  min-height: 2.75rem;
+  align-items: center;
+}
+
+.role-call-overlay .exercise-check input[type='checkbox'] {
+  width: 1.25rem;
+  height: 1.25rem;
+  min-width: 1.25rem;
+  min-height: 1.25rem;
+  max-width: 1.25rem;
+  max-height: 1.25rem;
+  margin: 0;
+}
+
+@media (min-width: 640px) {
+  .role-call-overlay {
+    align-items: center;
+    padding: 1.25rem;
+  }
+
+  .role-call-overlay__card {
+    border-radius: 0.75rem;
   }
 }

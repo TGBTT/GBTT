@@ -13,6 +13,7 @@ import {
   groupByWeekday,
   shiftWeekStart,
   subscribeLiveSessions,
+  subscribeMyWeekBookings,
   subscribeSessionRoster,
   subscribeWeeklyLocks,
   weekRangeLabel,
@@ -28,12 +29,31 @@ import type { RosterEntry, RosterStatus } from '@gbtt/shared/studio/fitnessStudi
 import { readCachedRoster, writeCachedRoster } from './rosterCache'
 export function useLiveSessions(weekStart: string = currentWeekStart()) {
   const [state, setState] = useState<LiveSessionsState>({ status: 'loading', occurrences: [] })
+  // The requested week can change a frame before the subscription does; never
+  // show the previous week's sessions as if they belonged to the new one.
+  const [dataWeek, setDataWeek] = useState<string | null>(null)
 
-  useEffect(() => subscribeLiveSessions(weekStart, setState), [weekStart])
+  useEffect(
+    () =>
+      subscribeLiveSessions(weekStart, (next) => {
+        setDataWeek(weekStart)
+        setState(next)
+      }),
+    [weekStart],
+  )
 
-  const byDay = useMemo(() => groupByWeekday(state.occurrences), [state.occurrences])
+  const ready = dataWeek === weekStart
+  const occurrences = ready ? state.occurrences : []
+  const byDay = useMemo(() => groupByWeekday(occurrences), [occurrences])
 
-  return { ...state, byDay, weekStart }
+  return {
+    ...state,
+    status: ready ? state.status : 'loading',
+    occurrences,
+    error: ready ? state.error : undefined,
+    byDay,
+    weekStart,
+  }
 }
 
 /**
@@ -169,6 +189,16 @@ export function useWeeklyLocks(enabled: boolean) {
   useEffect(() => subscribeWeeklyLocks(uid, setSlotIds), [uid])
 
   return slotIds
+}
+
+/** Session ids the signed-in member is booked into for the displayed week. */
+export function useMyWeekBookings(uid: string | null, sessionIds: string[]) {
+  const [bookedIds, setBookedIds] = useState<string[]>([])
+  const key = sessionIds.join(',')
+
+  useEffect(() => subscribeMyWeekBookings(uid, sessionIds, setBookedIds), [uid, key])
+
+  return bookedIds
 }
 
 /** The signed-in member's own record: preferences, terms, and any pending plan. */

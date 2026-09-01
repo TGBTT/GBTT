@@ -44,6 +44,8 @@ export interface ClassOccurrence {
   cancelled?: boolean
   /** Recurring timetable slot this session belongs to; the key weekly locks use. */
   slotId?: string
+  /** Season this session was generated for. */
+  seasonId?: string
   /**
    * Absolute start instant, ISO. What the transfer window is measured from, so
    * the UI can show a deadline instead of offering an action the server will

@@ -136,6 +136,11 @@ service cloud.firestore {
       match /weeklyLocks/{slotId} {
         allow read: if isOwner(uid) || isStaff();
         allow write: if isAdmin();
+
+        match /skippedWeeks/{weekStart} {
+          allow read: if isOwner(uid) || isStaff();
+          allow write: if false;
+        }
       }
 
       // The SEQUENCE counter behind a member's recurring calendar invite.

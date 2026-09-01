@@ -6,44 +6,53 @@
     <title>Golden Bay Team Training | Group fitness in Tākaka</title>
     <meta
       name="description"
-      content="GBTT — group workout classes with Tom at Rec Park Centre, Tākaka. Sweat, Strong, Mobility, Circuits, and Les Mills BodyBalance for all fitness levels."
+      content="Group fitness with Tom at Rec Park Centre, Tākaka, Golden Bay. Sweat, Strong, Circuits, Mobility, BodyBalance, kids and teens — all levels."
     />
+    <meta name="robots" content="index, follow, max-image-preview:large" />
     <meta name="theme-color" content="#0a0a0a" />
     <meta name="geo.region" content="NZ-TAS" />
     <meta name="geo.placename" content="Tākaka, Golden Bay, New Zealand" />
     <meta name="geo.position" content="-40.86996;172.81699" />
     <meta name="ICBM" content="-40.86996, 172.81699" />
     <!--
-      Fixed rather than per-route: this is a client-rendered SPA, so a crawler
-      that does not run scripts sees this same head on every URL. A canonical
-      pointing at the home page is the honest answer for the one indexable
-      document that actually gets served.
+      Home-page values in this file. The Pages assemble step copies this HTML
+      into nested folders for SPA deep links, then rewrites title/canonical/
+      descriptions on /contact/ so that URL is a real second page.
     -->
     <link rel="canonical" href="https://gbtt.co.nz/" />
-    <link rel="icon" href="favicon.ico" sizes="any" />
-    <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png" />
-    <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png" />
-    <link rel="apple-touch-icon" href="apple-touch-icon.png" />
-    <link rel="manifest" href="site.webmanifest" />
+    <!--
+      Base-absolute rather than a relative href: GitHub Pages copies this HTML
+      into nested folders for SPA deep links, so favicon.ico would 404 as
+      /contact/favicon.ico (and the same for /app/fitness/... routes).
+    -->
+    <link rel="icon" href="%BASE_URL%favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" sizes="32x32" href="%BASE_URL%favicon-32x32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="%BASE_URL%favicon-16x16.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="%BASE_URL%apple-touch-icon.png" />
+    <link rel="manifest" href="%BASE_URL%site.webmanifest" />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Golden Bay Team Training" />
     <meta property="og:locale" content="en_NZ" />
     <meta property="og:url" content="https://gbtt.co.nz/" />
-    <meta property="og:title" content="Golden Bay Team Training" />
+    <meta property="og:title" content="Golden Bay Team Training | Group fitness in Tākaka" />
     <meta
       property="og:description"
-      content="Group fitness at Rec Park Centre, Tākaka — all levels, kids and teens welcome."
+      content="Group fitness at Rec Park Centre, Tākaka, Golden Bay — all levels, kids and teens welcome."
     />
     <!-- Absolute: relative og:image paths are not resolved by most crawlers. -->
     <meta property="og:image" content="https://gbtt.co.nz/og-image.png" />
     <meta property="og:image:alt" content="Golden Bay Team Training — Fit for Life" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Golden Bay Team Training" />
+    <meta name="twitter:title" content="Golden Bay Team Training | Group fitness in Tākaka" />
     <meta
       name="twitter:description"
-      content="Group fitness at Rec Park Centre, Tākaka — all levels, kids and teens welcome."
+      content="Group fitness at Rec Park Centre, Tākaka, Golden Bay — all levels, kids and teens welcome."
     />
     <meta name="twitter:image" content="https://gbtt.co.nz/og-image.png" />
+    <meta name="twitter:image:alt" content="Golden Bay Team Training — Fit for Life" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -58,8 +67,7 @@
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
-        "@type": "HealthAndBeautyBusiness",
-        "additionalType": "https://schema.org/ExerciseGym",
+        "@type": "ExerciseGym",
         "@id": "https://gbtt.co.nz/#business",
         "name": "Golden Bay Team Training",
         "alternateName": "GBTT",
@@ -68,8 +76,13 @@
         "image": "https://gbtt.co.nz/og-image.png",
         "logo": "https://gbtt.co.nz/android-chrome-512x512.png",
         "description": "Group workout classes with Tom at Rec Park Centre, Tākaka. Sweat, Strong, Circuits, Mobility, Womens Fit, Youth Fit, Kids Fit, Sculpt & Strength and Les Mills BodyBalance, scaled for all fitness levels.",
-        "telephone": "+64 21 089 28057",
+        "telephone": "+642108928057",
         "email": "Tom.GBTT@gmail.com",
+        "founder": {
+          "@type": "Person",
+          "name": "Tom",
+          "jobTitle": "Coach & founder"
+        },
         "sameAs": [
           "https://www.facebook.com/people/Golden-Bay-Team-Training/100077092552576/"
         ],
@@ -86,17 +99,11 @@
           "latitude": -40.86996,
           "longitude": 172.81699
         },
+        "hasMap": "https://www.google.com/maps/search/?api=1&query=-40.86996,172.81699",
         "areaServed": {
           "@type": "Place",
           "name": "Golden Bay, New Zealand"
-        },
-        "openingHoursSpecification": [
-          {
-            "@type": "OpeningHoursSpecification",
-            "dayOfWeek": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
-            "description": "Class times vary by term — see the timetable on the home page."
-          }
-        ]
+        }
       }
     </script>
   </head>

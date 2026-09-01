@@ -39,7 +39,7 @@ export function InAppExitBar() {
     <header className="site-header site-header--in-app">
       <div className="site-header__inner">
         <a className="app-back" href={marketingHomeHref()}>
-          ← GBTT apps
+          ← GBTT
         </a>
         <InAppLogoutButton />
       </div>

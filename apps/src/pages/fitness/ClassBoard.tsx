@@ -23,6 +23,7 @@ import {
   type ReminderKind,
 } from '@gbtt/shared/studio/firebase/liveReminders'
 import { StudioSignIn } from '../../components/StudioSignIn'
+import { WorkingOverlay, useWorkingOverlay } from '../../components/WorkingOverlay'
 import {
   createSessionSeries,
   deactivateTimetableSlot,
@@ -63,6 +64,8 @@ import {
   useLiveSiteContent,
 } from '../../hooks/useLiveCatalog'
 import { AppOutsideShell } from '../../components/AppChrome'
+import { RoleCallOverlay } from '../../components/RoleCallOverlay'
+import { RoleCallRoster } from '../../components/RoleCallRoster'
 import { WeekSessionCalendar } from '../../components/WeekSessionCalendar'
 import {
   useLiveSessions,
@@ -193,6 +196,7 @@ export default function ClassBoard() {
   const staff = role === 'admin' || role === 'trainer'
 
   const [tab, setTab] = useState<Tab>('schedule')
+  const [roleCallOpen, setRoleCallOpen] = useState(false)
   const [selectedTypeId, setSelectedTypeId] = useState('')
   const [selectedOccId, setSelectedOccId] = useState<string | null>(null)
   const [newExercise, setNewExercise] = useState('')
@@ -355,6 +359,8 @@ export default function ClassBoard() {
   const [actionError, setActionError] = useState<string | null>(null)
   const [actionNote, setActionNote] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const { run: runWithOverlay, overlayProps, busy: overlayBusy } = useWorkingOverlay()
+  const actionBusy = busy || overlayBusy
 
   // A session belongs to one week, so a selection made before stepping weeks
   // would leave the detail panel and roll call showing a class that is no
@@ -647,19 +653,22 @@ export default function ClassBoard() {
     const type = classTypeById(slot.classTypeId)
     setActionError(null)
     setActionNote(null)
-    setBusy(true)
-    const { weeks, seasonName, error } = await populateSlotAcrossWeeks(
-      {
-        classTypeId: slot.classTypeId,
-        className: type?.name ?? slot.classTypeId,
-        cap: type?.cap ?? 0,
-        dayLabel: slot.dayLabel,
-        time: slot.time,
-        weekStart: live.weekStart,
-      },
-      selectedSeason,
+    const { weeks, seasonName, error } = await runWithOverlay(
+      () =>
+        populateSlotAcrossWeeks(
+          {
+            classTypeId: slot.classTypeId,
+            className: type?.name ?? slot.classTypeId,
+            cap: type?.cap ?? 0,
+            dayLabel: slot.dayLabel,
+            time: slot.time,
+            weekStart: live.weekStart,
+          },
+          selectedSeason,
+        ),
+      { working: 'Filling sessions across the season…', success: 'Sessions added!' },
+      (r) => r.weeks === 0 && !!r.error,
     )
-    setBusy(false)
     if (error && weeks === 0) {
       setActionError(error)
       return
@@ -754,9 +763,9 @@ export default function ClassBoard() {
           </p>
         </div>
         <div className="btn-row">
-          <Link className="btn ghost" to="/fitness/studioflow">
-            Member app
-          </Link>
+          <button type="button" className="btn primary" onClick={() => setRoleCallOpen(true)}>
+            Role call
+          </button>
           <button
             type="button"
             className="btn ghost"
@@ -847,72 +856,35 @@ export default function ClassBoard() {
                         .join(', ')
                     : 'None yet'}
                 </p>
-                <div className="role-call-panel">
-                  <h3>Role-call</h3>
-                  {actionError ? <p className="form-error">{actionError}</p> : null}
-                  {liveRoster.status === 'loading' ? (
-                    <p className="hint">Loading roster…</p>
-                  ) : null}
-                  {liveRoster.fromCache ? (
-                    <p className="hint">Showing the last roster while we check for changes…</p>
-                  ) : null}
-                  {liveRoster.status === 'ready' && !liveRoster.roster.length ? (
-                    <p className="hint">Nobody booked into this session yet.</p>
-                  ) : null}
-                  <ul className="role-call-list">
-                    {selectedOcc.roster.map((r) => (
-                      <li key={`${r.memberId ?? r.displayName}`}>
-                        <label className={`exercise-check${r.status === 'attended' ? ' on' : ''}`}>
-                          <input
-                            type="checkbox"
-                            checked={r.status === 'attended'}
-                            onChange={(e) => {
-                              if (!r.memberId) return
-                              const next = e.target.checked ? 'attended' : 'booked'
-                              setActionError(null)
-                              markAttendance(r.memberId, next).then((err) => setActionError(err))
-                            }}
-                          />
-                          <span>
-                            {r.displayName}
-                            {r.kind === 'guest' ? ' *' : ''}
-                            {r.bookedBy === 'admin' ? ' (admin added)' : ''}
-                          </span>
-                        </label>
-                      </li>
-                    ))}
-                  </ul>
-                  <div className="add-exercise-row">
-                    <select
-                      value={addMemberId}
-                      onChange={(e) => setAddMemberId(e.target.value)}
-                      aria-label="Add member to session"
-                    >
-                      <option value="">Add client to session…</option>
-                      {users
-                        .filter((u) => !selectedOcc.roster.some((r) => r.memberId === u.uid))
-                        .map((u) => (
-                          <option key={u.uid} value={u.uid}>
-                            {u.name}
-                          </option>
-                        ))}
-                    </select>
-                    <button
-                      type="button"
-                      className="btn ghost"
-                      disabled={!addMemberId}
-                      onClick={() => {
-                        setActionError(null)
-                        studioAddMemberToSession(selectedOcc.id, addMemberId).then((err) => {
-                          setActionError(err)
-                          if (!err) setAddMemberId('')
-                        })
-                      }}
-                    >
-                      Add
-                    </button>
-                  </div>
-                </div>
+                <RoleCallRoster
+                  heading="Role-call"
+                  roster={selectedOcc.roster}
+                  rosterStatus={liveRoster.status}
+                  fromCache={liveRoster.fromCache}
+                  error={actionError}
+                  members={users}
+                  addMemberId={addMemberId}
+                  onAddMemberIdChange={setAddMemberId}
+                  onMarkAttendance={(memberId, attended) => {
+                    setActionError(null)
+                    void markAttendance(memberId, attended ? 'attended' : 'booked').then((err) =>
+                      setActionError(err),
+                    )
+                  }}
+                  onAddMember={() => {
+                    void (async () => {
+                      setActionError(null)
+                      const memberId = addMemberId
+                      const err = await runWithOverlay(
+                        () => studioAddMemberToSession(selectedOcc.id, memberId),
+                        { working: 'Adding client to session…', success: 'Client added!' },
+                      )
+                      setActionError(err)
+                      if (!err) setAddMemberId('')
+                    })()
+                  }}
+                  addBusy={actionBusy}
+                />
                 <label className="field">
                   Exercise preview for members
                   <select
@@ -1960,6 +1932,14 @@ export default function ClassBoard() {
         </section>
       )}
       </div>
+      {roleCallOpen ? (
+        <RoleCallOverlay
+          members={users}
+          classNames={classNames}
+          onClose={() => setRoleCallOpen(false)}
+        />
+      ) : null}
+      <WorkingOverlay {...overlayProps} />
     </div>
   )
 }

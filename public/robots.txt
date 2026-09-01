@@ -1,8 +1,12 @@
 User-agent: *
 Allow: /
 
-# The booking app and the sign-in form are behind an account and render
-# nothing useful to a crawler, so they are kept out of the index.
+# Member/trainer app. Prefix is /app/ (trailing slash) so /apps, the
+# homepage booking section, stays crawlable.
 Disallow: /app/
+
+# Search and AI citation crawlers (Googlebot, OAI-SearchBot, Claude-SearchBot,
+# PerplexityBot, and others) inherit Allow: / above. Training-bot opt-out is
+# not applied; the marketing pages are public.
 
 Sitemap: https://gbtt.co.nz/sitemap.xml
