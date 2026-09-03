@@ -9,7 +9,7 @@ import {
 } from 'firebase-admin/firestore'
 import { defineSecret, defineString } from 'firebase-functions/params'
 import { onDocumentWritten } from 'firebase-functions/v2/firestore'
-import { onCall, HttpsError } from 'firebase-functions/v2/https'
+import { onCall, HttpsError, type CallableOptions } from 'firebase-functions/v2/https'
 import { setGlobalOptions } from 'firebase-functions/v2/options'
 import {
   commitmentFromSessions,
@@ -50,6 +50,26 @@ function passwordActionSettings() {
 }
 
 setGlobalOptions({ region: 'australia-southeast1' })
+
+/**
+ * Browser callables need an explicit public invoker and CORS list.
+ *
+ * Gen2 functions sit behind Cloud Run. A 403 (IAM) or 500 (instance crash)
+ * on OPTIONS has no `Access-Control-Allow-Origin`, which Chrome reports as a
+ * CORS failure even when the real problem is elsewhere. `invoker: 'public'`
+ * is Cloud Run IAM — Firebase Auth is still checked in the handler.
+ */
+const CALLABLE_ORIGINS = [
+  'https://gbtt.co.nz',
+  'https://www.gbtt.co.nz',
+  'http://localhost:5173',
+  'http://localhost:4173',
+  'http://127.0.0.1:5173',
+]
+
+function callableOptions(extra: CallableOptions = {}): CallableOptions {
+  return { cors: CALLABLE_ORIGINS, invoker: 'public', ...extra }
+}
 
 type AppsScriptResult = { ok: boolean; error?: string; data?: unknown }
 
@@ -298,7 +318,7 @@ async function sendInviteEmail(invite: {
 
 /** Admin creates a member Auth user + Firestore profile; sends invite / password reset. */
 export const createMemberAccount = onCall(
-  { secrets: [webhookSecret] },
+  callableOptions({ secrets: [webhookSecret] }),
   async (request) => {
     requireAdmin(request)
 
@@ -366,7 +386,7 @@ export const createMemberAccount = onCall(
 )
 
 /** Re-issues a set-password link and re-sends the invite email to an existing member. */
-export const resendInvite = onCall({ secrets: [webhookSecret] }, async (request) => {
+export const resendInvite = onCall(callableOptions({ secrets: [webhookSecret] }), async (request) => {
   requireAdmin(request)
 
   const email = String(request.data?.email ?? '')
@@ -413,7 +433,7 @@ export const resendInvite = onCall({ secrets: [webhookSecret] }, async (request)
 })
 
 /** Admin triggers Firebase password reset email for a member. */
-export const adminResetPassword = onCall(async (request) => {
+export const adminResetPassword = onCall(callableOptions(), async (request) => {
   requireAdmin(request)
 
   const email = String(request.data?.email ?? '')
@@ -701,9 +721,11 @@ function readCalendarLinks(data: Record<string, unknown> | undefined): CalendarS
  * shared publicly in Google Calendar's settings.
  *
  * A stale cache is served in preference to an error, because a link that was
- * right yesterday is still more use than a failure message.
+ * right yesterday is still more use than a failure message. A miss returns
+ * empty links rather than throwing: login fetches this on every client load
+ * and a hard failure only produces console noise.
  */
-export const getCalendarSubscribeUrl = onCall({ secrets: [webhookSecret] }, async (request) => {
+export const getCalendarSubscribeUrl = onCall(callableOptions({ secrets: [webhookSecret] }), async (request) => {
   requireAuth(request)
 
   const cacheRef = db.doc('meta/calendarSubscribe')
@@ -723,15 +745,13 @@ export const getCalendarSubscribeUrl = onCall({ secrets: [webhookSecret] }, asyn
 
   if (!result.ok) {
     if (cachedLinks.icsUrl) return { ok: true, ...cachedLinks }
-    throw new HttpsError(
-      'unavailable',
-      result.error ?? 'The shared calendar is not configured yet.',
-    )
+    return { ok: false, ...readCalendarLinks(undefined) }
   }
 
   const links = readCalendarLinks(result.data as Record<string, unknown> | undefined)
   if (!links.icsUrl) {
-    throw new HttpsError('unavailable', 'The shared calendar returned no subscribe address.')
+    if (cachedLinks.icsUrl) return { ok: true, ...cachedLinks }
+    return { ok: false, ...readCalendarLinks(undefined) }
   }
 
   await cacheRef.set({ ...links, fetchedAt: FieldValue.serverTimestamp() }, { merge: true })
@@ -740,7 +760,7 @@ export const getCalendarSubscribeUrl = onCall({ secrets: [webhookSecret] }, asyn
 })
 
 /** Admin callable — compute owed amount for a billing period from attended roster entries. */
-export const calculateBillingPeriod = onCall(async (request) => {
+export const calculateBillingPeriod = onCall(callableOptions(), async (request) => {
   requireAdmin(request)
 
   const uid = String(request.data?.uid ?? '').trim()
@@ -1142,7 +1162,7 @@ async function fanWeeklyLocksIntoSessions(
 // A year-long season is hundreds of session writes, a batched calendar sync and
 // a seat for every member holding a slot, so the default minute is not enough.
 // The secret is for the calendar and invite calls generation now makes.
-const GENERATE_OPTIONS = { secrets: [webhookSecret], timeoutSeconds: 540 }
+const GENERATE_OPTIONS = callableOptions({ secrets: [webhookSecret], timeoutSeconds: 540 })
 
 export const generateSeasonSessions = onCall(GENERATE_OPTIONS, async (request) => {
   const authCtx = requireAdmin(request)
@@ -1303,7 +1323,7 @@ export const generateSeasonSessions = onCall(GENERATE_OPTIONS, async (request) =
  * upfront season, and it is also what makes a holiday break visible as a lower
  * total rather than as an unexplained discount later.
  */
-export const projectSeasonInvoice = onCall(async (request) => {
+export const projectSeasonInvoice = onCall(callableOptions(), async (request) => {
   const authCtx = requireAuth(request)
 
   const seasonId = String(request.data?.seasonId ?? '').trim()
@@ -1396,7 +1416,7 @@ export const projectSeasonInvoice = onCall(async (request) => {
  * this callable is the only way the status moves, which keeps an auditable
  * trail of who cleared what and when.
  */
-export const markBillingPeriodPaid = onCall(async (request) => {
+export const markBillingPeriodPaid = onCall(callableOptions(), async (request) => {
   requireAdmin(request)
 
   const uid = String(request.data?.uid ?? '').trim()
@@ -1451,7 +1471,7 @@ export const markBillingPeriodPaid = onCall(async (request) => {
  * The outbox row is written only after Apps Script confirms the send, so the
  * history cannot claim a delivery that did not happen.
  */
-export const sendBroadcast = onCall({ secrets: [webhookSecret] }, async (request) => {
+export const sendBroadcast = onCall(callableOptions({ secrets: [webhookSecret] }), async (request) => {
   requireAdmin(request)
 
   const subject = String(request.data?.subject ?? '').trim()
@@ -1499,7 +1519,7 @@ export const sendBroadcast = onCall({ secrets: [webhookSecret] }, async (request
   return { ok: true, recipientCount, testMode }
 })
 
-export const createGuestPass = onCall({ secrets: [webhookSecret] }, async (request) => {
+export const createGuestPass = onCall(callableOptions({ secrets: [webhookSecret] }), async (request) => {
   requireAdmin(request)
 
   const sessionId = String(request.data?.sessionId ?? '').trim()
@@ -1739,7 +1759,7 @@ async function dropInRateCents(): Promise<number> {
  * Capacity is read inside the transaction so two people racing for the last
  * seat cannot both win.
  */
-export const bookSession = onCall(async (request) => {
+export const bookSession = onCall(callableOptions(), async (request) => {
   const authCtx = requireAuth(request)
   const sessionId = String(request.data?.sessionId ?? '').trim()
   if (!sessionId) {
@@ -1829,7 +1849,7 @@ export const bookSession = onCall(async (request) => {
  * Inside it the seat is non-refundable, matching the terms members accept on
  * join, and only an admin can grant an exception.
  */
-export const cancelBooking = onCall(async (request) => {
+export const cancelBooking = onCall(callableOptions(), async (request) => {
   const authCtx = requireAuth(request)
   const sessionId = String(request.data?.sessionId ?? '').trim()
   if (!sessionId) {
@@ -1879,7 +1899,7 @@ export const cancelBooking = onCall(async (request) => {
  * `attendanceSummary.totalAttended` on the member is adjusted in the same
  * transaction so it cannot drift from the roster it summarizes.
  */
-export const markAttendance = onCall(async (request) => {
+export const markAttendance = onCall(callableOptions(), async (request) => {
   const authCtx = requireStaff(request)
 
   const sessionId = String(request.data?.sessionId ?? '').trim()
@@ -1907,6 +1927,10 @@ export const markAttendance = onCall(async (request) => {
       return
     }
 
+    const delta = (status === 'attended' ? 1 : 0) - (previous === 'attended' ? 1 : 0)
+    // All reads must happen before any write or Firestore aborts with 500.
+    const userSnap = delta !== 0 ? await tx.get(userRef) : null
+
     tx.update(entryRef, {
       status,
       attendedAt: status === 'attended' ? FieldValue.serverTimestamp() : FieldValue.delete(),
@@ -1914,16 +1938,12 @@ export const markAttendance = onCall(async (request) => {
       markedAt: FieldValue.serverTimestamp(),
     })
 
-    const delta = (status === 'attended' ? 1 : 0) - (previous === 'attended' ? 1 : 0)
-    if (delta !== 0) {
-      const userSnap = await tx.get(userRef)
-      if (userSnap.exists) {
-        tx.set(
-          userRef,
-          { attendanceSummary: { totalAttended: FieldValue.increment(delta) } },
-          { merge: true },
-        )
-      }
+    if (delta !== 0 && userSnap?.exists) {
+      tx.set(
+        userRef,
+        { attendanceSummary: { totalAttended: FieldValue.increment(delta) } },
+        { merge: true },
+      )
     }
   })
 
@@ -2014,7 +2034,7 @@ function currentWeekStartKey(now: Date = new Date()): string {
  * Shares bookSession's capacity check so the admin path cannot overfill a
  * class that the member-facing path would have refused.
  */
-export const addMemberToSession = onCall(async (request) => {
+export const addMemberToSession = onCall(callableOptions(), async (request) => {
   requireStaff(request)
 
   const sessionId = String(request.data?.sessionId ?? '').trim()
@@ -2109,7 +2129,7 @@ async function isWeekSkippedForSlot(
  * Lock a single included session for one week — uses plan allowance without
  * creating a recurring weekly lock.
  */
-export const lockSessionWeek = onCall({ secrets: [webhookSecret] }, async (request) => {
+export const lockSessionWeek = onCall(callableOptions({ secrets: [webhookSecret] }), async (request) => {
   const authCtx = requireAuth(request)
   const sessionId = String(request.data?.sessionId ?? '').trim()
   if (!sessionId) {
@@ -2200,7 +2220,7 @@ export const lockSessionWeek = onCall({ secrets: [webhookSecret] }, async (reque
  * Release one week's seat. When the session comes from a season lock, record a
  * skip so fan-out does not re-book it.
  */
-export const releaseSessionWeek = onCall({ secrets: [webhookSecret] }, async (request) => {
+export const releaseSessionWeek = onCall(callableOptions({ secrets: [webhookSecret] }), async (request) => {
   const authCtx = requireAuth(request)
   const sessionId = String(request.data?.sessionId ?? '').trim()
   if (!sessionId) {
@@ -2364,16 +2384,20 @@ async function refreshSlotSeries(
   slotId: string,
   profile: Record<string, unknown>,
 ): Promise<void> {
-  const held = await memberSlotOccurrences(uid, slotId)
-  if (!held.length) return
+  try {
+    const held = await memberSlotOccurrences(uid, slotId)
+    if (!held.length) return
 
-  await sendSlotCalendarEmail('sendSlotInvite', {
-    slotId,
-    uid,
-    profile,
-    session: held[0].session,
-    occurrences: held.map((h) => h.startsAt),
-  })
+    await sendSlotCalendarEmail('sendSlotInvite', {
+      slotId,
+      uid,
+      profile,
+      session: held[0].session,
+      occurrences: held.map((h) => h.startsAt),
+    })
+  } catch (err) {
+    console.error('refreshSlotSeries failed', uid, slotId, err)
+  }
 }
 
 /**
@@ -2386,7 +2410,7 @@ async function refreshSlotSeries(
  * reported back rather than failing the whole lock, since the remaining weeks
  * are still worth holding.
  */
-export const lockWeeklySlot = onCall({ secrets: [webhookSecret] }, async (request) => {
+export const lockWeeklySlot = onCall(callableOptions({ secrets: [webhookSecret] }), async (request) => {
   const authCtx = requireAuth(request)
   const slotId = String(request.data?.slotId ?? '').trim()
   const requestedSeasonId = String(request.data?.seasonId ?? '').trim()
@@ -2516,7 +2540,7 @@ export const lockWeeklySlot = onCall({ secrets: [webhookSecret] }, async (reques
  * the member would attend twice on one included session. The slot can be
  * changed once the week rolls over.
  */
-export const unlockWeeklySlot = onCall({ secrets: [webhookSecret] }, async (request) => {
+export const unlockWeeklySlot = onCall(callableOptions({ secrets: [webhookSecret] }), async (request) => {
   const authCtx = requireAuth(request)
   const slotId = String(request.data?.slotId ?? '').trim()
   if (!slotId) {
@@ -2628,7 +2652,7 @@ export const unlockWeeklySlot = onCall({ secrets: [webhookSecret] }, async (requ
  *
  * Rules forbid client deletes of sessions so this invariant cannot be bypassed.
  */
-export const removeSession = onCall(async (request) => {
+export const removeSession = onCall(callableOptions(), async (request) => {
   // Trainers cover the timetable when Tom is away, which is precisely when a
   // session needs cancelling, so this is staff rather than admin. Removal is
   // still not destructive: a session with anyone on the roster is archived,
@@ -2688,7 +2712,7 @@ export const removeSession = onCall(async (request) => {
 })
 
 /** Admin approves a pending self-registration, unlocking booking. */
-export const approveMember = onCall(async (request) => {
+export const approveMember = onCall(callableOptions(), async (request) => {
   requireAdmin(request)
 
   const uid = String(request.data?.uid ?? '').trim()
@@ -2733,7 +2757,7 @@ export const approveMember = onCall(async (request) => {
  * "trainer" while the token says "member" would show staff screens that every
  * read behind them then denies.
  */
-export const setMemberRole = onCall(async (request) => {
+export const setMemberRole = onCall(callableOptions(), async (request) => {
   requireAdmin(request)
 
   const uid = String(request.data?.uid ?? '').trim()
@@ -2775,7 +2799,7 @@ export const setMemberRole = onCall(async (request) => {
  * priced, so Firestore rules keep members out of it. The request is recorded
  * for Tom to action and the member's current plan keeps running until he does.
  */
-export const requestPlanChange = onCall({ secrets: [webhookSecret] }, async (request) => {
+export const requestPlanChange = onCall(callableOptions({ secrets: [webhookSecret] }), async (request) => {
   const { uid } = requireAuth(request)
 
   const planId = String(request.data?.planId ?? '').trim()
@@ -2845,7 +2869,7 @@ export const requestPlanChange = onCall({ secrets: [webhookSecret] }, async (req
 })
 
 /** Admin resolves an open plan change: applies the new plan, or declines it. */
-export const resolvePlanChange = onCall(async (request) => {
+export const resolvePlanChange = onCall(callableOptions(), async (request) => {
   requireAdmin(request)
 
   const uid = String(request.data?.uid ?? '').trim()
