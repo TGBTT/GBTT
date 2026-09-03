@@ -465,7 +465,7 @@ automatically.
    | A | `@` | `185.199.109.153` |
    | A | `@` | `185.199.110.153` |
    | A | `@` | `185.199.111.153` |
-   | CNAME | `www` | `agent5479.github.io` |
+   | CNAME | `www` | `TGBTT.github.io` |
 
 3. Repo Settings → Pages → Custom domain `gbtt.co.nz` → Save → tick **Enforce HTTPS** (after the certificate provisions, can take up to an hour).
 4. Workflow already uses `VITE_BASE=/` and `VITE_APP_BASE=/app/` — correct for a custom apex domain.
