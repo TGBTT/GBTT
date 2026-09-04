@@ -114,6 +114,9 @@ $secrets = [ordered]@{
 
 if ($FormEndpoint) {
   $secrets['VITE_FORM_ENDPOINT'] = $FormEndpoint
+  # Same URL under the Functions param name, so a GitHub UI that only lists
+  # FORM_ENDPOINT still feeds the Pages build (pages.yml accepts either).
+  $secrets['FORM_ENDPOINT'] = $FormEndpoint
 }
 
 # --- Write them to GitHub ----------------------------------------------------

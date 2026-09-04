@@ -40,9 +40,19 @@ Editor:
 
 https://script.google.com/home/projects/15aRixbYkB6npJdJ_p-ptIKqR2xjJttQp22zHaAlvxUbCFjP8SqzeRiwV/edit
 
-Deploy → Manage deployments → the Web app `/exec` URL. That value is
-`VITE_FORM_ENDPOINT` (GitHub) and `FORM_ENDPOINT` (Cloud Functions). Do not
-invent it from the script id, and do not set it to `-`.
+Deploy → Manage deployments → the Web app `/exec` URL. That value is stored
+under **two names**. They are the same URL, not two different secrets:
+
+| Name | Where | Used by |
+|------|--------|---------|
+| `VITE_FORM_ENDPOINT` | GitHub Actions secret | Pages / Vite client (contact form) |
+| `FORM_ENDPOINT` | Firebase Functions param, and optionally GitHub | Cloud Functions → Apps Script |
+
+Pages now accepts either GitHub name. If GitHub only has `FORM_ENDPOINT`, that
+is enough for the client build. It is **not** enough for the cert error: that
+comes from the four `VITE_FIREBASE_*` secrets being `-`.
+
+Do not invent the URL from the script id, and do not set either name to `-`.
 
 ## Apps Script properties and the webhook secret
 
@@ -103,9 +113,9 @@ Then set the form endpoint, substituting the real `/exec` URL:
 ./scripts/sync-github-secrets.ps1 -Repo TGBTT/GBTT -FormEndpoint "https://script.google.com/macros/s/PASTE_DEPLOYMENT_ID/exec"
 ```
 
-If you are unsure of the URL, list the old repo’s secret *names* (values are
-not shown) and copy `VITE_FORM_ENDPOINT` from the GitHub UI, or open the Apps
-Script project → Deploy → Manage deployments.
+If you are unsure of the URL, copy it from GitHub secret `FORM_ENDPOINT` or
+`VITE_FORM_ENDPOINT` (same `/exec` URL), or from Apps Script → Deploy →
+Manage deployments. Pass it as `-FormEndpoint` so both GitHub names get set.
 
 Do not create a GitHub secret whose value is `-`. Vite treats that as
 configured and the cert error comes back.
