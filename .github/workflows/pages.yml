@@ -43,6 +43,31 @@ jobs:
           fi
           test -f public/images/classes/sweat/card-480.jpg
 
+      - name: Reject placeholder Firebase secrets
+        env:
+          VITE_FIREBASE_API_KEY: ${{ secrets.VITE_FIREBASE_API_KEY }}
+          VITE_FIREBASE_AUTH_DOMAIN: ${{ secrets.VITE_FIREBASE_AUTH_DOMAIN }}
+          VITE_FIREBASE_PROJECT_ID: ${{ secrets.VITE_FIREBASE_PROJECT_ID }}
+          VITE_FIREBASE_APP_ID: ${{ secrets.VITE_FIREBASE_APP_ID }}
+          VITE_FORM_ENDPOINT: ${{ secrets.VITE_FORM_ENDPOINT }}
+        run: |
+          set -euo pipefail
+          fail=0
+          for var in VITE_FIREBASE_API_KEY VITE_FIREBASE_AUTH_DOMAIN VITE_FIREBASE_PROJECT_ID VITE_FIREBASE_APP_ID; do
+            val="${!var}"
+            if [ -z "$val" ] || [ "$val" = "-" ]; then
+              echo "::error::$var is missing or a placeholder. Run scripts/sync-github-secrets.ps1 -Repo TGBTT/GBTT"
+              fail=1
+            fi
+          done
+          if [ "${VITE_FORM_ENDPOINT:-}" = "-" ]; then
+            echo "::error::VITE_FORM_ENDPOINT is a placeholder, not the Apps Script URL."
+            fail=1
+          fi
+          if [ "$fail" -eq 1 ]; then
+            exit 1
+          fi
+
       - name: Build marketing site
         env:
           VITE_BASE: /

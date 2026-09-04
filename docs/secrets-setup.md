@@ -15,7 +15,7 @@ Firebase project: **`gbtt-c1130`**
 | App reads timetable/attendance from Firestore | done — code committed, never yet run against live data |
 | Blaze plan + Cloud Functions deployed | done — all 17 functions live in `australia-southeast1` |
 | Apps Script deployed → `VITE_FORM_ENDPOINT` | done — signed request verified end to end |
-| GitHub repository secrets | done — all five set |
+| GitHub repository secrets | **redo on TGBTT/GBTT** — Pages built with placeholder `-` values after the repo move |
 | Timetable seeded into Firestore | **todo** — `functions/scripts/seed-timetable.mjs` |
 | Email/Password sign-in enabled | **todo** — console only; the only sign-in method |
 | First admin custom claim | **todo** — `functions/scripts/set-admin-claim.mjs` |
@@ -216,14 +216,21 @@ firebase deploy --only firestore:rules,firestore:indexes
 
 ## 2. GitHub repository secrets
 
+After the move to [`TGBTT/GBTT`](https://github.com/TGBTT/GBTT), an Admin must re-run the
+sync against that repo. Step-by-step for a Cursor session with Admin access:
+[`docs/tgbtt-pages-secrets.md`](tgbtt-pages-secrets.md).
+
 There are exactly **five**. Set them with the helper script rather than by hand — it reads the
 Firebase values live from the project, so they cannot drift from what is deployed:
 
 ```powershell
 gh auth login          # once
-./scripts/sync-github-secrets.ps1
-./scripts/sync-github-secrets.ps1 -FormEndpoint "https://script.google.com/macros/s/.../exec"
+./scripts/sync-github-secrets.ps1 -Repo TGBTT/GBTT
+./scripts/sync-github-secrets.ps1 -Repo TGBTT/GBTT -FormEndpoint "https://script.google.com/macros/s/.../exec"
 ```
+
+A literal `-` in any of these secrets is not “unset” — Vite still inlines it, the app thinks
+Firebase is configured, and every callable hits a hostname whose certificate does not match.
 
 Or manually via Repo → Settings → Secrets and variables → Actions → **Repository secrets**:
 

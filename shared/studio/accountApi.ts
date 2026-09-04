@@ -5,7 +5,8 @@ export const FORM_ENDPOINT =
   'https://script.google.com/macros/s/YOUR_DEPLOYMENT_ID/exec'
 
 export function formEndpointConfigured(): boolean {
-  return Boolean(FORM_ENDPOINT) && !FORM_ENDPOINT.includes('YOUR_DEPLOYMENT_ID')
+  if (!FORM_ENDPOINT || FORM_ENDPOINT === '-') return false
+  return !FORM_ENDPOINT.includes('YOUR_DEPLOYMENT_ID')
 }
 
 /*
