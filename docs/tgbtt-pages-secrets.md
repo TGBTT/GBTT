@@ -29,10 +29,48 @@ public JS bundle. Having them on this machine for the duration of the script is
 expected. Firestore rules are what protect the data, not secrecy of the API
 key. Still: do not commit them, and do not write them into this document.
 
-`VITE_FORM_ENDPOINT` is the Apps Script `/exec` URL. It is more sensitive than
-the Firebase web keys. Read it from the previous repo’s Actions secrets
-(`agent5479/GBTT`) or from the current Apps Script deployment — do not invent
-it, and do not set it to `-`.
+`VITE_FORM_ENDPOINT` is the Apps Script `/exec` URL. The **script id** is not
+that URL. Open the project, then copy the web-app deployment URL.
+
+Script id:
+
+`15aRixbYkB6npJdJ_p-ptIKqR2xjJttQp22zHaAlvxUbCFjP8SqzeRiwV`
+
+Editor:
+
+https://script.google.com/home/projects/15aRixbYkB6npJdJ_p-ptIKqR2xjJttQp22zHaAlvxUbCFjP8SqzeRiwV/edit
+
+Deploy → Manage deployments → the Web app `/exec` URL. That value is
+`VITE_FORM_ENDPOINT` (GitHub) and `FORM_ENDPOINT` (Cloud Functions). Do not
+invent it from the script id, and do not set it to `-`.
+
+## Apps Script properties and the webhook secret
+
+Set these on the script project (Project settings → Script properties). They
+are not GitHub Pages secrets.
+
+| Property | Value |
+|----------|--------|
+| `CALENDAR_ID` | `d33869728efbe6bcbb6639433e96141db8a89b6919e1f4b7169f9c2cbbd93912@group.calendar.google.com` |
+| `FUNCTIONS_WEBHOOK_SECRET` | The shared webhook string from the operator chat — **do not write it into this file or commit it** |
+
+The same webhook string must also be the Firebase secret:
+
+```powershell
+firebase functions:secrets:set FUNCTIONS_WEBHOOK_SECRET --project gbtt-c1130
+```
+
+Paste when prompted, then redeploy functions so they pick it up:
+
+```powershell
+firebase deploy --only functions --project gbtt-c1130
+```
+
+Also set the functions param to the same `/exec` URL you put in GitHub:
+
+```powershell
+firebase functions:params:set FORM_ENDPOINT "https://script.google.com/macros/s/PASTE_DEPLOYMENT_ID/exec" --project gbtt-c1130
+```
 
 ## Prerequisites
 
