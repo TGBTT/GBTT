@@ -286,6 +286,15 @@ Copy examples and fill values (never commit real secrets):
    - Who has access: **Anyone**
 5. Copy the deployment URL → `VITE_FORM_ENDPOINT` (GitHub Secret) and `FORM_ENDPOINT` (Functions).
 
+### Shared calendar ops checklist (Tom — do not commit secrets)
+
+1. Set Apps Script property **`CALENDAR_ID`** to the ID in the table above.
+2. Script owner must have **Make changes to events** on that calendar (not view-only).
+3. Authorize the **Calendar** scope on first `CalendarApp` run (trigger once from the editor).
+4. Make the calendar **available to public** so ICS / embed subscribe URLs work for members.
+5. Confirm **`FORM_ENDPOINT` + `FUNCTIONS_WEBHOOK_SECRET`** match between Firebase and Apps Script.
+6. Confirm Pages / Firebase client secrets are **real values**, not a literal `-` (that yields hosts like `australia-southeast1--.cloudfunctions.net/...` and TLS failures).
+
 > **The activation key is gone.** Firebase email verification replaced it, and
 > the `activation` action, its `ACTIVATION_KEY` property and the matching
 > `VITE_ACTIVATION_KEY` have been deleted from `Code.gs` and the env examples.
@@ -502,6 +511,22 @@ curl -X POST "$FORM_ENDPOINT" \
 ```
 
 Expect a calendar event on the studio calendar.
+
+### B2. Shared calendar subscribe URL
+
+```bash
+curl -X POST "$FORM_ENDPOINT" \
+  -H "Content-Type: text/plain;charset=utf-8" \
+  -d '{"action":"calendarGetSubscribeUrl","webhookSecret":"YOUR_SECRET"}'
+```
+
+Expect `{ "ok": true, "icsUrl": "https://calendar.google.com/...", ... }`. If you still see
+`CALENDAR_ID script property not configured`, finish the shared-calendar ops checklist
+above first.
+
+Then in the member app (signed in): Studio → **Add the timetable to your calendar**.
+With `CALENDAR_ID` unset you should see the ask-Tom message, not infinite “Loading…”.
+With it set and the calendar public, you should see the Google / ICS subscribe controls.
 
 ### C. Client Firebase init
 

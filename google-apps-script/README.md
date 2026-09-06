@@ -14,13 +14,21 @@ Cloud Functions (Firebase) call protected actions with `webhookSecret` in the JS
    | Property | Example | Purpose |
    |----------|---------|---------|
    | `NOTIFY_EMAIL` | `Tom.GBTT@gmail.com` | Tom's inbox for admin notifications |
-   | `CALENDAR_ID` | `abc@group.calendar.google.com` | Shared studio Google Calendar ID |
+   | `CALENDAR_ID` | `d33869728efbe6bcbb6639433e96141db8a89b6919e1f4b7169f9c2cbbd93912@group.calendar.google.com` | Shared studio Google Calendar ID (set as script property, not in git) |
    | `FUNCTIONS_WEBHOOK_SECRET` | long random string | Shared secret for Cloud Functions → Apps Script |
    | `AUDIT_SPREADSHEET_ID` | *(optional)* Sheet id from its URL | Where audit tabs are written |
 
    Audit logging is optional. A standalone script has no active spreadsheet, so unless `AUDIT_SPREADSHEET_ID` is set the audit rows are skipped. Skipping is never fatal: `auditLog_` swallows its own failures so a logging problem can never stop an email or a calendar update.
 
-3. **Calendar setup** — create or share a Google Calendar with the Google account that deploys the script. Copy the calendar ID (Settings → Integrate calendar). Set `CALENDAR_ID` in script properties. Make the calendar public if members need ICS subscribe links.
+3. **Calendar setup** — share the studio Google Calendar with the Google account that deploys the script. Copy the calendar ID (Settings → Integrate calendar) and set `CALENDAR_ID` in script properties.
+
+   **Ops checklist (Tom):**
+   1. Set script property `CALENDAR_ID` to the ID above.
+   2. Script owner must have **Make changes to events** on that calendar.
+   3. Authorize the Calendar scope on first `CalendarApp` run (from the editor).
+   4. Make the calendar **available to public** so member ICS / embed subscribe URLs work.
+   5. Confirm `FORM_ENDPOINT` + `FUNCTIONS_WEBHOOK_SECRET` match between Firebase and Apps Script.
+   6. Confirm Pages / Firebase client secrets are real values (not `-`), or callables hit `australia-southeast1--.cloudfunctions.net/...` and fail TLS.
 
 4. Deploy → **New deployment** → Type: **Web app**
    - Execute as: **Me**

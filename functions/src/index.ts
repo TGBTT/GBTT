@@ -722,8 +722,8 @@ function readCalendarLinks(data: Record<string, unknown> | undefined): CalendarS
  *
  * A stale cache is served in preference to an error, because a link that was
  * right yesterday is still more use than a failure message. A miss returns
- * empty links rather than throwing: login fetches this on every client load
- * and a hard failure only produces console noise.
+ * `{ ok: false, error, …empty links }` rather than throwing: login fetches this
+ * on every client load and the UI maps soft failure to the ask-Tom path.
  */
 export const getCalendarSubscribeUrl = onCall(callableOptions({ secrets: [webhookSecret] }), async (request) => {
   requireAuth(request)
@@ -745,13 +745,21 @@ export const getCalendarSubscribeUrl = onCall(callableOptions({ secrets: [webhoo
 
   if (!result.ok) {
     if (cachedLinks.icsUrl) return { ok: true, ...cachedLinks }
-    return { ok: false, ...readCalendarLinks(undefined) }
+    return {
+      ok: false,
+      error: result.error ?? 'Could not load calendar subscribe URL',
+      ...readCalendarLinks(undefined),
+    }
   }
 
   const links = readCalendarLinks(result.data as Record<string, unknown> | undefined)
   if (!links.icsUrl) {
     if (cachedLinks.icsUrl) return { ok: true, ...cachedLinks }
-    return { ok: false, ...readCalendarLinks(undefined) }
+    return {
+      ok: false,
+      error: 'Apps Script returned no calendar subscribe URL',
+      ...readCalendarLinks(undefined),
+    }
   }
 
   await cacheRef.set({ ...links, fetchedAt: FieldValue.serverTimestamp() }, { merge: true })

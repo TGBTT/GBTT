@@ -29,13 +29,36 @@ here — writing it into this file is what let it drift last time.
 ```
 
 Every shared-calendar action fails on this, so `calendarUpsertSession`,
-`calendarDeleteSession` and the subscribe URL do nothing. The value Tom
-supplied is
-`d33869728efbe6bcbb6639433e96141db8a89b6919e1f4b7169f9c2cbbd93912@group.calendar.google.com`.
-Setting it also requires authorising the Calendar scope on first run.
+`calendarDeleteSession` and the subscribe URL do nothing. Per-member booking
+invites are unaffected — those are ICS attachments over email and are working.
 
-Per-member booking invites are unaffected — those are ICS attachments over
-email and are working.
+### Shared calendar ops checklist (Tom)
+
+Do these in the Apps Script project and Google Calendar UI. Do **not** commit
+the secret values to git.
+
+1. **Set script property `CALENDAR_ID`** to
+   `d33869728efbe6bcbb6639433e96141db8a89b6919e1f4b7169f9c2cbbd93912@group.calendar.google.com`
+   (Project settings → Script properties).
+2. **Script owner must have “Make changes to events”** on that calendar (not
+   view-only), or upserts/deletes fail when writing.
+3. **Authorize the Calendar scope** on first `CalendarApp` run — trigger once
+   from the Apps Script editor so consent is granted before live traffic.
+4. **Make the calendar “available to public”** (Calendar settings → Access
+   permissions) so member ICS / embed subscribe URLs from
+   `calendarGetSubscribeUrl` resolve.
+5. **Confirm `FORM_ENDPOINT` + `FUNCTIONS_WEBHOOK_SECRET` match** between
+   Firebase Functions params/secrets and Apps Script script properties (same
+   deployment URL and same shared secret).
+6. **Confirm Pages / Firebase client secrets are real values** (not a literal
+   `-` from `gh secret set --body -` with no piped value). Placeholder dashes
+   produce callable hosts like `australia-southeast1--.cloudfunctions.net/...`
+   and TLS failures.
+
+After step 1–4, smoke-test: POST `calendarGetSubscribeUrl` (or call the
+Firebase callable while signed in) and open Studio → **Add the timetable to
+your calendar**. Soft failures now surface the ask-Tom message instead of
+infinite “Loading the calendar link…”.
 
 ---
 

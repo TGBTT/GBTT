@@ -9,7 +9,11 @@ export interface FirebaseClientConfig {
 
 function envTrim(key: string): string | undefined {
   const raw = import.meta.env[key] as string | undefined
-  return raw?.trim() || undefined
+  const value = raw?.trim()
+  // GitHub Actions `gh secret set --body -` without a piped value stores a
+  // literal dash, which is truthy and would initialise Auth against a bogus key.
+  if (!value || value === '-') return undefined
+  return value
 }
 
 /** GitHub Actions sometimes stores a literal "-" when a secret was created empty. */

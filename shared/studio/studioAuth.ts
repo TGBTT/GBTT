@@ -723,12 +723,22 @@ export async function studioCalendarSubscribeLinks(): Promise<CalendarSubscribeL
   try {
     const res = await httpsCallable(functions, 'getCalendarSubscribeUrl')({})
     const d = (res.data ?? {}) as Record<string, unknown>
-    return {
-      error: null,
-      htmlLink: String(d.htmlLink ?? ''),
-      icsUrl: String(d.icsUrl ?? ''),
-      publicUrl: String(d.publicUrl ?? ''),
+    const htmlLink = String(d.htmlLink ?? '')
+    const icsUrl = String(d.icsUrl ?? '')
+    const publicUrl = String(d.publicUrl ?? '')
+    const serverError =
+      typeof d.error === 'string' && d.error.trim() ? d.error.trim() : null
+    // Soft failures return ok:false with empty links instead of throwing. Treat
+    // those as errors so the UI leaves “Loading…” for the ask-Tom path.
+    if (d.ok === false || !icsUrl) {
+      return {
+        error: serverError ?? 'The shared class calendar is not available yet.',
+        htmlLink,
+        icsUrl,
+        publicUrl,
+      }
     }
+    return { error: null, htmlLink, icsUrl, publicUrl }
   } catch (e) {
     return {
       error: e instanceof Error ? e.message : 'Could not load the calendar link.',
