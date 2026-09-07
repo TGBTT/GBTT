@@ -19,6 +19,7 @@ import {
   initialOf,
   matchesQuery,
 } from './memberDirectory'
+import { FieldControl, useFieldSaveFlash } from './FieldSaveFlash'
 
 function notePreview(member: LiveMember): string {
   const bits: string[] = []
@@ -29,6 +30,9 @@ function notePreview(member: LiveMember): string {
 }
 
 function RiskCard({ member }: { member: LiveMember }) {
+  const { flash, isSaved } = useFieldSaveFlash()
+  const [localError, setLocalError] = useState<string | null>(null)
+
   return (
     <details className="member-card risk-card">
       <summary className="member-card__summary">
@@ -37,27 +41,40 @@ function RiskCard({ member }: { member: LiveMember }) {
       </summary>
       <div className="member-card__panel">
         <p className="hint">{member.email}</p>
+        {localError ? <p className="form-error">{localError}</p> : null}
         <label className="field">
           Limitations (member-reported)
-          <textarea
-            rows={2}
-            defaultValue={member.limitations}
-            onBlur={(e) => {
-              if (e.target.value === member.limitations) return
-              void saveMemberClinical(member.uid, { limitations: e.target.value })
-            }}
-          />
+          <FieldControl saved={isSaved('limitations')}>
+            <textarea
+              rows={2}
+              defaultValue={member.limitations}
+              onBlur={async (e) => {
+                if (e.target.value === member.limitations) return
+                const err = await saveMemberClinical(member.uid, {
+                  limitations: e.target.value,
+                })
+                setLocalError(err)
+                if (!err) flash('limitations')
+              }}
+            />
+          </FieldControl>
         </label>
         <label className="field">
           Observed risk notes (staff)
-          <textarea
-            rows={2}
-            defaultValue={member.riskNotes}
-            onBlur={(e) => {
-              if (e.target.value === member.riskNotes) return
-              void saveMemberClinical(member.uid, { riskNotes: e.target.value })
-            }}
-          />
+          <FieldControl saved={isSaved('riskNotes')}>
+            <textarea
+              rows={2}
+              defaultValue={member.riskNotes}
+              onBlur={async (e) => {
+                if (e.target.value === member.riskNotes) return
+                const err = await saveMemberClinical(member.uid, {
+                  riskNotes: e.target.value,
+                })
+                setLocalError(err)
+                if (!err) flash('riskNotes')
+              }}
+            />
+          </FieldControl>
         </label>
       </div>
     </details>

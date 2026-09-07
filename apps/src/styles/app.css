@@ -242,6 +242,46 @@ textarea {
   background: #fff;
 }
 
+/* Blur-save success: green check at the bottom-right of the control. */
+.field-control {
+  position: relative;
+  display: block;
+}
+
+.field-control > input,
+.field-control > select,
+.field-control > textarea {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.field-saved-check {
+  position: absolute;
+  right: 0.55rem;
+  bottom: 0.5rem;
+  color: #1b7a3d;
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1;
+  pointer-events: none;
+  animation: field-saved-in 0.18s ease-out;
+}
+
+.theme-classboard .field-saved-check {
+  color: #8fd14f;
+}
+
+@keyframes field-saved-in {
+  from {
+    opacity: 0;
+    transform: scale(0.65);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
 .hint {
   font-size: 0.9rem;
   opacity: 0.8;

@@ -18,6 +18,7 @@ import {
   type LiveRemindersState,
   type ReminderKind,
 } from '@gbtt/shared/studio/firebase/liveReminders'
+import { FieldControl, useFieldSaveFlash } from '../../components/FieldSaveFlash'
 import { StudioSignIn } from '../../components/StudioSignIn'
 import { WorkingOverlay, useWorkingOverlay } from '../../components/WorkingOverlay'
 import {
@@ -288,6 +289,7 @@ export default function ClassBoard() {
    */
   const [classDraft, setClassDraft] = useState<Partial<LiveClassType>>({})
   useEffect(() => setClassDraft({}), [selectedTypeId])
+  const { flash: flashSaved, isSaved } = useFieldSaveFlash()
 
   /*
    * Site copy uses uncontrolled inputs keyed on load state rather than a
@@ -300,7 +302,9 @@ export default function ClassBoard() {
     defaultValue: site[key],
     onBlur: async (e: { target: { value: string } }) => {
       if (e.target.value === site[key]) return
-      setActionError(await saveSiteContent({ [key]: e.target.value }))
+      const err = await saveSiteContent({ [key]: e.target.value })
+      setActionError(err)
+      if (!err) flashSaved(`site-${key}`)
     },
   })
 
@@ -320,7 +324,9 @@ export default function ClassBoard() {
     onBlur: async () => {
       const next = classDraft[key]
       if (!selected || next === undefined || next === selected[key]) return
-      setActionError(await saveClassType(selected.id, { [key]: next }))
+      const err = await saveClassType(selected.id, { [key]: next })
+      setActionError(err)
+      if (!err) flashSaved(`class-${key}`)
     },
   })
 
@@ -373,7 +379,9 @@ export default function ClassBoard() {
 
   const savePlanRate = async (planId: string, ratePerClass: number) => {
     setPricingError(null)
-    setPricingError(await savePricingPlan(planId, { ratePerClass }))
+    const err = await savePricingPlan(planId, { ratePerClass })
+    setPricingError(err)
+    if (!err) flashSaved(`plan-rate-${planId}`)
   }
 
   const addSession = async () => {
@@ -1013,49 +1021,67 @@ export default function ClassBoard() {
                   <>
                     <label className="field">
                       Name
-                      <input {...classField('name')} />
+                      <FieldControl saved={isSaved('class-name')}>
+                        <input {...classField('name')} />
+                      </FieldControl>
                     </label>
                     <label className="field">
                       Short blurb
-                      <input {...classField('blurb')} />
+                      <FieldControl saved={isSaved('class-blurb')}>
+                        <input {...classField('blurb')} />
+                      </FieldControl>
                     </label>
                     <label className="field">
                       Public description
-                      <textarea rows={4} {...classField('longDescription')} />
+                      <FieldControl saved={isSaved('class-longDescription')}>
+                        <textarea rows={4} {...classField('longDescription')} />
+                      </FieldControl>
                     </label>
                     <label className="field">
                       Warnings
-                      <textarea rows={2} {...classField('warnings')} />
+                      <FieldControl saved={isSaved('class-warnings')}>
+                        <textarea rows={2} {...classField('warnings')} />
+                      </FieldControl>
                     </label>
                     <label className="field">
                       Restrictions
-                      <textarea rows={2} {...classField('restrictions')} />
+                      <FieldControl saved={isSaved('class-restrictions')}>
+                        <textarea rows={2} {...classField('restrictions')} />
+                      </FieldControl>
                     </label>
                     <label className="field">
                       Recommendations
-                      <textarea rows={2} {...classField('recommendations')} />
+                      <FieldControl saved={isSaved('class-recommendations')}>
+                        <textarea rows={2} {...classField('recommendations')} />
+                      </FieldControl>
                     </label>
                     <label className="field">
                       What to bring
-                      <textarea rows={2} {...classField('whatToBring')} />
+                      <FieldControl saved={isSaved('class-whatToBring')}>
+                        <textarea rows={2} {...classField('whatToBring')} />
+                      </FieldControl>
                     </label>
                   </>
                 ) : null}
                 <label className="field">
                   Max capacity
-                  <input
-                    type="number"
-                    min={4}
-                    max={27}
-                    defaultValue={selected.cap}
-                    key={`cap-${selected.id}`}
-                    disabled={role !== 'admin'}
-                    onBlur={async (e) => {
-                      const cap = Number(e.target.value)
-                      if (cap === selected.cap) return
-                      setActionError(await saveClassType(selected.id, { cap }))
-                    }}
-                  />
+                  <FieldControl saved={isSaved(`class-cap-${selected.id}`)}>
+                    <input
+                      type="number"
+                      min={4}
+                      max={27}
+                      defaultValue={selected.cap}
+                      key={`cap-${selected.id}`}
+                      disabled={role !== 'admin'}
+                      onBlur={async (e) => {
+                        const cap = Number(e.target.value)
+                        if (cap === selected.cap) return
+                        const err = await saveClassType(selected.id, { cap })
+                        setActionError(err)
+                        if (!err) flashSaved(`class-cap-${selected.id}`)
+                      }}
+                    />
+                  </FieldControl>
                 </label>
               </section>
               <section>
@@ -1618,17 +1644,21 @@ export default function ClassBoard() {
           <h2>Legal, pricing &amp; policies</h2>
           <label className="field">
             Transfer window (hours before class)
-            <input
-              type="number"
-              min={0}
-              key={`window-${settingsState.status}`}
-              defaultValue={settingsState.settings.transferWindowHours}
-              onBlur={async (e) => {
-                const hours = Number(e.target.value)
-                if (hours === settingsState.settings.transferWindowHours) return
-                setActionError(await saveSettings({ transferWindowHours: hours }))
-              }}
-            />
+            <FieldControl saved={isSaved('transfer-window')}>
+              <input
+                type="number"
+                min={0}
+                key={`window-${settingsState.status}`}
+                defaultValue={settingsState.settings.transferWindowHours}
+                onBlur={async (e) => {
+                  const hours = Number(e.target.value)
+                  if (hours === settingsState.settings.transferWindowHours) return
+                  const err = await saveSettings({ transferWindowHours: hours })
+                  setActionError(err)
+                  if (!err) flashSaved('transfer-window')
+                }}
+              />
+            </FieldControl>
           </label>
           <p className="hint">
             This is the value the booking functions enforce when a member tries to cancel or move a
@@ -1653,28 +1683,40 @@ export default function ClassBoard() {
                 )}
                 <label className="field">
                   Rate per class ($)
-                  <input
-                    type="number"
-                    min={0}
-                    step="0.50"
-                    defaultValue={p.ratePerClass}
-                    onBlur={(e) => savePlanRate(p.id, Number(e.target.value))}
-                  />
+                  <FieldControl saved={isSaved(`plan-rate-${p.id}`)}>
+                    <input
+                      type="number"
+                      min={0}
+                      step="0.50"
+                      defaultValue={p.ratePerClass}
+                      onBlur={(e) => {
+                        const rate = Number(e.target.value)
+                        if (rate === p.ratePerClass) return
+                        void savePlanRate(p.id, rate)
+                      }}
+                    />
+                  </FieldControl>
                 </label>
               </li>
             ))}
           </ul>
           <label className="field">
             Payment instructions
-            <textarea rows={3} {...siteField('paymentInstructions')} />
+            <FieldControl saved={isSaved('site-paymentInstructions')}>
+              <textarea rows={3} {...siteField('paymentInstructions')} />
+            </FieldControl>
           </label>
           <label className="field">
             Terms
-            <textarea rows={4} {...siteField('termsText')} />
+            <FieldControl saved={isSaved('site-termsText')}>
+              <textarea rows={4} {...siteField('termsText')} />
+            </FieldControl>
           </label>
           <label className="field">
             Waiver
-            <textarea rows={4} {...siteField('waiverText')} />
+            <FieldControl saved={isSaved('site-waiverText')}>
+              <textarea rows={4} {...siteField('waiverText')} />
+            </FieldControl>
           </label>
           <p className="hint">
             Members accept these when they join, and their acceptance is recorded against their
@@ -1880,15 +1922,21 @@ export default function ClassBoard() {
           <p className="hint">Edits appear in the member app without touching code.</p>
           <label className="field">
             Hero blurb
-            <textarea rows={2} {...siteField('heroBlurb')} />
+            <FieldControl saved={isSaved('site-heroBlurb')}>
+              <textarea rows={2} {...siteField('heroBlurb')} />
+            </FieldControl>
           </label>
           <label className="field">
             Schedule narrative
-            <textarea rows={3} {...siteField('scheduleNarrative')} />
+            <FieldControl saved={isSaved('site-scheduleNarrative')}>
+              <textarea rows={3} {...siteField('scheduleNarrative')} />
+            </FieldControl>
           </label>
           <label className="field">
             Contact display line
-            <input {...siteField('contactDisplay')} />
+            <FieldControl saved={isSaved('site-contactDisplay')}>
+              <input {...siteField('contactDisplay')} />
+            </FieldControl>
           </label>
         </section>
       )}

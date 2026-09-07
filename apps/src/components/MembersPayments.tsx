@@ -40,6 +40,7 @@ import {
   initialOf,
   matchesQuery,
 } from './memberDirectory'
+import { FieldControl, useFieldSaveFlash } from './FieldSaveFlash'
 
 interface PlanChangeRequest {
   uid: string
@@ -73,10 +74,11 @@ function MemberCard({
   busy: boolean
   onRecalculate: () => void
   onTogglePaid: (periodId: string, paid: boolean) => void
-  onDiscount: (pct: number) => void
+  onDiscount: (pct: number) => Promise<string | null>
   onArchive: () => void
 }) {
   const archived = isArchivedMember(member)
+  const { flash, isSaved } = useFieldSaveFlash()
 
   return (
     <details className="member-card">
@@ -126,13 +128,20 @@ function MemberCard({
           <div className="member-admin-row">
             <label className="field">
               Discount %
-              <input
-                type="number"
-                min={0}
-                max={100}
-                defaultValue={member.discountPct}
-                onBlur={(e) => onDiscount(Number(e.target.value))}
-              />
+              <FieldControl saved={isSaved('discount')}>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  defaultValue={member.discountPct}
+                  onBlur={async (e) => {
+                    const pct = Number(e.target.value)
+                    if (pct === member.discountPct) return
+                    const err = await onDiscount(pct)
+                    if (!err) flash('discount')
+                  }}
+                />
+              </FieldControl>
             </label>
             <button type="button" className="btn ghost" disabled={busy} onClick={onRecalculate}>
               {busy ? 'Working…' : 'Recalculate'}
@@ -240,7 +249,9 @@ export function MembersPayments({ role }: { role: string }) {
 
   const changeDiscount = async (uid: string, pct: number) => {
     setError(null)
-    setError(await saveMemberDiscount(uid, pct))
+    const err = await saveMemberDiscount(uid, pct)
+    setError(err)
+    return err
   }
 
   // Staff hold accounts on the same roll but are not billed for classes.
