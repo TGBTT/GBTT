@@ -23,7 +23,7 @@ import { FieldControl, useFieldSaveFlash } from './FieldSaveFlash'
 
 function notePreview(member: LiveMember): string {
   const bits: string[] = []
-  if (member.limitations.trim()) bits.push('limitations')
+  if (member.limitations.trim()) bits.push('health notes')
   if (member.riskNotes.trim()) bits.push('staff notes')
   if (isArchivedMember(member)) bits.push('archived')
   return bits.length ? bits.join(' · ') : 'nothing on file'
@@ -43,7 +43,7 @@ function RiskCard({ member }: { member: LiveMember }) {
         <p className="hint">{member.email}</p>
         {localError ? <p className="form-error">{localError}</p> : null}
         <label className="field">
-          Limitations (member-reported)
+          Health notes (member)
           <FieldControl saved={isSaved('limitations')}>
             <textarea
               rows={2}
@@ -59,8 +59,9 @@ function RiskCard({ member }: { member: LiveMember }) {
             />
           </FieldControl>
         </label>
+        <p className="hint">Members can also edit these from Studio when they lock in classes.</p>
         <label className="field">
-          Observed risk notes (staff)
+          Staff-only risk notes
           <FieldControl saved={isSaved('riskNotes')}>
             <textarea
               rows={2}
@@ -76,6 +77,7 @@ function RiskCard({ member }: { member: LiveMember }) {
             />
           </FieldControl>
         </label>
+        <p className="hint">Members never see this field.</p>
       </div>
     </details>
   )

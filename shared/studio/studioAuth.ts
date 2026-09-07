@@ -955,6 +955,24 @@ export async function studioSetShowName(value: boolean): Promise<string | null> 
 }
 
 /**
+ * Member-owned health notes for class safety.
+ *
+ * Only `limitations` is written — merge keeps staff `riskNotes` intact, and
+ * rules freeze that field for anyone who is not an admin.
+ */
+export async function studioSaveMyLimitations(limitations: string): Promise<string | null> {
+  const user = getFirebaseAuth()?.currentUser
+  const db = getFirestoreDb()
+  if (!user || !db) return 'Sign in first.'
+  try {
+    await setDoc(doc(db, 'users', user.uid), { clinical: { limitations } }, { merge: true })
+    return null
+  } catch (e) {
+    return e instanceof Error ? e.message : 'Could not save your health notes.'
+  }
+}
+
+/**
  * Email every active member.
  *
  * `testMode` sends only to Tom's own inbox, which is the safe way to check a

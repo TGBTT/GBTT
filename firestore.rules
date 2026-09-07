@@ -51,15 +51,31 @@ service cloud.firestore {
     // could edit them could set their own discount or plan rate and invoice
     // themselves nothing. `role` and `status` gate access and approval.
     //
+    // `clinical.limitations` is the member's own health notes — they fill those
+    // in from Studio. Staff `riskNotes` stay frozen here; only an admin write
+    // may change them.
+    //
     // Everything else under `profile` — name, phone, contact details — stays the
     // member's own to correct. Nothing server-side reads them for money or
     // access, so a wrong phone number is a wrong phone number, not a privilege.
+    function clinicalVal(data, key) {
+      return data.get('clinical', {}).get(key, '');
+    }
+
+    function clinicalSelfEditOk() {
+      let before = resource.data.get('clinical', {});
+      let after = request.resource.data.get('clinical', {});
+      let changed = after.diff(before).affectedKeys();
+      return changed.size() == 0 || changed.hasOnly(['limitations']);
+    }
+
     function selfEditAllowed() {
       return profileVal(request.resource.data, 'role') == profileVal(resource.data, 'role')
         && profileVal(request.resource.data, 'status') == profileVal(resource.data, 'status')
         && request.resource.data.get('billing', null) == resource.data.get('billing', null)
         && request.resource.data.get('membership', null) == resource.data.get('membership', null)
-        && request.resource.data.get('clinical', null) == resource.data.get('clinical', null);
+        && clinicalSelfEditOk()
+        && clinicalVal(request.resource.data, 'riskNotes') == clinicalVal(resource.data, 'riskNotes');
     }
 
     // —— Public catalog (class types, exercises, venues, team) ——
@@ -122,7 +138,8 @@ service cloud.firestore {
       allow read: if isOwner(uid) || isStaff();
 
       // Self-registration lands in `pending` with no booking rights until an
-      // admin approves. Billing and clinical data may not be self-supplied.
+      // admin approves. Billing and staff clinical notes may not be self-supplied
+      // at create; members add limitations later from Studio.
       allow create: if isOwner(uid)
         && profileVal(request.resource.data, 'status') == 'pending'
         && profileVal(request.resource.data, 'role') == 'member'

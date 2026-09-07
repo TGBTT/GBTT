@@ -156,7 +156,7 @@ describe('privilege escalation is blocked', () => {
     await assertSucceeds(updateDoc(doc(db, 'users', PENDING), { 'profile.name': 'Patricia' }))
   })
 
-  it('member cannot edit their own clinical notes', async () => {
+  it('member cannot edit staff risk notes on their own clinical record', async () => {
     await assertFails(updateDoc(doc(memberDb(), 'users', MEMBER), { 'clinical.riskNotes': 'x' }))
   })
 })
@@ -169,6 +169,12 @@ describe('members retain the edits they should have', () => {
   it('member can change their privacy preference', async () => {
     await assertSucceeds(
       updateDoc(doc(memberDb(), 'users', MEMBER), { 'preferences.showNameToClassmates': false }),
+    )
+  })
+
+  it('member can edit their own health limitations', async () => {
+    await assertSucceeds(
+      updateDoc(doc(memberDb(), 'users', MEMBER), { 'clinical.limitations': 'knee: avoid deep lunges' }),
     )
   })
 })

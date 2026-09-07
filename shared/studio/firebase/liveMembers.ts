@@ -65,6 +65,8 @@ export interface LiveProfile {
   creditsRemaining: number
   showNameToClassmates: boolean
   termsAccepted: boolean
+  /** Member-owned health notes; staff risk notes are never exposed here. */
+  limitations: string
   /** The plan they have asked to move to, while Tom has yet to action it. */
   pendingPlanId: string | null
   pendingPlanName: string | null
@@ -156,6 +158,7 @@ export function subscribeMyProfile(
     const membership = (latest.membership ?? {}) as DocumentData
     const preferences = (latest.preferences ?? {}) as DocumentData
     const compliance = (latest.compliance ?? {}) as DocumentData
+    const clinical = (latest.clinical ?? {}) as DocumentData
 
     onChange({
       status: 'ready',
@@ -168,6 +171,7 @@ export function subscribeMyProfile(
         creditsRemaining: Number(membership.creditsRemaining ?? 0),
         showNameToClassmates: preferences.showNameToClassmates !== false,
         termsAccepted: Boolean(compliance.termsAcceptedAt),
+        limitations: String(clinical.limitations ?? ''),
         pendingPlanId,
         pendingPlanName,
       },

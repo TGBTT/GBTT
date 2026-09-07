@@ -161,8 +161,9 @@ record shows a verified email, checked server-side in `requireActiveMember`. Mak
 manual approval to pay for a single class defeats the point of a drop-in, and a confirmed address is
 enough to show the account is a real person who can be invoiced.
 
-Members cannot write `billing`, `membership`, `clinical`, `profile.role` or `profile.status` on
-their own document — those drive what they are charged and what they can reach.
+Members cannot write `billing`, `membership`, `clinical.riskNotes`, `profile.role` or
+`profile.status` on their own document — those drive what they are charged and what they can
+reach. They may write `clinical.limitations` (their own health notes) from Studio.
 
 Run the rules test suite after any change to `firestore.rules`:
 

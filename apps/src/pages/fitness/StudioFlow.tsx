@@ -26,6 +26,7 @@ import {
   studioReleaseSessionWeek,
   studioRequestPlanChange,
   studioResendVerification,
+  studioSaveMyLimitations,
   studioSetShowName,
   studioCalendarSubscribeLinks,
   studioUnlockWeeklySlot,
@@ -885,6 +886,29 @@ export default function StudioFlow() {
               />
               Show my name to other subscribers in the same class
             </label>
+
+            <label className="field">
+              My health notes
+              <textarea
+                rows={3}
+                key={myProfile ? 'health-notes' : 'health-notes-loading'}
+                defaultValue={myProfile?.limitations ?? ''}
+                disabled={busy || !myProfile}
+                placeholder="Injuries, limitations, or anything staff should know before class"
+                onBlur={async (e) => {
+                  if (!myProfile || e.target.value === myProfile.limitations) return
+                  setBusy(true)
+                  const err = await studioSaveMyLimitations(e.target.value)
+                  setBusy(false)
+                  flash(err ? null : 'Health notes saved.', err)
+                }}
+              />
+            </label>
+            <p className="hint">
+              Shared with studio staff for class safety. Staff keep a separate private note you cannot
+              see.
+            </p>
+
             {myProfile && !myProfile.termsAccepted ? (
               <div className="legal-box">
                 <h3>Terms &amp; waiver</h3>
