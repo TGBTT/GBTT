@@ -9,11 +9,7 @@ import {
   studioSendBroadcast,
   studioSetMemberRole,
 } from '@gbtt/shared/studio/studioAuth'
-import {
-  saveMemberClinical,
-  subscribeMembers,
-  type LiveMembersState,
-} from '@gbtt/shared/studio/firebase/liveMembers'
+import { subscribeMembers, type LiveMembersState } from '@gbtt/shared/studio/firebase/liveMembers'
 import {
   addReminder,
   removeReminder,
@@ -77,6 +73,7 @@ import { WeekNavigator } from '../../components/WeekNavigator'
 import { SeasonsPanel } from '../../components/SeasonsPanel'
 import { MembersPayments } from '../../components/MembersPayments'
 import { ClientAccounts } from '../../components/ClientAccounts'
+import { RiskNotes } from '../../components/RiskNotes'
 import {
   WEEKDAYS,
   formatSessionAttending,
@@ -1613,43 +1610,7 @@ export default function ClassBoard() {
       {tab === 'clients' && role === 'admin' && <ClientAccounts />}
 
       {tab === 'risk' && (
-        <section className="yacht-panel app-enter app-section">
-          <h2>Personal limitations &amp; risk</h2>
-          {liveMembers.status === 'loading' ? <p className="hint">Loading clients…</p> : null}
-          {liveMembers.status === 'error' ? (
-            <p className="form-error">Could not load clients: {liveMembers.error}</p>
-          ) : null}
-          {liveMembers.status === 'ready' && !users.length ? (
-            <p className="hint">No clients yet. Notes appear here once accounts exist.</p>
-          ) : null}
-          {users.map((u) => (
-            <article key={u.uid} className="risk-card">
-              <h3>{u.name}</h3>
-              <label className="field">
-                Limitations (member-reported)
-                <textarea
-                  rows={2}
-                  defaultValue={u.limitations}
-                  onBlur={(e) => {
-                    if (e.target.value === u.limitations) return
-                    void saveMemberClinical(u.uid, { limitations: e.target.value })
-                  }}
-                />
-              </label>
-              <label className="field">
-                Observed risk notes (staff)
-                <textarea
-                  rows={2}
-                  defaultValue={u.riskNotes}
-                  onBlur={(e) => {
-                    if (e.target.value === u.riskNotes) return
-                    void saveMemberClinical(u.uid, { riskNotes: e.target.value })
-                  }}
-                />
-              </label>
-            </article>
-          ))}
-        </section>
+        <RiskNotes members={users} status={liveMembers.status} error={liveMembers.error} />
       )}
 
       {tab === 'legal' && role === 'admin' && (

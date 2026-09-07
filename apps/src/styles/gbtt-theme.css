@@ -362,6 +362,13 @@
   border-bottom: 1px solid #d4d4d0;
 }
 
+/* Nested inside the member list, so the row already supplies the rule. */
+.admin-member-list .risk-card {
+  padding: 0;
+  border-bottom: 0;
+  background: transparent;
+}
+
 .client-row-list {
   list-style: none;
   padding: 0;
