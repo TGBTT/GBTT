@@ -771,6 +771,16 @@ export function subscribeWeeklyLocks(
   )
 }
 
+/** Roster seats the signed-in member holds in one week. */
+export interface MyWeekBookings {
+  /** Every session they are on, including paid drop-ins. */
+  bookedIds: string[]
+  /** Included allowance seats only — drop-ins are excluded. */
+  includedIds: string[]
+}
+
+const EMPTY_WEEK_BOOKINGS: MyWeekBookings = { bookedIds: [], includedIds: [] }
+
 /**
  * Subscribe to which sessions in a week the member holds a seat on.
  * One listener per session roster doc; rules allow members to read their own entry.
@@ -778,24 +788,29 @@ export function subscribeWeeklyLocks(
 export function subscribeMyWeekBookings(
   uid: string | null,
   sessionIds: string[],
-  onChange: (bookedSessionIds: string[]) => void,
+  onChange: (bookings: MyWeekBookings) => void,
 ): () => void {
   const db = getFirestoreDb()
   if (!db || !uid || !sessionIds.length) {
-    onChange([])
+    onChange(EMPTY_WEEK_BOOKINGS)
     return noop
   }
 
-  const held = new Set<string>()
+  // dropIn=true means the seat is extra and must not count against the plan.
+  const held = new Map<string, boolean>()
   const unsubs: Unsubscribe[] = []
 
-  const emit = () => onChange([...held])
+  const emit = () => {
+    const bookedIds = [...held.keys()]
+    const includedIds = bookedIds.filter((id) => held.get(id) !== true)
+    onChange({ bookedIds, includedIds })
+  }
 
   for (const sessionId of sessionIds) {
     const unsub = onSnapshot(
       doc(db, 'sessions', sessionId, 'roster', uid),
       (snap) => {
-        if (snap.exists()) held.add(sessionId)
+        if (snap.exists()) held.set(sessionId, snap.data()?.dropIn === true)
         else held.delete(sessionId)
         emit()
       },

@@ -182,9 +182,8 @@ export function usePendingAttendance(sessionId: string | null, roster: RosterEnt
 }
 
 /** Slot ids the signed-in member has locked recurringly. */
-export function useWeeklyLocks(enabled: boolean) {
+export function useWeeklyLocks(uid: string | null) {
   const [slotIds, setSlotIds] = useState<string[]>([])
-  const uid = enabled ? (getFirebaseUser()?.uid ?? null) : null
 
   useEffect(() => subscribeWeeklyLocks(uid, setSlotIds), [uid])
 
@@ -193,12 +192,15 @@ export function useWeeklyLocks(enabled: boolean) {
 
 /** Session ids the signed-in member is booked into for the displayed week. */
 export function useMyWeekBookings(uid: string | null, sessionIds: string[]) {
-  const [bookedIds, setBookedIds] = useState<string[]>([])
+  const [bookings, setBookings] = useState<{ bookedIds: string[]; includedIds: string[] }>({
+    bookedIds: [],
+    includedIds: [],
+  })
   const key = sessionIds.join(',')
 
-  useEffect(() => subscribeMyWeekBookings(uid, sessionIds, setBookedIds), [uid, key])
+  useEffect(() => subscribeMyWeekBookings(uid, sessionIds, setBookings), [uid, key])
 
-  return bookedIds
+  return bookings
 }
 
 /** The signed-in member's own record: preferences, terms, and any pending plan. */

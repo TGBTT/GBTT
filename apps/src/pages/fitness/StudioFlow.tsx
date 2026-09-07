@@ -97,9 +97,12 @@ export default function StudioFlow() {
   // invented spot count.
   const week = useWeekNavigation()
   const live = useLiveSessions(week.weekStart)
-  const lockedSlotIds = useWeeklyLocks(!!member)
+  const lockedSlotIds = useWeeklyLocks(member?.id ?? null)
   const sessionIds = useMemo(() => live.occurrences.map((o) => o.id), [live.occurrences])
-  const myBookedIds = useMyWeekBookings(member?.id ?? null, sessionIds)
+  const { bookedIds: myBookedIds, includedIds: myIncludedIds } = useMyWeekBookings(
+    member?.id ?? null,
+    sessionIds,
+  )
   const myProfile = useMyProfile(!!member).profile
   const byDay = live.byDay
   const selected = selectedId
@@ -851,11 +854,14 @@ export default function StudioFlow() {
                 </div>
               </div>
             ) : null}
+            {/* Included seats for the week on the calendar, so locking a session
+                for this week moves 0/3 to 1/3. Season-long recurring locks are
+                listed separately under "Your season locks". */}
             <p>
               Signed in as <strong>{member.name}</strong> ·{' '}
               {planById(member.planId)?.name}
               {member.classesPerWeek > 0
-                ? ` · ${lockedSlotIds.length}/${member.classesPerWeek} weekly slots locked`
+                ? ` · ${myIncludedIds.length}/${member.classesPerWeek} weekly slots locked`
                 : ` · ${myProfile?.creditsRemaining ?? 0} credits`}
             </p>
             {myProfile?.pendingPlanName ? (
@@ -1013,7 +1019,7 @@ export default function StudioFlow() {
         )}
       </section>
 
-      {member ? <SeasonCost /> : null}
+      {member ? <SeasonCost lockRevision={lockedSlotIds.join(',')} /> : null}
       </div>
       <WorkingOverlay {...overlayProps} />
     </div>

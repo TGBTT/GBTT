@@ -19,7 +19,7 @@ import {
 
 const money = (cents: number) => `$${(cents / 100).toFixed(2)}`
 
-export function SeasonCost() {
+export function SeasonCost({ lockRevision = '' }: { lockRevision?: string }) {
   const [seasons, setSeasons] = useState<LiveSeasonsState>({ status: 'loading', seasons: [] })
   const [seasonId, setSeasonId] = useState('')
   const [projection, setProjection] = useState<SeasonProjection | null>(null)
@@ -49,7 +49,7 @@ export function SeasonCost() {
     return () => {
       active = false
     }
-  }, [seasonId])
+  }, [seasonId, lockRevision])
 
   if (seasons.status === 'unavailable' || (seasons.status === 'ready' && !seasons.seasons.length)) {
     return null
