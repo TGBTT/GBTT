@@ -11,6 +11,8 @@ interface RoleCallRosterProps {
   members: Pick<LiveMember, 'uid' | 'name'>[]
   addMemberId: string
   onAddMemberIdChange: (id: string) => void
+  complimentaryAdd?: boolean
+  onComplimentaryAddChange?: (value: boolean) => void
   onMarkAttendance: (memberId: string, attended: boolean) => void
   onAddMember: () => void
   addBusy?: boolean
@@ -26,6 +28,8 @@ export function RoleCallRoster({
   members,
   addMemberId,
   onAddMemberIdChange,
+  complimentaryAdd = false,
+  onComplimentaryAddChange,
   onMarkAttendance,
   onAddMember,
   addBusy = false,
@@ -56,7 +60,11 @@ export function RoleCallRoster({
               <span>
                 {r.displayName}
                 {r.kind === 'guest' ? ' *' : ''}
-                {r.bookedBy === 'admin' ? ' (admin added)' : ''}
+                {r.complimentary
+                  ? ' (makeup)'
+                  : r.bookedBy === 'admin'
+                    ? ' (admin added)'
+                    : ''}
               </span>
             </label>
           </li>
@@ -86,6 +94,16 @@ export function RoleCallRoster({
           Add
         </button>
       </div>
+      {onComplimentaryAddChange ? (
+        <label className="exercise-check">
+          <input
+            type="checkbox"
+            checked={complimentaryAdd}
+            onChange={(e) => onComplimentaryAddChange(e.target.checked)}
+          />
+          <span>Complimentary / makeup (no extra charge)</span>
+        </label>
+      ) : null}
     </div>
   )
 }

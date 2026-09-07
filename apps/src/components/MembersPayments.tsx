@@ -1,29 +1,32 @@
 /**
  * Members and payments.
  *
- * Everything money-related here comes from Firestore. The owed figure is a
- * `billingPeriods` document written by `calculateBillingPeriod`, and marking a
- * period paid goes through `markBillingPeriodPaid` so the sign-off is recorded
- * against an admin and survives outside the browser it was clicked in.
- *
- * The roll is collapsed to a line per member and filtered rather than listed in
- * full: every member carries their billing periods and admin controls, so an
- * open list of everyone is a wall of detail to scroll past to reach one person.
+ * Invoices come from `calculateBillingPeriod` (subscription weeks × rate).
+ * Cash and bank deposits are recorded on the payment ledger; balance is
+ * invoiced owed minus payments. Manual adjustments write an exception that
+ * the next recalculate folds into the invoice.
  */
 
 import { useEffect, useMemo, useState } from 'react'
 import {
+  invoicedOwedCents,
   isArchivedMember,
   outstandingCents,
+  paymentsTotalCents,
+  saveBillingAdjustment,
   saveMemberDiscount,
   setMemberArchived,
   subscribeBillingPeriods,
   subscribeMembers,
+  subscribePayments,
   subscribePlanChangeRequests,
   type LiveBillingPeriod,
   type LiveBillingState,
   type LiveMember,
   type LiveMembersState,
+  type LivePayment,
+  type LivePaymentsState,
+  type PaymentMethod,
 } from '@gbtt/shared/studio/firebase/liveMembers'
 import {
   subscribeSeasons,
@@ -31,7 +34,8 @@ import {
 } from '@gbtt/shared/studio/firebase/liveSeasons'
 import {
   studioCalculateBillingPeriod,
-  studioMarkBillingPeriodPaid,
+  studioDeleteMemberPayment,
+  studioRecordMemberPayment,
   studioResolvePlanChange,
 } from '@gbtt/shared/studio/studioAuth'
 import {
@@ -56,29 +60,55 @@ function currentMonthStart(): string {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
 }
 
+function todayKey(): string {
+  const now = new Date()
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+}
+
 function MemberCard({
   member,
   periods,
+  payments,
   owed,
   role,
   busy,
   onRecalculate,
-  onTogglePaid,
   onDiscount,
   onArchive,
+  onRecordPayment,
+  onDeletePayment,
+  onAdjust,
 }: {
   member: LiveMember
   periods: LiveBillingPeriod[]
+  payments: LivePayment[]
   owed: number
   role: string
   busy: boolean
   onRecalculate: () => void
-  onTogglePaid: (periodId: string, paid: boolean) => void
   onDiscount: (pct: number) => Promise<string | null>
   onArchive: () => void
+  onRecordPayment: (input: {
+    amountCents: number
+    method: PaymentMethod
+    paidOn: string
+    note: string
+  }) => Promise<string | null>
+  onDeletePayment: (paymentId: string) => Promise<string | null>
+  onAdjust: (dollars: number, note: string) => Promise<string | null>
 }) {
   const archived = isArchivedMember(member)
   const { flash, isSaved } = useFieldSaveFlash()
+  const invoiced = invoicedOwedCents(periods)
+  const paid = paymentsTotalCents(payments)
+
+  const [amount, setAmount] = useState('')
+  const [paidOn, setPaidOn] = useState(todayKey)
+  const [method, setMethod] = useState<PaymentMethod>('bank')
+  const [payNote, setPayNote] = useState('')
+  const [adjustDollars, setAdjustDollars] = useState('')
+  const [adjustNote, setAdjustNote] = useState('')
+  const [localError, setLocalError] = useState<string | null>(null)
 
   return (
     <details className="member-card">
@@ -98,25 +128,18 @@ function MemberCard({
         <p className="hint">
           {member.email}
           {member.discountPct ? ` · ${member.discountPct}% discount` : ''}
+          {` · ${money(invoiced)} invoiced · ${money(paid)} paid`}
         </p>
 
         {periods.length ? (
           <ul className="billing-period-list">
             {periods.map((p) => (
               <li key={p.id}>
-                <label className="exercise-check">
-                  <input
-                    type="checkbox"
-                    checked={p.status === 'paid'}
-                    disabled={role !== 'admin' || busy}
-                    onChange={(e) => onTogglePaid(p.id, e.target.checked)}
-                  />
-                  <span>
-                    {p.seasonName ?? `${p.periodStart} → ${p.periodEnd}`} ·{' '}
-                    <strong>{money(p.totalCents)}</strong> · {p.chargeableCount} charged
-                    {p.status === 'paid' ? ' · paid' : ' · owed'}
-                  </span>
-                </label>
+                <span>
+                  {p.seasonName ?? `${p.periodStart} → ${p.periodEnd}`} ·{' '}
+                  <strong>{money(p.totalCents)}</strong> · {p.chargeableCount} charged
+                  {p.status === 'paid' ? ' · marked paid' : ' · open'}
+                </span>
               </li>
             ))}
           </ul>
@@ -124,32 +147,158 @@ function MemberCard({
           <p className="hint">No billing run yet for this member. Recalculate to produce one.</p>
         )}
 
+        {payments.length ? (
+          <ul className="payment-ledger-list">
+            {payments.map((p) => (
+              <li key={p.id}>
+                <span>
+                  {p.paidOn} · {p.method} · <strong>{money(p.amountCents)}</strong>
+                  {p.note ? ` · ${p.note}` : ''}
+                </span>
+                {role === 'admin' ? (
+                  <button
+                    type="button"
+                    className="link-button"
+                    disabled={busy}
+                    onClick={() => void onDeletePayment(p.id)}
+                  >
+                    Remove
+                  </button>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="hint">No payments recorded yet.</p>
+        )}
+
+        {localError ? <p className="form-error">{localError}</p> : null}
+
         {role === 'admin' ? (
-          <div className="member-admin-row">
-            <label className="field">
-              Discount %
-              <FieldControl saved={isSaved('discount')}>
+          <>
+            <div className="payment-entry-row">
+              <label className="field">
+                Amount $
                 <input
                   type="number"
                   min={0}
-                  max={100}
-                  defaultValue={member.discountPct}
-                  onBlur={async (e) => {
-                    const pct = Number(e.target.value)
-                    if (pct === member.discountPct) return
-                    const err = await onDiscount(pct)
-                    if (!err) flash('discount')
-                  }}
+                  step="0.01"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
                 />
-              </FieldControl>
-            </label>
-            <button type="button" className="btn ghost" disabled={busy} onClick={onRecalculate}>
-              {busy ? 'Working…' : 'Recalculate'}
-            </button>
-            <button type="button" className="btn ghost" disabled={busy} onClick={onArchive}>
-              {archived ? 'Restore to the roll' : 'Archive'}
-            </button>
-          </div>
+              </label>
+              <label className="field">
+                Date
+                <input type="date" value={paidOn} onChange={(e) => setPaidOn(e.target.value)} />
+              </label>
+              <label className="field">
+                Method
+                <select
+                  value={method}
+                  onChange={(e) => setMethod(e.target.value === 'cash' ? 'cash' : 'bank')}
+                >
+                  <option value="bank">Bank</option>
+                  <option value="cash">Cash</option>
+                </select>
+              </label>
+              <label className="field">
+                Note
+                <input value={payNote} onChange={(e) => setPayNote(e.target.value)} />
+              </label>
+              <button
+                type="button"
+                className="btn ghost"
+                disabled={busy || !amount}
+                onClick={async () => {
+                  setLocalError(null)
+                  const dollars = Number(amount)
+                  if (!Number.isFinite(dollars) || dollars <= 0) {
+                    setLocalError('Enter a payment amount greater than zero.')
+                    return
+                  }
+                  const err = await onRecordPayment({
+                    amountCents: Math.round(dollars * 100),
+                    method,
+                    paidOn,
+                    note: payNote,
+                  })
+                  if (err) {
+                    setLocalError(err)
+                    return
+                  }
+                  setAmount('')
+                  setPayNote('')
+                }}
+              >
+                Record payment
+              </button>
+            </div>
+
+            <div className="payment-entry-row">
+              <label className="field">
+                Adjust owed $
+                <input
+                  type="number"
+                  step="0.01"
+                  value={adjustDollars}
+                  onChange={(e) => setAdjustDollars(e.target.value)}
+                  placeholder="+ or −"
+                />
+              </label>
+              <label className="field">
+                Reason
+                <input value={adjustNote} onChange={(e) => setAdjustNote(e.target.value)} />
+              </label>
+              <button
+                type="button"
+                className="btn ghost"
+                disabled={busy || !adjustDollars}
+                onClick={async () => {
+                  setLocalError(null)
+                  const dollars = Number(adjustDollars)
+                  if (!Number.isFinite(dollars) || dollars === 0) {
+                    setLocalError('Enter a non-zero adjustment.')
+                    return
+                  }
+                  const err = await onAdjust(dollars, adjustNote)
+                  if (err) {
+                    setLocalError(err)
+                    return
+                  }
+                  setAdjustDollars('')
+                  setAdjustNote('')
+                }}
+              >
+                Adjust &amp; recalculate
+              </button>
+            </div>
+
+            <div className="member-admin-row">
+              <label className="field">
+                Discount %
+                <FieldControl saved={isSaved('discount')}>
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    defaultValue={member.discountPct}
+                    onBlur={async (e) => {
+                      const pct = Number(e.target.value)
+                      if (pct === member.discountPct) return
+                      const err = await onDiscount(pct)
+                      if (!err) flash('discount')
+                    }}
+                  />
+                </FieldControl>
+              </label>
+              <button type="button" className="btn ghost" disabled={busy} onClick={onRecalculate}>
+                {busy ? 'Working…' : 'Recalculate'}
+              </button>
+              <button type="button" className="btn ghost" disabled={busy} onClick={onArchive}>
+                {archived ? 'Restore to the roll' : 'Archive'}
+              </button>
+            </div>
+          </>
         ) : null}
       </div>
     </details>
@@ -159,6 +308,7 @@ function MemberCard({
 export function MembersPayments({ role }: { role: string }) {
   const [members, setMembers] = useState<LiveMembersState>({ status: 'loading', members: [] })
   const [billing, setBilling] = useState<LiveBillingState>({ status: 'loading', byMember: {} })
+  const [payments, setPayments] = useState<LivePaymentsState>({ status: 'loading', byMember: {} })
   const [seasons, setSeasons] = useState<LiveSeasonsState>({ status: 'loading', seasons: [] })
   const [range, setRange] = useState('month')
   const [error, setError] = useState<string | null>(null)
@@ -171,6 +321,7 @@ export function MembersPayments({ role }: { role: string }) {
 
   useEffect(() => subscribeMembers(setMembers), [])
   useEffect(() => subscribeBillingPeriods(setBilling), [])
+  useEffect(() => subscribePayments(setPayments), [])
   useEffect(() => subscribeSeasons(setSeasons), [])
   useEffect(() => subscribePlanChangeRequests(setPlanRequests), [])
 
@@ -198,23 +349,62 @@ export function MembersPayments({ role }: { role: string }) {
       return
     }
     setNote(
-      `Recalculated ${res.periodId}: ${res.chargeableCount} session${res.chargeableCount === 1 ? '' : 's'} charged, ${money(res.totalCents)} owed.`,
+      `Recalculated ${res.periodId}: ${res.chargeableCount} session${res.chargeableCount === 1 ? '' : 's'} charged, ${money(res.totalCents)} invoiced.`,
     )
   }
 
-  const togglePaid = async (uid: string, periodId: string, paid: boolean) => {
+  const recordPayment = async (
+    uid: string,
+    input: { amountCents: number; method: PaymentMethod; paidOn: string; note: string },
+  ) => {
     setBusyUid(uid)
     setError(null)
     setNote(null)
-    const err = await studioMarkBillingPeriodPaid(
+    const err = await studioRecordMemberPayment({ uid, ...input })
+    setBusyUid(null)
+    if (err) {
+      setError(err)
+      return err
+    }
+    setNote(`Recorded ${money(input.amountCents)} ${input.method} payment.`)
+    return null
+  }
+
+  const deletePayment = async (uid: string, paymentId: string) => {
+    setBusyUid(uid)
+    setError(null)
+    setNote(null)
+    const err = await studioDeleteMemberPayment(uid, paymentId)
+    setBusyUid(null)
+    if (err) {
+      setError(err)
+      return err
+    }
+    setNote('Payment removed.')
+    return null
+  }
+
+  const adjustOwed = async (uid: string, dollars: number, reason: string) => {
+    setBusyUid(uid)
+    setError(null)
+    setNote(null)
+    const err = await saveBillingAdjustment(uid, Math.round(dollars * 100), reason)
+    if (err) {
+      setBusyUid(null)
+      setError(err)
+      return err
+    }
+    const res = await studioCalculateBillingPeriod(
       uid,
-      periodId,
-      paid,
-      paid ? 'Payment cleared' : '',
+      range === 'month' ? { periodStart: currentMonthStart() } : { seasonId: range },
     )
     setBusyUid(null)
-    if (err) setError(err)
-    else setNote(paid ? `Marked ${periodId} paid.` : `Reopened ${periodId} as owed.`)
+    if (res.error) {
+      setError(res.error)
+      return res.error
+    }
+    setNote(`Adjustment saved and invoice recalculated (${money(res.totalCents)}).`)
+    return null
   }
 
   /**
@@ -266,20 +456,24 @@ export function MembersPayments({ role }: { role: string }) {
   const shown = letter ? searched.filter((m) => initialOf(m) === letter) : searched
   const archiveShown = archivedMembers.filter((m) => matchesQuery(m, archiveQuery))
 
-  const owedFor = (uid: string) => outstandingCents(billing.byMember[uid] ?? [])
+  const owedFor = (uid: string) =>
+    outstandingCents(billing.byMember[uid] ?? [], payments.byMember[uid] ?? [])
 
   const cardFor = (m: LiveMember) => (
     <li key={m.uid}>
       <MemberCard
         member={m}
         periods={billing.byMember[m.uid] ?? []}
+        payments={payments.byMember[m.uid] ?? []}
         owed={owedFor(m.uid)}
         role={role}
         busy={busyUid === m.uid}
         onRecalculate={() => recalculate(m.uid)}
-        onTogglePaid={(periodId, paid) => togglePaid(m.uid, periodId, paid)}
         onDiscount={(pct) => changeDiscount(m.uid, pct)}
         onArchive={() => void toggleArchived(m, owedFor(m.uid))}
+        onRecordPayment={(input) => recordPayment(m.uid, input)}
+        onDeletePayment={(paymentId) => deletePayment(m.uid, paymentId)}
+        onAdjust={(dollars, reason) => adjustOwed(m.uid, dollars, reason)}
       />
     </li>
   )
@@ -288,9 +482,9 @@ export function MembersPayments({ role }: { role: string }) {
     <section className="yacht-panel app-enter app-section">
       <h2>Members &amp; payments</h2>
       <p className="hint">
-        Owed comes from the last billing run for that period. Recalculate after roll call, then mark
-        a period paid once the money has landed — there is no payment gateway, so this is the record
-        of what has cleared.
+        Recalculate builds the invoice from their weekly subscription (sessions/week × rate) from
+        enrolment, not from role-call. Record cash or bank deposits against the balance — there is
+        no payment gateway.
       </p>
 
       {error ? <p className="form-error">{error}</p> : null}
@@ -340,6 +534,9 @@ export function MembersPayments({ role }: { role: string }) {
       ) : null}
       {billing.status === 'error' ? (
         <p className="form-error">Could not load billing: {billing.error}</p>
+      ) : null}
+      {payments.status === 'error' ? (
+        <p className="form-error">Could not load payments: {payments.error}</p>
       ) : null}
 
       <label className="field">

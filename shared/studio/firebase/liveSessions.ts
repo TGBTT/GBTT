@@ -192,6 +192,7 @@ function mapRosterEntry(id: string, data: DocumentData): RosterEntry {
         ? (status as RosterStatus)
         : 'booked',
     bookedBy: data.bookedBy === 'admin' ? 'admin' : 'self',
+    complimentary: data.complimentary === true,
     attendedAt: typeof data.attendedAt === 'string' ? data.attendedAt : undefined,
   }
 }

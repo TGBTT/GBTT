@@ -1,10 +1,8 @@
 /**
  * What the coming season will cost this member.
  *
- * The figure is counted from the sessions their locked slots actually produce,
- * so a holiday closure shows up here as a smaller number rather than as an
- * unexplained adjustment on a later invoice. Charging is per seat held, which
- * is why the count is of sessions rather than of classes attended.
+ * The figure is the plan allowance × billable weeks from enrolment (closures
+ * skipped), matching what `calculateBillingPeriod` invoices.
  */
 
 import { useEffect, useState } from 'react'
@@ -76,8 +74,8 @@ export function SeasonCost({ lockRevision = '' }: { lockRevision?: string }) {
       {projection && !projection.error && !busy ? (
         projection.sessionCount === 0 ? (
           <p className="hint">
-            You have no recurring slots locked for this season yet, so there is nothing to total up.
-            Lock a slot on the calendar above and the cost will appear here.
+            Nothing to bill for this season on your current plan — casual accounts only pay for
+            drop-ins, and a zero allowance produces no subscription charge.
           </p>
         ) : (
           <>
@@ -89,7 +87,7 @@ export function SeasonCost({ lockRevision = '' }: { lockRevision?: string }) {
             <p className="hint">
               {projection.billingMode === 'upfront'
                 ? 'This season is paid up front, so this is the amount invoiced when you enrol.'
-                : 'This season is billed at the end, for the seats you actually hold. Holiday closures are already excluded.'}
+                : 'This season is billed at the end from your weekly subscription. Holiday closures are already excluded.'}
             </p>
           </>
         )

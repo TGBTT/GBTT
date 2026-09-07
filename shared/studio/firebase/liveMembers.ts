@@ -91,6 +91,24 @@ export interface LiveBillingState {
   error?: string
 }
 
+export type PaymentMethod = 'cash' | 'bank'
+
+export interface LivePayment {
+  id: string
+  uid: string
+  amountCents: number
+  method: PaymentMethod
+  paidOn: string
+  note: string
+}
+
+export interface LivePaymentsState {
+  status: LiveStatus
+  /** Payments keyed by member uid, newest paidOn first. */
+  byMember: Record<string, LivePayment[]>
+  error?: string
+}
+
 function mapMember(uid: string, data: DocumentData): LiveMember {
   const profile = (data.profile ?? {}) as DocumentData
   const membership = (data.membership ?? {}) as DocumentData
@@ -355,9 +373,27 @@ export async function setMemberArchived(
   }
 }
 
-/** Total still owed across a member's unpaid periods, in cents. */
-export function outstandingCents(periods: LiveBillingPeriod[] = []): number {
+/** Invoice total still marked owed across billing periods, in cents. */
+export function invoicedOwedCents(periods: LiveBillingPeriod[] = []): number {
   return periods.filter((p) => p.status === 'owed').reduce((sum, p) => sum + p.totalCents, 0)
+}
+
+/** Sum of recorded payments, in cents. */
+export function paymentsTotalCents(payments: LivePayment[] = []): number {
+  return payments.reduce((sum, p) => sum + p.amountCents, 0)
+}
+
+/**
+ * Balance after invoices and the payment ledger.
+ *
+ * Periods already marked paid (legacy checkbox) are excluded from the invoice
+ * side; cash/bank entries reduce what remains on owed periods.
+ */
+export function outstandingCents(
+  periods: LiveBillingPeriod[] = [],
+  payments: LivePayment[] = [],
+): number {
+  return Math.max(0, invoicedOwedCents(periods) - paymentsTotalCents(payments))
 }
 
 /**
@@ -383,4 +419,98 @@ export async function saveMemberDiscount(uid: string, discountPct: number): Prom
   } catch (e) {
     return e instanceof Error ? e.message : 'Could not save this discount.'
   }
+}
+
+/**
+ * Set how many included sessions a member may lock per week.
+ *
+ * Written straight to Firestore: rules already restrict `users` updates to
+ * admins, and lock callables read `membership.classesPerWeek`.
+ */
+export async function saveMemberClassesPerWeek(
+  uid: string,
+  classesPerWeek: number,
+): Promise<string | null> {
+  const db = getFirestoreDb()
+  if (!db) return 'Firebase not configured.'
+  if (!Number.isFinite(classesPerWeek) || classesPerWeek < 0 || classesPerWeek > 14) {
+    return 'Sessions per week must be between 0 and 14.'
+  }
+  try {
+    await setDoc(
+      doc(db, 'users', uid),
+      { membership: { classesPerWeek: Math.round(classesPerWeek) } },
+      { merge: true },
+    )
+    return null
+  } catch (e) {
+    return e instanceof Error ? e.message : 'Could not save this allowance.'
+  }
+}
+
+/**
+ * Manual billing adjustment in cents (positive increases owed, negative reduces).
+ * Applied on the next `calculateBillingPeriod` run via `exceptions`.
+ */
+export async function saveBillingAdjustment(
+  uid: string,
+  adjustmentCents: number,
+  note = '',
+): Promise<string | null> {
+  const db = getFirestoreDb()
+  if (!db) return 'Firebase not configured.'
+  if (!Number.isFinite(adjustmentCents)) {
+    return 'Adjustment must be a number of cents.'
+  }
+  try {
+    const id = `adj-${Date.now()}`
+    await setDoc(doc(db, 'users', uid, 'exceptions', id), {
+      billingAdjustmentCents: Math.round(adjustmentCents),
+      note: note.trim(),
+      createdAt: new Date().toISOString(),
+    })
+    return null
+  } catch (e) {
+    return e instanceof Error ? e.message : 'Could not save this adjustment.'
+  }
+}
+
+function mapPayment(id: string, uid: string, data: DocumentData): LivePayment {
+  const method = data.method === 'bank' ? 'bank' : 'cash'
+  return {
+    id,
+    uid,
+    amountCents: Number(data.amountCents ?? 0),
+    method,
+    paidOn: String(data.paidOn ?? ''),
+    note: String(data.note ?? ''),
+  }
+}
+
+/** Every member's payment ledger entries, one collection-group listener. */
+export function subscribePayments(onChange: (state: LivePaymentsState) => void): () => void {
+  const db = getFirestoreDb()
+  if (!db) {
+    onChange({ status: 'unavailable', byMember: {} })
+    return () => {}
+  }
+
+  onChange({ status: 'loading', byMember: {} })
+
+  return onSnapshot(
+    collectionGroup(db, 'payments'),
+    (snap) => {
+      const byMember: Record<string, LivePayment[]> = {}
+      for (const d of snap.docs) {
+        const uid = d.ref.parent.parent?.id
+        if (!uid) continue
+        byMember[uid] = [...(byMember[uid] ?? []), mapPayment(d.id, uid, d.data())]
+      }
+      for (const uid of Object.keys(byMember)) {
+        byMember[uid].sort((a, b) => b.paidOn.localeCompare(a.paidOn) || b.id.localeCompare(a.id))
+      }
+      onChange({ status: 'ready', byMember })
+    },
+    (err) => onChange({ status: 'error', byMember: {}, error: err.message }),
+  )
 }

@@ -217,6 +217,7 @@ export default function ClassBoard() {
   const [newOccDay, setNewOccDay] = useState<Weekday>('Mon')
   const [newOccTime, setNewOccTime] = useState('07:00')
   const [addMemberId, setAddMemberId] = useState('')
+  const [addComplimentary, setAddComplimentary] = useState(false)
   const [newClassName, setNewClassName] = useState('')
   const [newClassCap, setNewClassCap] = useState(16)
   const [renameExerciseId, setRenameExerciseId] = useState<string | null>(null)
@@ -870,6 +871,8 @@ export default function ClassBoard() {
                   members={users}
                   addMemberId={addMemberId}
                   onAddMemberIdChange={setAddMemberId}
+                  complimentaryAdd={addComplimentary}
+                  onComplimentaryAddChange={setAddComplimentary}
                   onMarkAttendance={(memberId, attended) => {
                     setActionError(null)
                     void markAttendance(memberId, attended ? 'attended' : 'booked').then((err) =>
@@ -880,12 +883,22 @@ export default function ClassBoard() {
                     void (async () => {
                       setActionError(null)
                       const memberId = addMemberId
+                      const complimentary = addComplimentary
                       const err = await runWithOverlay(
-                        () => studioAddMemberToSession(selectedOcc.id, memberId),
-                        { working: 'Adding client to session…', success: 'Client added!' },
+                        () =>
+                          studioAddMemberToSession(selectedOcc.id, memberId, { complimentary }),
+                        {
+                          working: complimentary
+                            ? 'Adding makeup seat…'
+                            : 'Adding client to session…',
+                          success: complimentary ? 'Makeup seat added!' : 'Client added!',
+                        },
                       )
                       setActionError(err)
-                      if (!err) setAddMemberId('')
+                      if (!err) {
+                        setAddMemberId('')
+                        setAddComplimentary(false)
+                      }
                     })()
                   }}
                   addBusy={actionBusy}

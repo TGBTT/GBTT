@@ -19,6 +19,11 @@ import {
   type TimedSession,
 } from './weeklyCommitment'
 import { shouldFanBookSession, skipWeekKey, weeklyAllowanceRemaining } from './sessionLockHelpers'
+import {
+  billableWeekStarts,
+  enrolmentDateKey,
+  isPaidDropInCharge,
+} from './billingHelpers'
 
 initializeApp()
 
@@ -353,6 +358,8 @@ export const createMemberAccount = onCall(
         classesPerWeek,
         weeklySlotIds: [],
         creditsRemaining: 0,
+        // YYYY-MM-DD used for mid-season billing; set at create so signup week is fixed.
+        enrolledAt: dateKey(new Date()),
       },
       preferences: { showNameToClassmates: true },
       compliance: {},
@@ -784,9 +791,9 @@ export const calculateBillingPeriod = onCall(callableOptions(), async (request) 
 
   /*
    * A season and a calendar month are the same thing here: a date range to
-   * total seats over. Seasons are the configurable form — a term, a short
-   * summer block or a full year — and a month remains available so billing
-   * can run on a rolling cycle before any season is defined.
+   * total subscription weeks over. Seasons are the configurable form — a term,
+   * a short summer block or a full year — and a month remains available so
+   * billing can run on a rolling cycle before any season is defined.
    */
   const season = seasonId ? await loadSeason(seasonId) : null
   const periodStart = season ? season.startDate : requestedStart
@@ -800,48 +807,64 @@ export const calculateBillingPeriod = onCall(callableOptions(), async (request) 
   const membership = (user.membership as Record<string, unknown>) ?? {}
   const billing = (user.billing as Record<string, unknown>) ?? {}
   const planId = String(membership.planId ?? 'casual')
+  const classesPerWeek = Number(membership.classesPerWeek ?? 0)
 
   const planSnap = await db.doc(`pricingPlans/${planId}`).get()
   const plan = planSnap.data() ?? {}
-  // The tier's per-class rate is the whole price signal; the seat count comes
-  // from the roster rather than the plan allowance.
   const ratePerClass = Number(plan.ratePerClass ?? 0)
+  const rateCents = Math.round(ratePerClass * 100)
 
   const periodEnd = season ? season.endDate : periodEndFromStart(periodStart)
   const startTs = Timestamp.fromDate(new Date(`${periodStart}T00:00:00.000Z`))
   const endTs = Timestamp.fromDate(new Date(`${periodEnd}T23:59:59.999Z`))
 
-  /*
-   * Every seat held in the period is charged, not just the ones attended.
-   *
-   * A booked seat holds a place that nobody else could take, so the terms
-   * members accept on join make it non-refundable once the transfer window has
-   * closed — a no-show is still billed. Members who want out cancel or transfer
-   * before the window, which removes the roster entry entirely and so removes
-   * the charge with it.
-   *
-   * There is deliberately no separate subscription line. The tier a member is
-   * on sets their per-class rate — the more classes a week, the lower the rate —
-   * and that rate is already applied to each seat below. Adding a plan fee on
-   * top billed those same classes twice. The rates themselves live in
-   * `pricingPlans`, set from Pricing in the admin console.
-   */
-  const rosterQuery = await db.collectionGroup('roster').where('memberId', '==', uid).get()
-
-  const chargeable = rosterQuery.docs.filter((d) => {
-    const status = String(d.data()?.status ?? 'booked')
-    return status === 'booked' || status === 'attended' || status === 'noShow'
+  const enrolledAt = enrolmentDateKey({
+    enrolledAt: membership.enrolledAt,
+    createdAt: user.createdAt,
+    approvedAt: user.approvedAt,
   })
 
   /*
-   * Fetch the sessions in bulk rather than one per roster entry. A member with
-   * a full year of bookings has a few hundred entries, and reading each one
-   * inside the loop meant that many sequential round trips — enough to push the
-   * callable towards its timeout on exactly the members whose invoices matter
-   * most. `getAll` is chunked because it takes a bounded number of refs.
+   * Owed comes from the subscription allowance for each billable week from
+   * enrolment, not from role-call or how many slots they actually locked.
+   * Missed lock-ins still bill; complimentary makeups do not reduce the total.
    */
+  const weeks = billableWeekStarts({
+    periodStart,
+    periodEnd,
+    enrolmentDate: enrolledAt,
+    breaks: season?.breaks ?? [],
+  })
+
+  const lineItems: BillingLineItem[] = []
+  let chargeableCount = 0
+
+  if (classesPerWeek > 0 && rateCents > 0) {
+    const weekAmount = classesPerWeek * rateCents
+    for (const weekStart of weeks) {
+      chargeableCount += classesPerWeek
+      lineItems.push({
+        sessionId: `sub:${weekStart}`,
+        label: `${weekStart} · subscription × ${classesPerWeek}`,
+        amountCents: weekAmount,
+      })
+    }
+  }
+
+  /*
+   * Paid drop-ins on top of the plan still invoice. Complimentary / makeup
+   * seats (chargeRateCents 0 or complimentary flag) are ignored here.
+   */
+  const rosterQuery = await db.collectionGroup('roster').where('memberId', '==', uid).get()
+  const dropIns = rosterQuery.docs.filter((d) => {
+    const entry = d.data() ?? {}
+    const status = String(entry.status ?? 'booked')
+    if (status !== 'booked' && status !== 'attended' && status !== 'noShow') return false
+    return isPaidDropInCharge(entry)
+  })
+
   const sessionIds = [
-    ...new Set(chargeable.map((d) => d.ref.parent.parent?.id).filter((id): id is string => !!id)),
+    ...new Set(dropIns.map((d) => d.ref.parent.parent?.id).filter((id): id is string => !!id)),
   ]
 
   const sessions = new Map<string, Record<string, unknown>>()
@@ -854,48 +877,27 @@ export const calculateBillingPeriod = onCall(callableOptions(), async (request) 
     }
   }
 
-  const lineItems: BillingLineItem[] = []
   let attendedCount = 0
-  let chargeableCount = 0
-
-  for (const rosterDoc of chargeable) {
+  for (const rosterDoc of dropIns) {
     const entry = rosterDoc.data() ?? {}
     const status = String(entry.status ?? 'booked')
-
     const sessionId = rosterDoc.ref.parent.parent?.id
-    if (!sessionId) {
-      continue
-    }
+    if (!sessionId) continue
 
     const session = sessions.get(sessionId) ?? {}
     const weekStart = String(session.weekStart ?? '')
-    if (!weekStart) {
-      continue
-    }
+    if (!weekStart) continue
 
-    // An archived session still bills: the seat was held and the class ran or
-    // the member failed to release it in time.
     const sessionDate = new Date(`${weekStart}T00:00:00.000Z`)
-    if (sessionDate < startTs.toDate() || sessionDate > endTs.toDate()) {
-      continue
-    }
+    if (sessionDate < startTs.toDate() || sessionDate > endTs.toDate()) continue
 
-    if (status === 'attended') {
-      attendedCount += 1
-    }
+    if (status === 'attended') attendedCount += 1
     chargeableCount += 1
 
-    // Drop-ins carry the rate they were quoted at booking time, so a later
-    // change to the price list cannot alter an extra already agreed to.
-    const amountCents =
-      entry.chargeRateCents != null
-        ? Number(entry.chargeRateCents)
-        : Math.round(ratePerClass * 100)
-
-    const suffix = entry.dropIn ? ' · drop-in' : status === 'noShow' ? ' · no-show' : ''
+    const amountCents = Number(entry.chargeRateCents ?? 0)
     lineItems.push({
       sessionId,
-      label: `${weekStart} · ${String(session.slotId ?? sessionId)}${suffix}`,
+      label: `${weekStart} · ${String(session.slotId ?? sessionId)} · drop-in`,
       amountCents,
     })
   }
@@ -927,8 +929,6 @@ export const calculateBillingPeriod = onCall(callableOptions(), async (request) 
   }
 
   const totalCents = Math.max(0, subtotalCents - discountCents + adjustmentCents)
-  // Keyed by season where there is one so re-running replaces that season's
-  // invoice rather than filing a second one under its start date.
   const periodId = season ? season.id : periodStart
 
   await db.doc(`users/${uid}/billingPeriods/${periodId}`).set({
@@ -938,6 +938,8 @@ export const calculateBillingPeriod = onCall(callableOptions(), async (request) 
     seasonName: season?.name ?? null,
     billingMode: season?.billingMode ?? 'arrears',
     planId,
+    classesPerWeek,
+    enrolledAt: enrolledAt ?? null,
     lineItems,
     attendedCount,
     chargeableCount,
@@ -1352,56 +1354,33 @@ export const projectSeasonInvoice = onCall(callableOptions(), async (request) =>
   if (!userSnap.exists) {
     throw new HttpsError('not-found', 'Member not found.')
   }
-  const membership = (userSnap.data()?.membership as Record<string, unknown>) ?? {}
+  const user = userSnap.data() ?? {}
+  const membership = (user.membership as Record<string, unknown>) ?? {}
   const planId = String(membership.planId ?? 'casual')
+  const classesPerWeek = Number(membership.classesPerWeek ?? 0)
 
   const planSnap = await db.doc(`pricingPlans/${planId}`).get()
   const ratePerClass = Number(planSnap.data()?.ratePerClass ?? 0)
   const planName = String(planSnap.data()?.name ?? planId)
 
+  const enrolledAt = enrolmentDateKey({
+    enrolledAt: membership.enrolledAt,
+    createdAt: user.createdAt,
+    approvedAt: user.approvedAt,
+  })
+
+  const weeks = billableWeekStarts({
+    periodStart: season.startDate,
+    periodEnd: season.endDate,
+    enrolmentDate: enrolledAt,
+    breaks: season.breaks,
+  })
+
+  const sessionCount = classesPerWeek > 0 ? weeks.length * classesPerWeek : 0
+  const totalCents = Math.round(ratePerClass * 100) * sessionCount
+
   const locksSnap = await db.collection(`users/${uid}/weeklyLocks`).get()
   const lockedSlotIds = locksSnap.docs.map((d) => d.id)
-
-  if (!lockedSlotIds.length) {
-    return {
-      ok: true,
-      seasonId: season.id,
-      seasonName: season.name,
-      billingMode: season.billingMode,
-      planName,
-      lockedSlotIds,
-      sessionCount: 0,
-      ratePerClass,
-      totalCents: 0,
-      note: 'No recurring slots locked yet, so there is nothing to project.',
-    }
-  }
-
-  // Count from the sessions that actually exist for the season rather than
-  // from the season length, so a closure or a cancelled class is reflected.
-  const sessionsSnap = await db.collection('sessions').where('seasonId', '==', season.id).get()
-
-  const skippedBySlot = new Map<string, Set<string>>()
-  for (const lockDoc of locksSnap.docs) {
-    const slotId = lockDoc.id
-    const skipsSnap = await db
-      .collection(`users/${uid}/weeklyLocks/${slotId}/skippedWeeks`)
-      .get()
-    skippedBySlot.set(
-      slotId,
-      new Set(skipsSnap.docs.map((d) => d.id)),
-    )
-  }
-
-  const sessionCount = sessionsSnap.docs.filter((d) => {
-    const data = d.data()
-    const slotId = String(data.slotId ?? '')
-    if (data.cancelled === true || !lockedSlotIds.includes(slotId)) return false
-    const weekStart = String(data.weekStart ?? '')
-    return !skippedBySlot.get(slotId)?.has(weekStart)
-  }).length
-
-  const totalCents = Math.round(ratePerClass * 100) * sessionCount
 
   return {
     ok: true,
@@ -1411,8 +1390,16 @@ export const projectSeasonInvoice = onCall(callableOptions(), async (request) =>
     planName,
     lockedSlotIds,
     sessionCount,
+    weekCount: weeks.length,
+    classesPerWeek,
     ratePerClass,
     totalCents,
+    note:
+      classesPerWeek <= 0
+        ? 'Casual plans have no weekly subscription charge — only drop-ins bill.'
+        : enrolledAt && enrolledAt > season.startDate
+          ? `Quoted from enrolment (${enrolledAt}) through season end, closures skipped.`
+          : 'Quoted for every billable week in the season at the plan allowance.',
   }
 })
 
@@ -1467,7 +1454,87 @@ export const markBillingPeriodPaid = onCall(callableOptions(), async (request) =
   return { ok: true, uid, periodId, status: paid ? 'paid' : 'owed' }
 })
 
-/** Admin creates a complimentary guest pass and emails the code via Apps Script. */
+/** Admin records a cash or bank payment against a member. */
+export const recordMemberPayment = onCall(callableOptions(), async (request) => {
+  requireAdmin(request)
+
+  const uid = String(request.data?.uid ?? '').trim()
+  const amountCents = Math.round(Number(request.data?.amountCents ?? 0))
+  const method = String(request.data?.method ?? '').trim()
+  const paidOn = String(request.data?.paidOn ?? '').trim()
+  const note = String(request.data?.note ?? '').trim()
+
+  if (!uid) {
+    throw new HttpsError('invalid-argument', 'uid is required.')
+  }
+  if (!Number.isFinite(amountCents) || amountCents <= 0) {
+    throw new HttpsError('invalid-argument', 'amountCents must be a positive number.')
+  }
+  if (method !== 'cash' && method !== 'bank') {
+    throw new HttpsError('invalid-argument', 'method must be cash or bank.')
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(paidOn)) {
+    throw new HttpsError('invalid-argument', 'paidOn must be YYYY-MM-DD.')
+  }
+
+  const userSnap = await db.doc(`users/${uid}`).get()
+  if (!userSnap.exists) {
+    throw new HttpsError('not-found', 'Member not found.')
+  }
+
+  const ref = db.collection(`users/${uid}/payments`).doc()
+  await ref.set({
+    amountCents,
+    method,
+    paidOn,
+    note,
+    recordedBy: request.auth!.uid,
+    createdAt: FieldValue.serverTimestamp(),
+  })
+
+  await db.collection('audit').add({
+    type: 'recordMemberPayment',
+    uid,
+    paymentId: ref.id,
+    amountCents,
+    method,
+    paidOn,
+    by: request.auth!.uid,
+    at: FieldValue.serverTimestamp(),
+  })
+
+  return { ok: true, paymentId: ref.id }
+})
+
+/** Admin removes a mistaken payment ledger entry. */
+export const deleteMemberPayment = onCall(callableOptions(), async (request) => {
+  requireAdmin(request)
+
+  const uid = String(request.data?.uid ?? '').trim()
+  const paymentId = String(request.data?.paymentId ?? '').trim()
+  if (!uid || !paymentId) {
+    throw new HttpsError('invalid-argument', 'uid and paymentId are required.')
+  }
+
+  const ref = db.doc(`users/${uid}/payments/${paymentId}`)
+  const snap = await ref.get()
+  if (!snap.exists) {
+    throw new HttpsError('not-found', 'Payment not found.')
+  }
+
+  await ref.delete()
+
+  await db.collection('audit').add({
+    type: 'deleteMemberPayment',
+    uid,
+    paymentId,
+    by: request.auth!.uid,
+    at: FieldValue.serverTimestamp(),
+  })
+
+  return { ok: true, paymentId }
+})
+
 /**
  * Emails every active member.
  *
@@ -1974,10 +2041,9 @@ async function bookMemberIntoSession(
   preferences: Record<string, unknown>,
   bookedBy: 'self' | 'admin',
   // A seat is "included" only when it comes from a recurring weekly lock, which
-  // is what the subscription allowance actually buys. Everything else is an
-  // extra, so admin-added seats are chargeable too and Tom waives them with a
-  // billing exception rather than by them being silently free.
-  charge: { dropIn: boolean; chargeRateCents: number },
+  // is what the subscription allowance actually buys. Paid drop-ins are extras.
+  // Complimentary makeups are free seats that do not change what is owed.
+  charge: { dropIn: boolean; chargeRateCents: number; complimentary?: boolean },
   // Set by the weekly-lock fan-out, which covers all its seats with a single
   // recurring invite of its own. See onRosterWrite.
   suppressInvite = false,
@@ -2005,6 +2071,7 @@ async function bookMemberIntoSession(
     const rosterSnap = await tx.get(rosterRef)
     if (rosterSnap.size >= cap) return 'full'
 
+    const complimentary = charge.complimentary === true
     tx.set(entryRef, {
       memberId,
       displayName: String(profile.name ?? ''),
@@ -2013,7 +2080,8 @@ async function bookMemberIntoSession(
       status: 'booked',
       bookedBy,
       dropIn: charge.dropIn,
-      chargeRateCents: charge.dropIn ? charge.chargeRateCents : 0,
+      complimentary,
+      chargeRateCents: complimentary ? 0 : charge.dropIn ? charge.chargeRateCents : 0,
       bookedAt: FieldValue.serverTimestamp(),
       inviteSuppressed: suppressInvite,
     })
@@ -2047,6 +2115,7 @@ export const addMemberToSession = onCall(callableOptions(), async (request) => {
 
   const sessionId = String(request.data?.sessionId ?? '').trim()
   const memberId = String(request.data?.memberId ?? '').trim()
+  const complimentary = request.data?.complimentary === true
   if (!sessionId || !memberId) {
     throw new HttpsError('invalid-argument', 'sessionId and memberId are required.')
   }
@@ -2063,7 +2132,9 @@ export const addMemberToSession = onCall(callableOptions(), async (request) => {
     (data.profile as Record<string, unknown>) ?? {},
     (data.preferences as Record<string, unknown>) ?? {},
     'admin',
-    { dropIn: true, chargeRateCents: await dropInRateCents() },
+    complimentary
+      ? { dropIn: true, chargeRateCents: 0, complimentary: true }
+      : { dropIn: true, chargeRateCents: await dropInRateCents() },
   )
 
   if (result === 'missing') throw new HttpsError('not-found', 'Session not found.')
@@ -2075,7 +2146,7 @@ export const addMemberToSession = onCall(callableOptions(), async (request) => {
   }
   if (result === 'full') throw new HttpsError('resource-exhausted', 'This session is full.')
 
-  return { ok: true, sessionId, memberId }
+  return { ok: true, sessionId, memberId, complimentary }
 })
 
 /**
@@ -2737,9 +2808,26 @@ export const approveMember = onCall(callableOptions(), async (request) => {
   const userRecord = await auth.getUser(uid)
   await auth.setCustomUserClaims(uid, { ...(userRecord.customClaims ?? {}), role: 'member' })
 
+  const existingMembership = (snap.data()?.membership as Record<string, unknown>) ?? {}
+  const requested = (snap.data()?.requested as Record<string, unknown>) ?? {}
+  const planId = String(existingMembership.planId ?? requested.planId ?? 'casual')
+  const planSnap = await db.doc(`pricingPlans/${planId}`).get()
+  const classesPerWeek = Number(
+    existingMembership.classesPerWeek ?? planSnap.data()?.classesPerWeek ?? 0,
+  )
+  const enrolledAt =
+    typeof existingMembership.enrolledAt === 'string' && existingMembership.enrolledAt
+      ? existingMembership.enrolledAt
+      : dateKey(new Date())
+
   await userRef.set(
     {
       profile: { status: 'active' },
+      membership: {
+        planId,
+        classesPerWeek,
+        enrolledAt,
+      },
       approvedAt: FieldValue.serverTimestamp(),
       approvedBy: request.auth!.uid,
     },

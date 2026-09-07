@@ -25,6 +25,7 @@ export interface RosterEntry {
   showName: boolean
   status?: RosterStatus
   bookedBy?: 'self' | 'admin'
+  complimentary?: boolean
   attendedAt?: string
 }
 

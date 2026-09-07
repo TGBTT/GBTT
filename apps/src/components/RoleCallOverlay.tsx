@@ -33,6 +33,7 @@ export function RoleCallOverlay({ members, classNames, onClose }: RoleCallOverla
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [pendingPick, setPendingPick] = useState<PendingPick>('current')
   const [addMemberId, setAddMemberId] = useState('')
+  const [addComplimentary, setAddComplimentary] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const { run: runWithOverlay, overlayProps, busy: overlayBusy } = useWorkingOverlay()
   const emptyWeekSkips = useRef(0)
@@ -107,6 +108,7 @@ export function RoleCallOverlay({ members, classNames, onClose }: RoleCallOverla
     (direction: -1 | 1) => {
       setActionError(null)
       setAddMemberId('')
+      setAddComplimentary(false)
       emptyWeekSkips.current = 0
       const idx = selectedId ? sorted.findIndex((s) => s.id === selectedId) : -1
       const nextIdx = idx + direction
@@ -123,6 +125,7 @@ export function RoleCallOverlay({ members, classNames, onClose }: RoleCallOverla
   const jumpToNow = () => {
     setActionError(null)
     setAddMemberId('')
+    setAddComplimentary(false)
     emptyWeekSkips.current = 0
     const nowWeek = currentWeekStart()
     if (weekStart === nowWeek && live.status === 'ready') {
@@ -224,6 +227,8 @@ export function RoleCallOverlay({ members, classNames, onClose }: RoleCallOverla
             members={members}
             addMemberId={addMemberId}
             onAddMemberIdChange={setAddMemberId}
+            complimentaryAdd={addComplimentary}
+            onComplimentaryAddChange={setAddComplimentary}
             onMarkAttendance={(memberId, attended) => {
               setActionError(null)
               void markAttendance(memberId, attended ? 'attended' : 'booked').then((err) =>
@@ -234,12 +239,21 @@ export function RoleCallOverlay({ members, classNames, onClose }: RoleCallOverla
               void (async () => {
                 setActionError(null)
                 const memberId = addMemberId
+                const complimentary = addComplimentary
                 const err = await runWithOverlay(
-                  () => studioAddMemberToSession(occ.id, memberId),
-                  { working: 'Adding client to session…', success: 'Client added!' },
+                  () => studioAddMemberToSession(occ.id, memberId, { complimentary }),
+                  {
+                    working: complimentary
+                      ? 'Adding makeup seat…'
+                      : 'Adding client to session…',
+                    success: complimentary ? 'Makeup seat added!' : 'Client added!',
+                  },
                 )
                 setActionError(err)
-                if (!err) setAddMemberId('')
+                if (!err) {
+                  setAddMemberId('')
+                  setAddComplimentary(false)
+                }
               })()
             }}
             addBusy={overlayBusy}

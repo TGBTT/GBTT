@@ -40,8 +40,11 @@ async function completeMemberSignIn(
 
   const data = profile.data() ?? {}
   const planId = String(data.membership?.planId ?? data.requested?.planId ?? 'casual')
+  const membershipAllowance = Number(data.membership?.classesPerWeek)
   const planSnap = await getDoc(doc(db, 'pricingPlans', planId))
-  const classesPerWeek = Number(planSnap.data()?.classesPerWeek ?? 0)
+  const classesPerWeek = Number.isFinite(membershipAllowance)
+    ? membershipAllowance
+    : Number(planSnap.data()?.classesPerWeek ?? 0)
 
   if (data.profile?.status === 'suspended') {
     if (auth) await signOut(auth)
@@ -379,15 +382,20 @@ export async function studioMarkAttendance(
   }
 }
 
-/** Staff add a client to a session (phone bookings, walk-ins). */
+/** Staff add a client to a session (phone bookings, walk-ins, makeup). */
 export async function studioAddMemberToSession(
   sessionId: string,
   memberId: string,
+  options?: { complimentary?: boolean },
 ): Promise<string | null> {
   const functions = getFirebaseFunctions()
   if (!functions) return 'Firebase not configured.'
   try {
-    await httpsCallable(functions, 'addMemberToSession')({ sessionId, memberId })
+    await httpsCallable(functions, 'addMemberToSession')({
+      sessionId,
+      memberId,
+      complimentary: options?.complimentary === true,
+    })
     return null
   } catch (e) {
     return e instanceof Error ? e.message : 'Could not add this member.'
@@ -620,6 +628,39 @@ export async function studioMarkBillingPeriodPaid(
     return null
   } catch (e) {
     return e instanceof Error ? e.message : 'Could not update this payment.'
+  }
+}
+
+/** Record a cash or bank payment against a member's balance. */
+export async function studioRecordMemberPayment(input: {
+  uid: string
+  amountCents: number
+  method: 'cash' | 'bank'
+  paidOn: string
+  note?: string
+}): Promise<string | null> {
+  const functions = getFirebaseFunctions()
+  if (!functions) return 'Firebase not configured.'
+  try {
+    await httpsCallable(functions, 'recordMemberPayment')(input)
+    return null
+  } catch (e) {
+    return e instanceof Error ? e.message : 'Could not record this payment.'
+  }
+}
+
+/** Remove a mistaken payment ledger entry. */
+export async function studioDeleteMemberPayment(
+  uid: string,
+  paymentId: string,
+): Promise<string | null> {
+  const functions = getFirebaseFunctions()
+  if (!functions) return 'Firebase not configured.'
+  try {
+    await httpsCallable(functions, 'deleteMemberPayment')({ uid, paymentId })
+    return null
+  } catch (e) {
+    return e instanceof Error ? e.message : 'Could not delete this payment.'
   }
 }
 

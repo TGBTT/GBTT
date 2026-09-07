@@ -9,11 +9,28 @@
  * Submitting is per-row rather than a batch: one rejected address must not
  * discard the fifteen good ones behind it, so failures stay on screen with
  * their reason and succeeded rows drop away.
+ *
+ * Below the create form, existing clients can have their weekly session
+ * allowance raised so frequent attendees can lock more than their plan tier.
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { studioCreateMemberAccount, studioResendInvite } from '@gbtt/shared/studio/studioAuth'
+import {
+  isArchivedMember,
+  saveMemberClassesPerWeek,
+  subscribeMembers,
+  type LiveMember,
+  type LiveMembersState,
+} from '@gbtt/shared/studio/firebase/liveMembers'
 import { useLivePricing } from '../hooks/useLivePricing'
+import {
+  AlphabetFilter,
+  compareMembersByName,
+  initialOf,
+  matchesQuery,
+} from './memberDirectory'
+import { FieldControl, useFieldSaveFlash } from './FieldSaveFlash'
 
 /** A created account, tracked so a failed invite email can be retried on its own. */
 interface Invited {
@@ -104,6 +121,48 @@ function isBlank(r: Row): boolean {
   return !r.name.trim() && !r.email.trim() && !r.phone.trim()
 }
 
+function ExistingClientRow({ member }: { member: LiveMember }) {
+  const { flash, isSaved } = useFieldSaveFlash()
+  const [error, setError] = useState<string | null>(null)
+
+  return (
+    <li className="client-allowance-row">
+      <div className="client-allowance-row__meta">
+        <strong>{member.name}</strong>
+        <span className="hint">
+          {member.planId} · {member.email}
+          {member.status !== 'active' ? ` · ${member.status}` : ''}
+        </span>
+      </div>
+      <label className="field">
+        Included sessions / week
+        <FieldControl saved={isSaved('allowance')}>
+          <input
+            type="number"
+            min={0}
+            max={14}
+            defaultValue={member.classesPerWeek}
+            key={`${member.uid}-${member.classesPerWeek}`}
+            onBlur={async (e) => {
+              const n = Number(e.target.value)
+              if (n === member.classesPerWeek) return
+              setError(null)
+              const err = await saveMemberClassesPerWeek(member.uid, n)
+              if (err) {
+                setError(err)
+                e.target.value = String(member.classesPerWeek)
+                return
+              }
+              flash('allowance')
+            }}
+          />
+        </FieldControl>
+      </label>
+      {error ? <p className="form-error">{error}</p> : null}
+    </li>
+  )
+}
+
 export function ClientAccounts() {
   const pricing = useLivePricing()
   const plans = pricing.plans
@@ -116,6 +175,12 @@ export function ClientAccounts() {
   const [created, setCreated] = useState<Invited[]>([])
   const [error, setError] = useState<string | null>(null)
 
+  const [members, setMembers] = useState<LiveMembersState>({ status: 'loading', members: [] })
+  const [query, setQuery] = useState('')
+  const [letter, setLetter] = useState('')
+
+  useEffect(() => subscribeMembers(setMembers), [])
+
   // Plans load asynchronously, so the first row is created before the default
   // plan id is known. Adopt it once, without disturbing a row already edited.
   useEffect(() => {
@@ -125,6 +190,21 @@ export function ClientAccounts() {
   }, [defaultPlan])
 
   const problems = validate(rows)
+
+  const existing = useMemo(() => {
+    const list = members.members
+      .filter((m) => m.role === 'member' && !isArchivedMember(m))
+      .sort(compareMembersByName)
+    return list.filter((m) => matchesQuery(m, query)).filter((m) => !letter || initialOf(m) === letter)
+  }, [members.members, query, letter])
+
+  const allExisting = useMemo(
+    () =>
+      members.members
+        .filter((m) => m.role === 'member' && !isArchivedMember(m))
+        .sort(compareMembersByName),
+    [members.members],
+  )
 
   /*
    * The account exists either way — only the email failed. Resending is
@@ -210,165 +290,207 @@ export function ClientAccounts() {
   }
 
   return (
-    <section className="yacht-panel app-enter app-section">
-      <h2>Add client accounts</h2>
-      <p className="hint">
-        Creates each client an account and emails them an invitation to set their own password —
-        nobody here is given a password to pass on. Name, email and phone come from your client
-        list; the plan can be changed later.
-      </p>
-
-      {pricing.status === 'unavailable' ? (
-        <p className="form-error">
-          Firebase is not configured, so accounts cannot be created from this build.
-        </p>
-      ) : null}
-      {pricing.status === 'error' ? (
-        <p className="form-error">Could not load plans: {pricing.error}</p>
-      ) : null}
-
-      <details className="client-paste">
-        <summary>Paste from a spreadsheet</summary>
+    <>
+      <section className="yacht-panel app-enter app-section">
+        <h2>Add client accounts</h2>
         <p className="hint">
-          One client per line as <code>name, email, phone</code> — commas or tabs, and a header row
-          is ignored. This replaces the rows below so you can check them first.
+          Creates each client an account and emails them an invitation to set their own password —
+          nobody here is given a password to pass on. Name, email and phone come from your client
+          list; the plan can be changed later.
         </p>
-        <label className="field">
-          Pasted rows
-          <textarea
-            rows={6}
-            value={paste}
-            onChange={(e) => setPaste(e.target.value)}
-            placeholder={'Name, Email, Phone\nAlex Reed, alex@example.com, 021 555 0101'}
-          />
-        </label>
+
+        {pricing.status === 'unavailable' ? (
+          <p className="form-error">
+            Firebase is not configured, so accounts cannot be created from this build.
+          </p>
+        ) : null}
+        {pricing.status === 'error' ? (
+          <p className="form-error">Could not load plans: {pricing.error}</p>
+        ) : null}
+
+        <details className="client-paste">
+          <summary>Paste from a spreadsheet</summary>
+          <p className="hint">
+            One client per line as <code>name, email, phone</code> — commas or tabs, and a header row
+            is ignored. This replaces the rows below so you can check them first.
+          </p>
+          <label className="field">
+            Pasted rows
+            <textarea
+              rows={6}
+              value={paste}
+              onChange={(e) => setPaste(e.target.value)}
+              placeholder={'Name, Email, Phone\nAlex Reed, alex@example.com, 021 555 0101'}
+            />
+          </label>
+          <div className="btn-row">
+            <button type="button" className="btn ghost" disabled={!paste.trim()} onClick={applyPaste}>
+              Read rows
+            </button>
+          </div>
+        </details>
+
+        {pasteNote ? <p className="form-success">{pasteNote}</p> : null}
+        {error ? <p className="form-error">{error}</p> : null}
+
+        {created.length ? (
+          <div className="form-success">
+            <p>
+              Created {created.length} account{created.length === 1 ? '' : 's'}:
+            </p>
+            <ul>
+              {created.map((c) => (
+                <li key={c.email}>
+                  {c.name} ({c.email}){' '}
+                  {c.emailSent ? (
+                    <span>— invite emailed</span>
+                  ) : (
+                    <>
+                      <span className="form-error">
+                        — the invite email did not send
+                        {c.inviteError ? `: ${c.inviteError}` : ''}
+                      </span>{' '}
+                      <button
+                        type="button"
+                        className="link-button"
+                        disabled={c.resending}
+                        onClick={() => void resend(c.email)}
+                      >
+                        {c.resending ? 'Resending…' : 'Resend invite'}
+                      </button>
+                    </>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+
+        <ul className="client-row-list">
+          {rows.map((row, index) => (
+            <li key={row.key}>
+              <div className="client-row-grid">
+                <label className="field">
+                  Name
+                  <input
+                    value={row.name}
+                    onChange={(e) => patch(row.key, { name: e.target.value })}
+                    autoComplete="off"
+                  />
+                </label>
+                <label className="field">
+                  Email
+                  <input
+                    value={row.email}
+                    onChange={(e) => patch(row.key, { email: e.target.value })}
+                    autoComplete="off"
+                    inputMode="email"
+                  />
+                </label>
+                <label className="field">
+                  Phone
+                  <input
+                    value={row.phone}
+                    onChange={(e) => patch(row.key, { phone: e.target.value })}
+                    autoComplete="off"
+                    inputMode="tel"
+                  />
+                </label>
+                <label className="field">
+                  Plan
+                  <select
+                    value={row.planId}
+                    onChange={(e) => patch(row.key, { planId: e.target.value })}
+                  >
+                    {plans.length ? (
+                      plans.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                        </option>
+                      ))
+                    ) : (
+                      <option value={row.planId}>{row.planId}</option>
+                    )}
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  className="btn ghost client-row-remove"
+                  disabled={busy || (rows.length === 1 && isBlank(row))}
+                  onClick={() =>
+                    setRows((current) =>
+                      current.length === 1
+                        ? [blankRow(defaultPlan)]
+                        : current.filter((r) => r.key !== row.key),
+                    )
+                  }
+                  aria-label={`Remove row ${index + 1}`}
+                >
+                  Remove
+                </button>
+              </div>
+              {problems[row.key] ? <p className="form-error">{problems[row.key]}</p> : null}
+              {row.failure ? <p className="form-error">Not created: {row.failure}</p> : null}
+            </li>
+          ))}
+        </ul>
+
         <div className="btn-row">
-          <button type="button" className="btn ghost" disabled={!paste.trim()} onClick={applyPaste}>
-            Read rows
+          <button
+            type="button"
+            className="btn ghost"
+            disabled={busy}
+            onClick={() => setRows((current) => [...current, blankRow(defaultPlan)])}
+          >
+            Add another
+          </button>
+          <button type="button" className="btn primary" disabled={!canSubmit} onClick={submit}>
+            {busy
+              ? 'Creating accounts…'
+              : `Create ${fillable.length || 0} account${fillable.length === 1 ? '' : 's'} & email invitations`}
           </button>
         </div>
-      </details>
+      </section>
 
-      {pasteNote ? <p className="form-success">{pasteNote}</p> : null}
-      {error ? <p className="form-error">{error}</p> : null}
+      <section className="yacht-panel app-enter app-section">
+        <h2>Existing clients</h2>
+        <p className="hint">
+          Raise included sessions per week when someone comes more often than their plan tier. This
+          is what they can lock in — billing uses the same figure.
+        </p>
 
-      {created.length ? (
-        <div className="form-success">
-          <p>
-            Created {created.length} account{created.length === 1 ? '' : 's'}:
-          </p>
-          <ul>
-            {created.map((c) => (
-              <li key={c.email}>
-                {c.name} ({c.email}){' '}
-                {c.emailSent ? (
-                  <span>— invite emailed</span>
-                ) : (
-                  <>
-                    <span className="form-error">
-                      — the invite email did not send
-                      {c.inviteError ? `: ${c.inviteError}` : ''}
-                    </span>{' '}
-                    <button
-                      type="button"
-                      className="link-button"
-                      disabled={c.resending}
-                      onClick={() => void resend(c.email)}
-                    >
-                      {c.resending ? 'Resending…' : 'Resend invite'}
-                    </button>
-                  </>
-                )}
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
+        {members.status === 'loading' ? <p className="hint">Loading clients…</p> : null}
+        {members.status === 'error' ? (
+          <p className="form-error">Could not load clients: {members.error}</p>
+        ) : null}
 
-      <ul className="client-row-list">
-        {rows.map((row, index) => (
-          <li key={row.key}>
-            <div className="client-row-grid">
-              <label className="field">
-                Name
-                <input
-                  value={row.name}
-                  onChange={(e) => patch(row.key, { name: e.target.value })}
-                  autoComplete="off"
-                />
-              </label>
-              <label className="field">
-                Email
-                <input
-                  value={row.email}
-                  onChange={(e) => patch(row.key, { email: e.target.value })}
-                  autoComplete="off"
-                  inputMode="email"
-                />
-              </label>
-              <label className="field">
-                Phone
-                <input
-                  value={row.phone}
-                  onChange={(e) => patch(row.key, { phone: e.target.value })}
-                  autoComplete="off"
-                  inputMode="tel"
-                />
-              </label>
-              <label className="field">
-                Plan
-                <select
-                  value={row.planId}
-                  onChange={(e) => patch(row.key, { planId: e.target.value })}
-                >
-                  {plans.length ? (
-                    plans.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name}
-                      </option>
-                    ))
-                  ) : (
-                    <option value={row.planId}>{row.planId}</option>
-                  )}
-                </select>
-              </label>
-              <button
-                type="button"
-                className="btn ghost client-row-remove"
-                disabled={busy || (rows.length === 1 && isBlank(row))}
-                onClick={() =>
-                  setRows((current) =>
-                    current.length === 1
-                      ? [blankRow(defaultPlan)]
-                      : current.filter((r) => r.key !== row.key),
-                  )
-                }
-                aria-label={`Remove row ${index + 1}`}
-              >
-                Remove
-              </button>
-            </div>
-            {problems[row.key] ? <p className="form-error">{problems[row.key]}</p> : null}
-            {row.failure ? <p className="form-error">Not created: {row.failure}</p> : null}
-          </li>
-        ))}
-      </ul>
-
-      <div className="btn-row">
-        <button
-          type="button"
-          className="btn ghost"
-          disabled={busy}
-          onClick={() => setRows((current) => [...current, blankRow(defaultPlan)])}
-        >
-          Add another
-        </button>
-        <button type="button" className="btn primary" disabled={!canSubmit} onClick={submit}>
-          {busy
-            ? 'Creating accounts…'
-            : `Create ${fillable.length || 0} account${fillable.length === 1 ? '' : 's'} & email invitations`}
-        </button>
-      </div>
-    </section>
+        {members.status === 'ready' ? (
+          <>
+            <label className="field">
+              Find a client
+              <input
+                type="search"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Name or email"
+                autoComplete="off"
+              />
+            </label>
+            <AlphabetFilter members={allExisting} active={letter} onChange={setLetter} />
+            {!allExisting.length ? (
+              <p className="hint">No clients on the roll yet.</p>
+            ) : !existing.length ? (
+              <p className="hint">No clients match that filter.</p>
+            ) : (
+              <ul className="client-allowance-list">
+                {existing.map((m) => (
+                  <ExistingClientRow key={m.uid} member={m} />
+                ))}
+              </ul>
+            )}
+          </>
+        ) : null}
+      </section>
+    </>
   )
 }
