@@ -135,11 +135,42 @@ function MemberCard({
           <ul className="billing-period-list">
             {periods.map((p) => (
               <li key={p.id}>
-                <span>
-                  {p.seasonName ?? `${p.periodStart} → ${p.periodEnd}`} ·{' '}
-                  <strong>{money(p.totalCents)}</strong> · {p.chargeableCount} charged
-                  {p.status === 'paid' ? ' · marked paid' : ' · open'}
-                </span>
+                <details className="billing-period-detail">
+                  <summary>
+                    {p.seasonName ?? `${p.periodStart} → ${p.periodEnd}`} ·{' '}
+                    <strong>{money(p.totalCents)}</strong> · {p.chargeableCount} charged
+                    {p.status === 'paid' ? ' · marked paid' : ' · open'}
+                  </summary>
+                  {p.tierSummaries.length > 1 ? (
+                    <p className="hint billing-tier-shift">
+                      {p.tierSummaries
+                        .map(
+                          (t) =>
+                            `${t.classesPerWeek}/week @ $${(t.ratePerClassCents / 100).toFixed(2)} (${t.weeks} wk · ${money(t.amountCents)})`,
+                        )
+                        .join(' → ')}
+                    </p>
+                  ) : null}
+                  {p.tierSummaries.length === 1 ? (
+                    <p className="hint">
+                      {p.tierSummaries[0].classesPerWeek}/week @ $
+                      {(p.tierSummaries[0].ratePerClassCents / 100).toFixed(2)} ·{' '}
+                      {p.tierSummaries[0].weeks} week
+                      {p.tierSummaries[0].weeks === 1 ? '' : 's'}
+                    </p>
+                  ) : null}
+                  {p.lineItems.length ? (
+                    <ul className="billing-line-items">
+                      {p.lineItems.map((item) => (
+                        <li key={`${item.sessionId}-${item.label}`}>
+                          {item.label} · {money(item.amountCents)}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="hint">No line items on this invoice.</p>
+                  )}
+                </details>
               </li>
             ))}
           </ul>
@@ -496,8 +527,8 @@ export function MembersPayments({ role }: { role: string }) {
             Plan change request{planRequests.length === 1 ? '' : 's'} ({planRequests.length})
           </h3>
           <p className="hint">
-            Approving switches the member onto the new plan from now. Their existing plan stays in
-            force until you do.
+            Approving switches their lock allowance from now. Billing keeps earlier weeks at the old
+            rate; an upgrade&apos;s new rate starts when they book the extra session.
           </p>
           <ul className="plan-request-list">
             {planRequests.map((r) => (

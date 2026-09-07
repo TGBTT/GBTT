@@ -664,6 +664,30 @@ export async function studioDeleteMemberPayment(
   }
 }
 
+/**
+ * Admin sets included sessions/week. Snapshots mid-period billing history so
+ * earlier weeks keep the previous rate.
+ */
+export async function studioUpdateMemberAllowance(
+  uid: string,
+  classesPerWeek: number,
+  planId?: string,
+): Promise<string | null> {
+  const functions = getFirebaseFunctions()
+  if (!functions) return 'Firebase not configured.'
+  try {
+    const payload: { uid: string; classesPerWeek: number; planId?: string } = {
+      uid,
+      classesPerWeek,
+    }
+    if (planId) payload.planId = planId
+    await httpsCallable(functions, 'updateMemberAllowance')(payload)
+    return null
+  } catch (e) {
+    return e instanceof Error ? e.message : 'Could not update this allowance.'
+  }
+}
+
 export interface SeasonProjection {
   error: string | null
   seasonName: string

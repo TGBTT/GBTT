@@ -60,6 +60,13 @@ export function weekStartKeyInZone(now: Date, timeZone: string): string {
   return `${zoned.getUTCFullYear()}-${pad(zoned.getUTCMonth() + 1)}-${pad(zoned.getUTCDate())}`
 }
 
+/** Calendar date (YYYY-MM-DD) in a named time zone. */
+export function dateKeyInZone(now: Date, timeZone: string): string {
+  const zoned = new Date(now.getTime() + zoneOffsetMs(now.getTime(), timeZone))
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${zoned.getUTCFullYear()}-${pad(zoned.getUTCMonth() + 1)}-${pad(zoned.getUTCDate())}`
+}
+
 /**
  * Whether a class is close enough to have passed the point of no return.
  *

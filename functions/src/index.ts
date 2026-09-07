@@ -13,6 +13,7 @@ import { onCall, HttpsError, type CallableOptions } from 'firebase-functions/v2/
 import { setGlobalOptions } from 'firebase-functions/v2/options'
 import {
   commitmentFromSessions,
+  dateKeyInZone,
   isPastTransferCutoff,
   weekStartKeyInZone,
   zoneOffsetMs,
@@ -22,7 +23,11 @@ import { shouldFanBookSession, skipWeekKey, weeklyAllowanceRemaining } from './s
 import {
   billableWeekStarts,
   enrolmentDateKey,
+  historyForBilling,
   isPaidDropInCharge,
+  mondayKeyOf,
+  subscriptionLineItemsForWeeks,
+  type MembershipSegment,
 } from './billingHelpers'
 
 initializeApp()
@@ -294,6 +299,241 @@ interface BillingLineItem {
   sessionId: string
   label: string
   amountCents: number
+  planId?: string
+}
+
+interface PendingUpgrade {
+  toPlanId: string
+  toClassesPerWeek: number
+  toRatePerClassCents: number
+  fromClassesPerWeek: number
+  fromPlanId: string
+  fromRatePerClassCents: number
+  requestedAt: string
+}
+
+function studioTodayKey(now: Date = new Date()): string {
+  return dateKeyInZone(now, TIME_ZONE)
+}
+
+async function loadPlanRateCents(planId: string): Promise<number> {
+  const snap = await db.doc(`pricingPlans/${planId}`).get()
+  return Math.round(Number(snap.data()?.ratePerClass ?? 0) * 100)
+}
+
+/** Prefer a plan whose classesPerWeek matches; fall back to preferred id. */
+async function resolvePlanForAllowance(
+  classesPerWeek: number,
+  preferredPlanId?: string,
+): Promise<{ planId: string; ratePerClassCents: number }> {
+  if (preferredPlanId) {
+    const snap = await db.doc(`pricingPlans/${preferredPlanId}`).get()
+    if (snap.exists && Number(snap.data()?.classesPerWeek ?? -1) === classesPerWeek) {
+      return {
+        planId: preferredPlanId,
+        ratePerClassCents: Math.round(Number(snap.data()?.ratePerClass ?? 0) * 100),
+      }
+    }
+  }
+
+  const plans = await db.collection('pricingPlans').get()
+  const match = plans.docs.find((d) => Number(d.data()?.classesPerWeek ?? -1) === classesPerWeek)
+  if (match) {
+    return {
+      planId: match.id,
+      ratePerClassCents: Math.round(Number(match.data()?.ratePerClass ?? 0) * 100),
+    }
+  }
+
+  if (preferredPlanId) {
+    return { planId: preferredPlanId, ratePerClassCents: await loadPlanRateCents(preferredPlanId) }
+  }
+
+  throw new HttpsError(
+    'failed-precondition',
+    `No pricing plan found for ${classesPerWeek} session${classesPerWeek === 1 ? '' : 's'} a week.`,
+  )
+}
+
+async function loadMembershipHistory(uid: string): Promise<MembershipSegment[]> {
+  const snap = await db.collection(`users/${uid}/membershipHistory`).get()
+  return snap.docs
+    .map((d) => {
+      const data = d.data() ?? {}
+      return {
+        effectiveFrom: String(data.effectiveFrom ?? ''),
+        planId: String(data.planId ?? 'casual'),
+        classesPerWeek: Number(data.classesPerWeek ?? 0),
+        ratePerClassCents: Number(data.ratePerClassCents ?? 0),
+      }
+    })
+    .filter((s) => /^\d{4}-\d{2}-\d{2}$/.test(s.effectiveFrom))
+}
+
+async function appendMembershipHistory(
+  uid: string,
+  segment: MembershipSegment & { reason: string },
+  actorUid: string | null,
+): Promise<void> {
+  await db.collection(`users/${uid}/membershipHistory`).add({
+    effectiveFrom: segment.effectiveFrom,
+    planId: segment.planId,
+    classesPerWeek: segment.classesPerWeek,
+    ratePerClassCents: segment.ratePerClassCents,
+    reason: segment.reason,
+    createdAt: FieldValue.serverTimestamp(),
+    createdBy: actorUid,
+  })
+}
+
+/**
+ * Ensure at least one history row exists so upgrades do not lose the old rate
+ * when membership is overwritten.
+ */
+async function ensureBaselineMembershipHistory(
+  uid: string,
+  user: Record<string, unknown>,
+  actorUid: string | null,
+): Promise<void> {
+  const existing = await db.collection(`users/${uid}/membershipHistory`).limit(1).get()
+  if (!existing.empty) return
+
+  const membership = (user.membership as Record<string, unknown>) ?? {}
+  const planId = String(membership.planId ?? 'casual')
+  const classesPerWeek = Number(membership.classesPerWeek ?? 0)
+  const enrolledAt = enrolmentDateKey({
+    enrolledAt: membership.enrolledAt,
+    createdAt: user.createdAt,
+    approvedAt: user.approvedAt,
+  })
+  const ratePerClassCents =
+    Number.isFinite(Number(membership.ratePerClassCents)) && Number(membership.ratePerClassCents) > 0
+      ? Number(membership.ratePerClassCents)
+      : await loadPlanRateCents(planId)
+
+  await appendMembershipHistory(
+    uid,
+    {
+      effectiveFrom: mondayKeyOf(enrolledAt ?? studioTodayKey()),
+      planId,
+      classesPerWeek,
+      ratePerClassCents,
+      reason: 'enrolment',
+    },
+    actorUid,
+  )
+}
+
+/**
+ * Apply a plan / allowance change with mid-period billing rules:
+ * upgrades pending until the extra seat is booked; downgrades effective today.
+ */
+async function applyMembershipTierChange(opts: {
+  uid: string
+  toPlanId: string
+  toClassesPerWeek: number
+  toRatePerClassCents: number
+  reason: 'planChange' | 'allowanceEdit'
+  actorUid: string
+}): Promise<{ kind: 'upgrade' | 'downgrade' | 'same' }> {
+  const userRef = db.doc(`users/${opts.uid}`)
+  const userSnap = await userRef.get()
+  if (!userSnap.exists) {
+    throw new HttpsError('not-found', 'Member not found.')
+  }
+  const user = userSnap.data() ?? {}
+  const membership = (user.membership as Record<string, unknown>) ?? {}
+  const fromPlanId = String(membership.planId ?? 'casual')
+  const fromClassesPerWeek = Number(membership.classesPerWeek ?? 0)
+  const fromRatePerClassCents = await loadPlanRateCents(fromPlanId)
+
+  await ensureBaselineMembershipHistory(opts.uid, user, opts.actorUid)
+
+  const today = studioTodayKey()
+
+  if (opts.toClassesPerWeek > fromClassesPerWeek) {
+    const pendingUpgrade: PendingUpgrade = {
+      toPlanId: opts.toPlanId,
+      toClassesPerWeek: opts.toClassesPerWeek,
+      toRatePerClassCents: opts.toRatePerClassCents,
+      fromClassesPerWeek,
+      fromPlanId,
+      fromRatePerClassCents,
+      requestedAt: today,
+    }
+    await userRef.set(
+      {
+        membership: {
+          planId: opts.toPlanId,
+          classesPerWeek: opts.toClassesPerWeek,
+          pendingUpgrade,
+        },
+      },
+      { merge: true },
+    )
+    return { kind: 'upgrade' }
+  }
+
+  await appendMembershipHistory(
+    opts.uid,
+    {
+      // Bill the whole change week at the new rate (weekly invoices are week-keyed).
+      effectiveFrom: mondayKeyOf(today),
+      planId: opts.toPlanId,
+      classesPerWeek: opts.toClassesPerWeek,
+      ratePerClassCents: opts.toRatePerClassCents,
+      reason: opts.reason,
+    },
+    opts.actorUid,
+  )
+
+  await userRef.set(
+    {
+      membership: {
+        planId: opts.toPlanId,
+        classesPerWeek: opts.toClassesPerWeek,
+        pendingUpgrade: FieldValue.delete(),
+      },
+    },
+    { merge: true },
+  )
+
+  return {
+    kind: opts.toClassesPerWeek < fromClassesPerWeek ? 'downgrade' : 'same',
+  }
+}
+
+/** When the member books into the upgraded allowance, freeze the new rate from that week. */
+async function maybeActivatePendingUpgrade(
+  uid: string,
+  weekStart: string,
+  includedCount: number,
+): Promise<boolean> {
+  const userRef = db.doc(`users/${uid}`)
+  const userSnap = await userRef.get()
+  if (!userSnap.exists) return false
+
+  const membership = (userSnap.data()?.membership as Record<string, unknown>) ?? {}
+  const pending = membership.pendingUpgrade as PendingUpgrade | undefined
+  if (!pending || typeof pending !== 'object') return false
+
+  const toClasses = Number(pending.toClassesPerWeek ?? 0)
+  if (toClasses <= 0 || includedCount < toClasses) return false
+
+  await appendMembershipHistory(
+    uid,
+    {
+      effectiveFrom: mondayKeyOf(weekStart),
+      planId: String(pending.toPlanId ?? membership.planId ?? 'casual'),
+      classesPerWeek: toClasses,
+      ratePerClassCents: Number(pending.toRatePerClassCents ?? 0),
+      reason: 'upgradeActivated',
+    },
+    uid,
+  )
+
+  await userRef.set({ membership: { pendingUpgrade: FieldValue.delete() } }, { merge: true })
+  return true
 }
 
 /**
@@ -345,6 +585,7 @@ export const createMemberAccount = onCall(
     const userRecord = await auth.createUser({ email, displayName: name })
     await auth.setCustomUserClaims(userRecord.uid, { role: 'member' })
 
+    const enrolledAt = studioTodayKey()
     await db.doc(`users/${userRecord.uid}`).set({
       profile: {
         name,
@@ -359,7 +600,7 @@ export const createMemberAccount = onCall(
         weeklySlotIds: [],
         creditsRemaining: 0,
         // YYYY-MM-DD used for mid-season billing; set at create so signup week is fixed.
-        enrolledAt: dateKey(new Date()),
+        enrolledAt,
       },
       preferences: { showNameToClassmates: true },
       compliance: {},
@@ -369,6 +610,19 @@ export const createMemberAccount = onCall(
       createdAt: FieldValue.serverTimestamp(),
       createdBy: request.auth!.uid,
     })
+
+    const ratePerClassCents = await loadPlanRateCents(planId)
+    await appendMembershipHistory(
+      userRecord.uid,
+      {
+        effectiveFrom: mondayKeyOf(enrolledAt),
+        planId,
+        classesPerWeek,
+        ratePerClassCents,
+        reason: 'enrolment',
+      },
+      request.auth!.uid,
+    )
 
     const resetLink = await auth.generatePasswordResetLink(email, passwordActionSettings())
     const scriptResult = await sendInviteEmail({ email, name, phone, planId, resetLink })
@@ -825,8 +1079,8 @@ export const calculateBillingPeriod = onCall(callableOptions(), async (request) 
   })
 
   /*
-   * Owed comes from the subscription allowance for each billable week from
-   * enrolment, not from role-call or how many slots they actually locked.
+   * Owed comes from membership history week-by-week (snapshotted rates), so a
+   * mid-period upgrade/downgrade keeps prior weeks at the old allowance×rate.
    * Missed lock-ins still bill; complimentary makeups do not reduce the total.
    */
   const weeks = billableWeekStarts({
@@ -836,20 +1090,36 @@ export const calculateBillingPeriod = onCall(callableOptions(), async (request) 
     breaks: season?.breaks ?? [],
   })
 
-  const lineItems: BillingLineItem[] = []
-  let chargeableCount = 0
+  const storedHistory = await loadMembershipHistory(uid)
+  const pendingRaw = membership.pendingUpgrade as PendingUpgrade | undefined
+  const pendingUpgrade =
+    pendingRaw && typeof pendingRaw === 'object'
+      ? {
+          fromPlanId: String(pendingRaw.fromPlanId ?? planId),
+          fromClassesPerWeek: Number(pendingRaw.fromClassesPerWeek ?? 0),
+          fromRatePerClassCents: Number(pendingRaw.fromRatePerClassCents ?? 0),
+        }
+      : null
 
-  if (classesPerWeek > 0 && rateCents > 0) {
-    const weekAmount = classesPerWeek * rateCents
-    for (const weekStart of weeks) {
-      chargeableCount += classesPerWeek
-      lineItems.push({
-        sessionId: `sub:${weekStart}`,
-        label: `${weekStart} · subscription × ${classesPerWeek}`,
-        amountCents: weekAmount,
-      })
-    }
-  }
+  const history = historyForBilling({
+    stored: storedHistory,
+    pendingUpgrade,
+    fallback: {
+      effectiveFrom: mondayKeyOf(enrolledAt ?? periodStart),
+      planId,
+      classesPerWeek,
+      ratePerClassCents: rateCents,
+    },
+  })
+
+  const subscription = subscriptionLineItemsForWeeks(weeks, history)
+  const lineItems: BillingLineItem[] = subscription.lineItems.map((item) => ({
+    sessionId: item.sessionId,
+    label: item.label,
+    amountCents: item.amountCents,
+    planId: item.planId,
+  }))
+  let chargeableCount = subscription.chargeableCount
 
   /*
    * Paid drop-ins on top of the plan still invoice. Complimentary / makeup
@@ -941,6 +1211,7 @@ export const calculateBillingPeriod = onCall(callableOptions(), async (request) 
     classesPerWeek,
     enrolledAt: enrolledAt ?? null,
     lineItems,
+    tierSummaries: subscription.tierSummaries,
     attendedCount,
     chargeableCount,
     subtotalCents,
@@ -958,6 +1229,7 @@ export const calculateBillingPeriod = onCall(callableOptions(), async (request) 
     periodStart,
     periodEnd,
     lineItems,
+    tierSummaries: subscription.tierSummaries,
     attendedCount,
     chargeableCount,
     subtotalCents,
@@ -1362,6 +1634,7 @@ export const projectSeasonInvoice = onCall(callableOptions(), async (request) =>
   const planSnap = await db.doc(`pricingPlans/${planId}`).get()
   const ratePerClass = Number(planSnap.data()?.ratePerClass ?? 0)
   const planName = String(planSnap.data()?.name ?? planId)
+  const rateCents = Math.round(ratePerClass * 100)
 
   const enrolledAt = enrolmentDateKey({
     enrolledAt: membership.enrolledAt,
@@ -1376,8 +1649,31 @@ export const projectSeasonInvoice = onCall(callableOptions(), async (request) =>
     breaks: season.breaks,
   })
 
-  const sessionCount = classesPerWeek > 0 ? weeks.length * classesPerWeek : 0
-  const totalCents = Math.round(ratePerClass * 100) * sessionCount
+  const storedHistory = await loadMembershipHistory(uid)
+  const pendingRaw = membership.pendingUpgrade as PendingUpgrade | undefined
+  const pendingUpgrade =
+    pendingRaw && typeof pendingRaw === 'object'
+      ? {
+          fromPlanId: String(pendingRaw.fromPlanId ?? planId),
+          fromClassesPerWeek: Number(pendingRaw.fromClassesPerWeek ?? 0),
+          fromRatePerClassCents: Number(pendingRaw.fromRatePerClassCents ?? 0),
+        }
+      : null
+
+  const history = historyForBilling({
+    stored: storedHistory,
+    pendingUpgrade,
+    fallback: {
+      effectiveFrom: mondayKeyOf(enrolledAt ?? season.startDate),
+      planId,
+      classesPerWeek,
+      ratePerClassCents: rateCents,
+    },
+  })
+
+  const subscription = subscriptionLineItemsForWeeks(weeks, history)
+  const sessionCount = subscription.chargeableCount
+  const totalCents = subscription.lineItems.reduce((sum, item) => sum + item.amountCents, 0)
 
   const locksSnap = await db.collection(`users/${uid}/weeklyLocks`).get()
   const lockedSlotIds = locksSnap.docs.map((d) => d.id)
@@ -1394,12 +1690,15 @@ export const projectSeasonInvoice = onCall(callableOptions(), async (request) =>
     classesPerWeek,
     ratePerClass,
     totalCents,
+    tierSummaries: subscription.tierSummaries,
     note:
-      classesPerWeek <= 0
+      sessionCount <= 0
         ? 'Casual plans have no weekly subscription charge — only drop-ins bill.'
-        : enrolledAt && enrolledAt > season.startDate
-          ? `Quoted from enrolment (${enrolledAt}) through season end, closures skipped.`
-          : 'Quoted for every billable week in the season at the plan allowance.',
+        : subscription.tierSummaries.length > 1
+          ? 'Quoted across plan changes in this season (earlier weeks keep their old rate).'
+          : enrolledAt && enrolledAt > season.startDate
+            ? `Quoted from enrolment (${enrolledAt}) through season end, closures skipped.`
+            : 'Quoted for every billable week in the season at the plan allowance.',
   }
 })
 
@@ -2292,6 +2591,9 @@ export const lockSessionWeek = onCall(callableOptions({ secrets: [webhookSecret]
     }
   }
 
+  const heldAfter = alreadyBooked ? held : held + 1
+  await maybeActivatePendingUpgrade(authCtx.uid, weekStart, heldAfter)
+
   return { ok: true, sessionId, weekStart, alreadyBooked: false }
 })
 
@@ -2596,6 +2898,9 @@ export const lockWeeklySlot = onCall(callableOptions({ secrets: [webhookSecret] 
     await refreshSlotSeries(authCtx.uid, slotId, profile)
   }
 
+  const locksAfter = alreadyLocked ? locks.size : locks.size + 1
+  await maybeActivatePendingUpgrade(authCtx.uid, currentWeekStartKey(), locksAfter)
+
   return {
     ok: true,
     slotId,
@@ -2818,7 +3123,7 @@ export const approveMember = onCall(callableOptions(), async (request) => {
   const enrolledAt =
     typeof existingMembership.enrolledAt === 'string' && existingMembership.enrolledAt
       ? existingMembership.enrolledAt
-      : dateKey(new Date())
+      : studioTodayKey()
 
   await userRef.set(
     {
@@ -2832,6 +3137,16 @@ export const approveMember = onCall(callableOptions(), async (request) => {
       approvedBy: request.auth!.uid,
     },
     { merge: true },
+  )
+
+  await ensureBaselineMembershipHistory(
+    uid,
+    {
+      ...(snap.data() ?? {}),
+      membership: { planId, classesPerWeek, enrolledAt },
+      approvedAt: enrolledAt,
+    },
+    request.auth!.uid,
   )
 
   await db.collection('audit').add({
@@ -2981,18 +3296,21 @@ export const resolvePlanChange = onCall(callableOptions(), async (request) => {
   }
 
   const toPlanId = String(snap.data()?.toPlanId ?? '')
+  let changeKind: 'upgrade' | 'downgrade' | 'same' | null = null
 
   if (approve) {
     const planSnap = await db.doc(`pricingPlans/${toPlanId}`).get()
-    await db.doc(`users/${uid}`).set(
-      {
-        membership: {
-          planId: toPlanId,
-          classesPerWeek: Number(planSnap.data()?.classesPerWeek ?? 0),
-        },
-      },
-      { merge: true },
-    )
+    const toClassesPerWeek = Number(planSnap.data()?.classesPerWeek ?? 0)
+    const toRatePerClassCents = Math.round(Number(planSnap.data()?.ratePerClass ?? 0) * 100)
+    const result = await applyMembershipTierChange({
+      uid,
+      toPlanId,
+      toClassesPerWeek,
+      toRatePerClassCents,
+      reason: 'planChange',
+      actorUid: request.auth!.uid,
+    })
+    changeKind = result.kind
   }
 
   await requestRef.delete()
@@ -3002,9 +3320,68 @@ export const resolvePlanChange = onCall(callableOptions(), async (request) => {
     uid,
     toPlanId,
     approved: approve,
+    changeKind,
     actorUid: request.auth!.uid,
     at: FieldValue.serverTimestamp(),
   })
 
-  return { ok: true, uid, approved: approve }
+  return { ok: true, uid, approved: approve, changeKind }
+})
+
+/**
+ * Admin sets a member's included sessions/week (Clients tab).
+ * Snapshots rates into membership history so mid-period switches keep prior weeks.
+ */
+export const updateMemberAllowance = onCall(callableOptions(), async (request) => {
+  requireAdmin(request)
+
+  const uid = String(request.data?.uid ?? '').trim()
+  const classesPerWeek = Number(request.data?.classesPerWeek)
+  const preferredPlanId = String(request.data?.planId ?? '').trim() || undefined
+
+  if (!uid) {
+    throw new HttpsError('invalid-argument', 'uid is required.')
+  }
+  if (!Number.isFinite(classesPerWeek) || classesPerWeek < 0 || classesPerWeek > 14) {
+    throw new HttpsError('invalid-argument', 'classesPerWeek must be between 0 and 14.')
+  }
+
+  const userSnap = await db.doc(`users/${uid}`).get()
+  if (!userSnap.exists) {
+    throw new HttpsError('not-found', 'Member not found.')
+  }
+  const membership = (userSnap.data()?.membership as Record<string, unknown>) ?? {}
+  const currentPlanId = String(membership.planId ?? 'casual')
+
+  const resolved = await resolvePlanForAllowance(
+    Math.round(classesPerWeek),
+    preferredPlanId ?? currentPlanId,
+  )
+
+  const result = await applyMembershipTierChange({
+    uid,
+    toPlanId: resolved.planId,
+    toClassesPerWeek: Math.round(classesPerWeek),
+    toRatePerClassCents: resolved.ratePerClassCents,
+    reason: 'allowanceEdit',
+    actorUid: request.auth!.uid,
+  })
+
+  await db.collection('audit').add({
+    type: 'updateMemberAllowance',
+    uid,
+    classesPerWeek: Math.round(classesPerWeek),
+    planId: resolved.planId,
+    changeKind: result.kind,
+    actorUid: request.auth!.uid,
+    at: FieldValue.serverTimestamp(),
+  })
+
+  return {
+    ok: true,
+    uid,
+    classesPerWeek: Math.round(classesPerWeek),
+    planId: resolved.planId,
+    changeKind: result.kind,
+  }
 })

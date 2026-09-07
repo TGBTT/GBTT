@@ -182,6 +182,11 @@ service cloud.firestore {
         allow write: if false;
       }
 
+      match /membershipHistory/{historyId} {
+        allow read: if isOwner(uid) || isAdmin();
+        allow write: if false;
+      }
+
       match /exceptions/{exceptionId} {
         allow read: if isOwner(uid) || isAdmin();
         allow write: if isAdmin();

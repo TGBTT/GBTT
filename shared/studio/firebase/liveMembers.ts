@@ -33,6 +33,24 @@ export interface LiveBillingPeriod {
   chargeableCount: number
   attendedCount: number
   paymentNote: string
+  lineItems: LiveBillingLineItem[]
+  tierSummaries: LiveTierSummary[]
+}
+
+export interface LiveBillingLineItem {
+  sessionId: string
+  label: string
+  amountCents: number
+  planId: string
+}
+
+export interface LiveTierSummary {
+  planId: string
+  classesPerWeek: number
+  ratePerClassCents: number
+  weeks: number
+  sessions: number
+  amountCents: number
 }
 
 export interface LiveMember {
@@ -133,6 +151,8 @@ function mapMember(uid: string, data: DocumentData): LiveMember {
 }
 
 function mapBillingPeriod(id: string, uid: string, data: DocumentData): LiveBillingPeriod {
+  const rawItems = Array.isArray(data.lineItems) ? data.lineItems : []
+  const rawTiers = Array.isArray(data.tierSummaries) ? data.tierSummaries : []
   return {
     id,
     uid,
@@ -144,6 +164,20 @@ function mapBillingPeriod(id: string, uid: string, data: DocumentData): LiveBill
     chargeableCount: Number(data.chargeableCount ?? 0),
     attendedCount: Number(data.attendedCount ?? 0),
     paymentNote: String(data.paymentNote ?? ''),
+    lineItems: rawItems.map((item: DocumentData) => ({
+      sessionId: String(item.sessionId ?? ''),
+      label: String(item.label ?? ''),
+      amountCents: Number(item.amountCents ?? 0),
+      planId: String(item.planId ?? ''),
+    })),
+    tierSummaries: rawTiers.map((tier: DocumentData) => ({
+      planId: String(tier.planId ?? ''),
+      classesPerWeek: Number(tier.classesPerWeek ?? 0),
+      ratePerClassCents: Number(tier.ratePerClassCents ?? 0),
+      weeks: Number(tier.weeks ?? 0),
+      sessions: Number(tier.sessions ?? 0),
+      amountCents: Number(tier.amountCents ?? 0),
+    })),
   }
 }
 
@@ -424,28 +458,19 @@ export async function saveMemberDiscount(uid: string, discountPct: number): Prom
 /**
  * Set how many included sessions a member may lock per week.
  *
- * Written straight to Firestore: rules already restrict `users` updates to
- * admins, and lock callables read `membership.classesPerWeek`.
+ * Prefer `studioUpdateMemberAllowance` from studioAuth (records billing history).
+ * This helper forwards there when the functions SDK is available via a lazy
+ * import to avoid a circular module graph.
  */
 export async function saveMemberClassesPerWeek(
   uid: string,
   classesPerWeek: number,
 ): Promise<string | null> {
-  const db = getFirestoreDb()
-  if (!db) return 'Firebase not configured.'
   if (!Number.isFinite(classesPerWeek) || classesPerWeek < 0 || classesPerWeek > 14) {
     return 'Sessions per week must be between 0 and 14.'
   }
-  try {
-    await setDoc(
-      doc(db, 'users', uid),
-      { membership: { classesPerWeek: Math.round(classesPerWeek) } },
-      { merge: true },
-    )
-    return null
-  } catch (e) {
-    return e instanceof Error ? e.message : 'Could not save this allowance.'
-  }
+  const { studioUpdateMemberAllowance } = await import('../studioAuth')
+  return studioUpdateMemberAllowance(uid, Math.round(classesPerWeek))
 }
 
 /**

@@ -15,10 +15,9 @@
  */
 
 import { useEffect, useMemo, useState } from 'react'
-import { studioCreateMemberAccount, studioResendInvite } from '@gbtt/shared/studio/studioAuth'
+import { studioCreateMemberAccount, studioResendInvite, studioUpdateMemberAllowance } from '@gbtt/shared/studio/studioAuth'
 import {
   isArchivedMember,
-  saveMemberClassesPerWeek,
   subscribeMembers,
   type LiveMember,
   type LiveMembersState,
@@ -147,7 +146,7 @@ function ExistingClientRow({ member }: { member: LiveMember }) {
               const n = Number(e.target.value)
               if (n === member.classesPerWeek) return
               setError(null)
-              const err = await saveMemberClassesPerWeek(member.uid, n)
+              const err = await studioUpdateMemberAllowance(member.uid, n)
               if (err) {
                 setError(err)
                 e.target.value = String(member.classesPerWeek)

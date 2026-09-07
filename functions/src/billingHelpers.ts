@@ -8,6 +8,23 @@ export interface SeasonBreakLike {
   endDate: string
 }
 
+/** Snapshotted membership tier for one stretch of calendar. */
+export interface MembershipSegment {
+  effectiveFrom: string
+  planId: string
+  classesPerWeek: number
+  ratePerClassCents: number
+}
+
+export interface TierSummary {
+  planId: string
+  classesPerWeek: number
+  ratePerClassCents: number
+  weeks: number
+  sessions: number
+  amountCents: number
+}
+
 function pad2(n: number): string {
   return String(n).padStart(2, '0')
 }
@@ -138,4 +155,104 @@ export function isPaidDropInCharge(entry: {
   if (entry.dropIn !== true) return false
   const rate = Number(entry.chargeRateCents ?? 0)
   return rate > 0
+}
+
+/**
+ * Latest history segment whose effectiveFrom is on or before the week Monday.
+ * History must be sorted ascending by effectiveFrom.
+ */
+export function segmentForWeek(
+  weekStart: string,
+  historySortedAsc: MembershipSegment[],
+): MembershipSegment | null {
+  let current: MembershipSegment | null = null
+  for (const seg of historySortedAsc) {
+    if (seg.effectiveFrom <= weekStart) current = seg
+    else break
+  }
+  return current
+}
+
+/** Sort segments by effectiveFrom ascending. */
+export function sortSegments(segments: MembershipSegment[]): MembershipSegment[] {
+  return [...segments].sort((a, b) => a.effectiveFrom.localeCompare(b.effectiveFrom))
+}
+
+/**
+ * Build subscription line items week-by-week from membership history.
+ * Weeks with classesPerWeek 0 or rate 0 are skipped.
+ */
+export function subscriptionLineItemsForWeeks(
+  weeks: string[],
+  historySortedAsc: MembershipSegment[],
+): {
+  lineItems: { sessionId: string; label: string; amountCents: number; planId: string }[]
+  chargeableCount: number
+  tierSummaries: TierSummary[]
+} {
+  const lineItems: { sessionId: string; label: string; amountCents: number; planId: string }[] =
+    []
+  let chargeableCount = 0
+  const tierMap = new Map<string, TierSummary>()
+
+  for (const weekStart of weeks) {
+    const seg = segmentForWeek(weekStart, historySortedAsc)
+    if (!seg || seg.classesPerWeek <= 0 || seg.ratePerClassCents <= 0) continue
+
+    const amountCents = seg.classesPerWeek * seg.ratePerClassCents
+    const rateDollars = (seg.ratePerClassCents / 100).toFixed(2)
+    chargeableCount += seg.classesPerWeek
+    lineItems.push({
+      sessionId: `sub:${weekStart}`,
+      label: `${weekStart} · ${seg.planId} × ${seg.classesPerWeek} @ $${rateDollars}`,
+      amountCents,
+      planId: seg.planId,
+    })
+
+    const key = `${seg.planId}|${seg.classesPerWeek}|${seg.ratePerClassCents}`
+    const existing = tierMap.get(key)
+    if (existing) {
+      existing.weeks += 1
+      existing.sessions += seg.classesPerWeek
+      existing.amountCents += amountCents
+    } else {
+      tierMap.set(key, {
+        planId: seg.planId,
+        classesPerWeek: seg.classesPerWeek,
+        ratePerClassCents: seg.ratePerClassCents,
+        weeks: 1,
+        sessions: seg.classesPerWeek,
+        amountCents,
+      })
+    }
+  }
+
+  return { lineItems, chargeableCount, tierSummaries: [...tierMap.values()] }
+}
+
+/**
+ * History used for billing: stored segments, or a synthetic baseline when empty.
+ * If a pending upgrade exists and history is empty, prefer the pre-upgrade snapshot.
+ */
+export function historyForBilling(opts: {
+  stored: MembershipSegment[]
+  pendingUpgrade?: {
+    fromPlanId: string
+    fromClassesPerWeek: number
+    fromRatePerClassCents: number
+  } | null
+  fallback: MembershipSegment
+}): MembershipSegment[] {
+  if (opts.stored.length) return sortSegments(opts.stored)
+  if (opts.pendingUpgrade) {
+    return [
+      {
+        effectiveFrom: opts.fallback.effectiveFrom,
+        planId: opts.pendingUpgrade.fromPlanId,
+        classesPerWeek: opts.pendingUpgrade.fromClassesPerWeek,
+        ratePerClassCents: opts.pendingUpgrade.fromRatePerClassCents,
+      },
+    ]
+  }
+  return [opts.fallback]
 }

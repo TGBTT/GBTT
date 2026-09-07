@@ -12,6 +12,9 @@ const {
   enrolmentDateKey,
   billableWeekStarts,
   isPaidDropInCharge,
+  segmentForWeek,
+  historyForBilling,
+  subscriptionLineItemsForWeeks,
 } = require('../lib/billingHelpers')
 
 describe('mondayKeyOf', () => {
@@ -94,5 +97,82 @@ describe('isPaidDropInCharge', () => {
 
   it('ignores included subscription seats', () => {
     assert.equal(isPaidDropInCharge({ dropIn: false, chargeRateCents: 0 }), false)
+  })
+})
+
+describe('segmentForWeek', () => {
+  const history = [
+    { effectiveFrom: '2026-08-03', planId: 'weekly1', classesPerWeek: 1, ratePerClassCents: 1500 },
+    { effectiveFrom: '2026-09-07', planId: 'weekly2', classesPerWeek: 2, ratePerClassCents: 1300 },
+  ]
+
+  it('uses the old tier before the switch week', () => {
+    assert.equal(segmentForWeek('2026-08-31', history)?.planId, 'weekly1')
+  })
+
+  it('uses the new tier from the switch week onward', () => {
+    assert.equal(segmentForWeek('2026-09-07', history)?.classesPerWeek, 2)
+    assert.equal(segmentForWeek('2026-09-14', history)?.ratePerClassCents, 1300)
+  })
+})
+
+describe('historyForBilling with pending upgrade', () => {
+  it('keeps the pre-upgrade snapshot when history is empty', () => {
+    const hist = historyForBilling({
+      stored: [],
+      pendingUpgrade: {
+        fromPlanId: 'weekly1',
+        fromClassesPerWeek: 1,
+        fromRatePerClassCents: 1500,
+      },
+      fallback: {
+        effectiveFrom: '2026-08-03',
+        planId: 'weekly2',
+        classesPerWeek: 2,
+        ratePerClassCents: 1300,
+      },
+    })
+    assert.equal(hist.length, 1)
+    assert.equal(hist[0].classesPerWeek, 1)
+    assert.equal(hist[0].ratePerClassCents, 1500)
+  })
+})
+
+describe('subscriptionLineItemsForWeeks mid-period 1→2', () => {
+  it('bills earlier weeks at 1×$15 and later at 2×$13', () => {
+    const history = [
+      { effectiveFrom: '2026-08-31', planId: 'weekly1', classesPerWeek: 1, ratePerClassCents: 1500 },
+      { effectiveFrom: '2026-09-14', planId: 'weekly2', classesPerWeek: 2, ratePerClassCents: 1300 },
+    ]
+    const weeks = ['2026-08-31', '2026-09-07', '2026-09-14', '2026-09-21']
+    const { lineItems, chargeableCount, tierSummaries } = subscriptionLineItemsForWeeks(
+      weeks,
+      history,
+    )
+
+    assert.equal(lineItems[0].amountCents, 1500)
+    assert.equal(lineItems[1].amountCents, 1500)
+    assert.equal(lineItems[2].amountCents, 2600)
+    assert.equal(lineItems[3].amountCents, 2600)
+    assert.equal(chargeableCount, 1 + 1 + 2 + 2)
+    assert.equal(tierSummaries.length, 2)
+    assert.equal(
+      tierSummaries.reduce((sum, t) => sum + t.amountCents, 0),
+      1500 + 1500 + 2600 + 2600,
+    )
+  })
+
+  it('applies a downgrade from the change week Monday', () => {
+    const history = [
+      { effectiveFrom: '2026-08-31', planId: 'weekly2', classesPerWeek: 2, ratePerClassCents: 1300 },
+      { effectiveFrom: '2026-09-07', planId: 'weekly1', classesPerWeek: 1, ratePerClassCents: 1500 },
+    ]
+    const { lineItems } = subscriptionLineItemsForWeeks(
+      ['2026-08-31', '2026-09-07', '2026-09-14'],
+      history,
+    )
+    assert.equal(lineItems[0].amountCents, 2600)
+    assert.equal(lineItems[1].amountCents, 1500)
+    assert.equal(lineItems[2].amountCents, 1500)
   })
 })
