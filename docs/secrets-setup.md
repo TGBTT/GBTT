@@ -523,11 +523,8 @@ curl -X POST "$FORM_ENDPOINT" \
 
 Expect `{ "ok": true, "icsUrl": "https://calendar.google.com/...", ... }`. If you still see
 `CALENDAR_ID script property not configured`, finish the shared-calendar ops checklist
-above first.
-
-Then in the member app (signed in): Studio → **Add the timetable to your calendar**.
-With `CALENDAR_ID` unset you should see the ask-Tom message, not infinite “Loading…”.
-With it set and the calendar public, you should see the Google / ICS subscribe controls.
+above first. Members get per-session add-to-calendar links in the lock-in email
+instead of a whole-timetable subscribe panel in the app.
 
 ### C. Client Firebase init
 

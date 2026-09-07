@@ -80,12 +80,15 @@ The delete fires on the transition into `cancelled` only, so re-saving an alread
 does not spend a call removing an event that has already gone. Un-cancelling recreates the event,
 because `cancelled` is itself a schedule field.
 
-**Member subscriptions.** `getCalendarSubscribeUrl` is callable by any signed-in account and returns
-the calendar's Google and ICS addresses, which the member app offers under “Add the timetable to
-your calendar”. The result is cached in `meta/calendarSubscribe` for a day, and a stale cache is
-served in preference to an error. These are Google's *public* calendar URLs, so **the calendar must
-be shared publicly** ("Make available to public" in its Google Calendar settings) before they
-resolve for anyone but Tom.
+**Subscribe URLs (ops).** `getCalendarSubscribeUrl` is callable by any signed-in
+account and returns the calendar's Google and ICS addresses. The result is
+cached in `meta/calendarSubscribe` for a day, and a stale cache is served in
+preference to an error. These are Google's *public* calendar URLs, so **the
+calendar must be shared publicly** ("Make available to public" in its Google
+Calendar settings) before they resolve for anyone but Tom. Members do not see
+a whole-timetable subscribe panel in the app — they use the per-session
+add-to-calendar links in the lock-in email, and the in-app calendar once signed
+in.
 
 Nothing is ever read back from Google Calendar. Firestore is the source of truth and pushes live
 counts to the site; Calendar is a downstream mirror for personal diaries.

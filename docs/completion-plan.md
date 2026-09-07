@@ -56,9 +56,9 @@ the secret values to git.
    and TLS failures.
 
 After step 1–4, smoke-test: POST `calendarGetSubscribeUrl` (or call the
-Firebase callable while signed in) and open Studio → **Add the timetable to
-your calendar**. Soft failures now surface the ask-Tom message instead of
-infinite “Loading the calendar link…”.
+Firebase callable while signed in) and confirm a public ICS / Google URL is
+returned. Members rely on the lock-in email’s add-to-calendar links and the
+signed-in studio calendar, not an in-app subscribe panel.
 
 ---
 

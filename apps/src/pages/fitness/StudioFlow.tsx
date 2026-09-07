@@ -28,9 +28,7 @@ import {
   studioResendVerification,
   studioSaveMyLimitations,
   studioSetShowName,
-  studioCalendarSubscribeLinks,
   studioUnlockWeeklySlot,
-  type CalendarSubscribeLinks,
   type DropInPrompt,
 } from '@gbtt/shared/studio/studioAuth'
 import {
@@ -114,27 +112,6 @@ export default function StudioFlow() {
   const [busy, setBusy] = useState(false)
   const actionBusy = busy || overlayBusy
   const [dropIn, setDropIn] = useState<{ prompt: DropInPrompt; occ: ClassOccurrence } | null>(null)
-  const [calendarLinks, setCalendarLinks] = useState<CalendarSubscribeLinks | null>(null)
-  const [calendarCopied, setCalendarCopied] = useState(false)
-
-  /*
-   * The subscribe links are fetched only once a member is signed in: the
-   * callable behind them requires an account, and the panel that shows them is
-   * inside the signed-in section anyway.
-   */
-  useEffect(() => {
-    if (!member) {
-      setCalendarLinks(null)
-      return
-    }
-    let live = true
-    void studioCalendarSubscribeLinks().then((links) => {
-      if (live) setCalendarLinks(links)
-    })
-    return () => {
-      live = false
-    }
-  }, [member])
 
   const formatMoney = (cents: number) => `$${(cents / 100).toFixed(2)}`
 
@@ -975,57 +952,6 @@ export default function StudioFlow() {
                 <li key={id}>{slotLabel(id)}</li>
               ))}
             </ul>
-
-            <h3>Add the timetable to your calendar</h3>
-            {/* Subscribing rather than exporting: the calendar keeps itself in
-                step, so a class Tom moves or cancels moves or disappears in
-                your own diary without you doing anything. */}
-            {calendarLinks?.icsUrl ? (
-              <>
-                <p className="hint">
-                  Subscribe once and the classes stay up to date on their own — anything Tom
-                  reschedules or cancels changes in your diary too.
-                </p>
-                <div className="btn-row">
-                  {calendarLinks.htmlLink ? (
-                    <a
-                      className="btn primary"
-                      href={calendarLinks.htmlLink}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      Add to Google Calendar
-                    </a>
-                  ) : null}
-                  <button
-                    type="button"
-                    className="btn ghost"
-                    onClick={async () => {
-                      try {
-                        await navigator.clipboard.writeText(calendarLinks.icsUrl)
-                        setCalendarCopied(true)
-                      } catch {
-                        // Clipboard access can be refused, and the address is
-                        // on screen to copy by hand either way.
-                        flash(null, 'Could not copy — select the address below instead.')
-                      }
-                    }}
-                  >
-                    {calendarCopied ? 'Address copied' : 'Copy address for Apple or Outlook'}
-                  </button>
-                </div>
-                <p className="hint">
-                  For Apple Calendar or Outlook, paste this into “Subscribe to calendar”:{' '}
-                  <code>{calendarLinks.icsUrl}</code>
-                </p>
-              </>
-            ) : (
-              <p className="hint">
-                {calendarLinks?.error
-                  ? 'The shared class calendar is not published yet — ask Tom for the link.'
-                  : 'Loading the calendar link…'}
-              </p>
-            )}
 
             <div className="btn-row">
               <button
